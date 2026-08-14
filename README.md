@@ -65,7 +65,23 @@ Point the profile's patch layer at the built entry:
               - { provider: opencode-go, model: deepseek-v4-pro, priority: 1 }
 ```
 
-> Note: the official Web bundle ships with shared HMR disabled, so a patch edit requires restarting `dsh web`. (Settings edits through `/router config` or the GUI apply live.)
+## Hot reload
+
+DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, but two things are worth knowing:
+
+1. **The official Web bundle ships the shared HMR row disabled** (`packages/bundle/web-app/cordis.patch.yml` has `- id: hmr, disabled: true`, upstream TODO: "Re-enable shared HMR for Web after its reload lifecycle is tested"). Re-enable it in your profile patch — this is the documented override mechanism:
+
+   ```yaml
+   # ~/.dsh/profiles/<name>/cordis.patch.yml
+   - id: hmr
+     disabled: false
+   ```
+
+2. **What hot-reloads and what doesn't** (verified against the current implementation):
+   - ✅ **Configuration changes** — editing this profile patch (or the home patch) re-runs the affected plugin's `apply()` with the new config, no restart. The plugin's own config is also hot through the settings namespace (`/router config set` and the GUI panel apply live without HMR at all).
+   - ❌ **Module (code) changes** — the HMR accepted-dependency graph currently covers the harness's own modules only; editing an external plugin's compiled files (e.g. `dist/index.js`) does not trigger a reload in the current release, so code changes still require a restart. This is the untested "reload lifecycle" the upstream TODO refers to, not a limitation of this plugin.
+
+   In practice: configure with `/router config` / the settings panel (always live), switch models by editing the patch (live once HMR is on), and restart only when you change plugin code.
 
 ## Configuration
 
