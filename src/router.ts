@@ -27,6 +27,8 @@ export function createRouterState(): RouterState {
     totalOutputTokens: 0,
     recentSpeeds: [],
     streamingStartTime: null,
+    lastRequestProvider: null,
+    lastRequestModel: null,
     upgradeCount: 0,
     downgradeCount: 0,
     lastActivityAt: 0,
@@ -208,7 +210,7 @@ export function processRoute(
   // 3. Push current judgment to window
   state.window.push({
     tier: targetTier,
-    timestamp: Date.now(),
+    timestamp: now,
     confidence: judgeResult.confidence,
   })
 

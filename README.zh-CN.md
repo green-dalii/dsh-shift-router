@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)](#development)
 
 </div>
 
@@ -31,7 +31,7 @@
 - **即时升级、趋势门控降级** —— 一次 `smart` 判定立即切到强模型；降回弱模型需要滑动窗口内的多数判定（默认 5 轮、≥60%，低置信度投票被忽略）。
 - **缓存感知路由** —— 当 Fast 与 Smart 共享同一 provider 时，路由器抬高降级阈值（0.9），并在 prompt 缓存仍热时保持当前层，避免切到便宜模型反而更贵。
 - **运行时故障转移** —— 429 / 5xx / 配额失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
-- **任务级编排** —— 复杂任务（`smart` 判定）会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代——且受插件强制执行的硬上限约束。
+- **任务级编排** —— 复杂任务（`smart` 判定）会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、每个失败的工作代理结果计一次升级，一旦触顶 `subagent` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
 - **成本遥测** —— 按层统计 token/吞吐，可选的 USD 计价表（`/router stats` 会显示"本次会话若全程使用 Smart 模型将花费多少"）。
 - **零配置启动** —— 未配置分层前完全无操作；配置完成后路由立即生效。配置可通过 GUI 设置面板 **和** `/router config` 命令实时编辑（持久化，无需重启）。
 
@@ -47,6 +47,15 @@ dsh plugin --profile web add /path/to/dsh-shift-router
 ```
 
 bundle 的 `cordis.patch.yml` 会把插件插入任何声明了它的 profile。插件无需任何配置即可加载（所有默认值都安全）；分层模型来自设置面板或 patch 行。
+
+从 git 安装（`dsh plugin --profile <name> add github:green-dalii/dsh-shift-router`）会通过包的 `prepare` 脚本自动构建 `dist/`。pnpm ≥ 10 默认拒绝 git 依赖的 `prepare` 脚本——若构建被跳过，需在 profile 的 `pnpm-workspace.yaml` 加以下配置后重新 `add`：
+
+```yaml
+allowBuilds:
+  dsh-shift-router: true
+```
+
+> 这等于允许该包在安装时执行构建脚本。如需完全锁定的安装，改用源码检出后 `npm run build`（见下）。
 
 ### 从源码（本地开发）
 
@@ -94,8 +103,10 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `enabled` | `true` | 总开关 |
 | `tiers.fast.models` | `[]` | Fast 层模型链（`provider/model` + `priority`）；同时也是裁判的模型链 |
 | `tiers.smart.models` | `[]` | Smart 层模型链 |
-| `routing.mode` | `auto` | `auto` / `manual` / `off`（仅信息展示；真正的开关是 `enabled`） |
+| `routing.mode` | `auto` | `auto`（默认）：裁判 + 路由 + 故障转移 + 编排；`manual`：无裁判，仅显式 `/route-force` 覆盖；`off`：模型选择完全被动（命令/遥测仍可用） |
 | `routing.judgeTimeout` | `5000` | 裁判调用超时（毫秒） |
+| `routing.judgeMaxTokens` | `4000` | 单次裁判调用最大输出 token |
+| `routing.judgePromptCap` | `6000` | 发送给裁判的最大 prompt 字符数（限制裁判成本） |
 | `routing.window.size` | `5` | 降级滑动窗口大小 |
 | `routing.window.threshold` | `0.6` | 触发降级所需的 fast 多数比例 |
 | `routing.window.minConfidence` | `0.5` | 忽略低于此置信度的裁判判定 |
@@ -103,12 +114,18 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `routing.cacheAware.sameFamilyThreshold` | `0.9` | 两层共享 provider 时的降级阈值 |
 | `routing.cacheAware.idleBoundaryMs` | `300000` | 热缓存被认为变冷前的空闲间隔 |
 | `orchestration.mode` | `auto` | `auto`：复杂任务 → Smart CTO；`off`：仅普通双层路由 |
-| `orchestration.maxRounds` | `3` | 委派→审查轮次硬上限 |
-| `orchestration.escalationThreshold` | `2` | 工作代理失败多少次后 Smart 亲自接管该阶段 |
+| `orchestration.maxRounds` | `3` | 委派→审查轮次硬上限（**强制执行**：每次 subagent 委派计一轮；触顶后拒绝 subagent 工具） |
+| `orchestration.escalationThreshold` | `2` | 失败的工作代理结果数，达到后 Smart 必须亲自接管（**强制执行**：每个 `isError` 的 subagent 结果计数） |
 | `orchestration.requireSmartModel` | `true` | 无法解析 Smart 模型时跳过编排 |
-| `ux.quietMode` | `false` | 关闭通知 |
+| `failover.baseMs` | `60000` | 5xx 失败的冷却基础延迟（1 分钟） |
+| `failover.maxMs` | `21600000` | 退避阶梯硬上限（6 小时） |
+| `failover.startAttempts4xx` | `3` | 4xx（429/配额）失败从该尝试次数起步（16 分钟），客户端限流通常比服务端抖动更持久 |
+| `failover.speedWindowSize` | `5` | `/router stats` 平均值保留的最近 token/秒读数数 |
+| `telemetry.callLogCap` | `1000` | 基线成本计算保留的最大逐条消息归属记录数 |
 | `ux.routerLogVerbose` | `false` | 把路由决策打印到 harness 日志 |
 | `pricing` | `[]` | 可选 `{provider, model, input, output, cacheRead?, cacheWrite?}` 每百万 token 的 USD 计价表，用于成本遥测 |
+
+> 所有数字字段都经 schema 范围校验（如 `window.threshold` 必须在 [0,1]、`window.size` 必须是正整数）；非法值在加载 / `set` 时被拒绝，绝不静默接受。
 
 ## 命令
 
@@ -117,7 +134,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `/router` | 简洁状态 |
 | `/router status` / `/router stats` | 完整状态：分层、窗口、切换记录、冷却、token、成本遥测 |
 | `/router on` / `/router off` | 启用 / 停用（会话级） |
-| `/router quiet` / `/router verbose` | 通知 / 详细日志开关 |
+| `/router verbose` | 详细日志开关 |
 | `/router orchestrate auto\|off` | 编排模式 |
 | `/router config` | 显示生效配置 + 可用 providers/models + 用法 |
 | `/router config set <path> <value>` | 设置单个字段（持久化），如 `set routing.judgeTimeout 8000`、`set tiers.fast.models [...]` |
@@ -150,11 +167,13 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 - **工作代理的模型由部署配置固定**（`dsh-tool-subagent` 的 `agentOptions`），而不是由工具调用指定。默认情况下工作代理继承父代理的模型。
 - 因此编排 prompt 指示 CTO 用精确的任务契约进行委派、在硬上限内审查/迭代/升级，并列出部署应在 `tool-subagent.agentOptions` 中固定 Fast 层模型链以实现成本对等。
 
+硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；每次失败（`isError`）的 subagent 结果递增 `orchestration.escalations`；一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）。
+
 ## 开发
 
 ```sh
 npm run build       # tsc → dist/
-npm test            # vitest（52 个测试：路由 / 故障转移 / 裁判解析 / 编排）
+npm test            # vitest（62 个测试：路由 / 故障转移 / 裁判解析 / 编排 / 配置 schema）
 npm run typecheck
 ```
 

@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  buildCapNotice,
   buildOrchestratorPrompt,
   capHit,
   createOrchestrationState,
@@ -111,6 +112,32 @@ describe('orchestration lifecycle', () => {
     expect(capHit(state, cfg)).toBe(true)
     state.orchestration.rounds = 0
     state.orchestration.escalations = 2
+    expect(capHit(state, cfg)).toBe(true)
+  })
+})
+
+describe('cap enforcement', () => {
+  it('buildCapNotice states the configured caps', () => {
+    const cfg = makeConfig()
+    cfg.orchestration.maxRounds = 5
+    cfg.orchestration.escalationThreshold = 3
+    const notice = buildCapNotice(cfg)
+    expect(notice).toContain('5')
+    expect(notice).toContain('3')
+    expect(notice).toContain('subagent')
+  })
+
+  it('capHit is false while counters are under the caps and true when reached', () => {
+    const cfg = makeConfig()
+    const state = createRouterState()
+    enterOrchestration(state)
+    state.orchestration.rounds = cfg.orchestration.maxRounds - 1
+    state.orchestration.escalations = cfg.orchestration.escalationThreshold - 1
+    expect(capHit(state, cfg)).toBe(false)
+    state.orchestration.rounds = cfg.orchestration.maxRounds
+    expect(capHit(state, cfg)).toBe(true)
+    state.orchestration.rounds = 0
+    state.orchestration.escalations = cfg.orchestration.escalationThreshold
     expect(capHit(state, cfg)).toBe(true)
   })
 })

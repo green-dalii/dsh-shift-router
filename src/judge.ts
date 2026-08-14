@@ -140,8 +140,8 @@ The "Tier" column is the model that **drives the whole turn**.
 | "Deploy this to production" | smart | Irreversible + high stakes |
 | "Plan the migration from v1 to v2" | smart | Multi-step, ambiguous |`
 
-/** Budget enough tokens for reasoning + JSON answer. */
-const JUDGE_MAX_TOKENS = 4000
+/** Budget enough tokens for reasoning + JSON answer (Config-tunable default). */
+export const JUDGE_MAX_TOKENS = 4000
 
 // ─── Judge reply parsing (pure, unit-tested) ──────────────────────
 
@@ -255,6 +255,7 @@ export async function defaultJudgeStreamCall(
   provider: string,
   model: string,
   signal: AbortSignal,
+  maxTokens: number = JUDGE_MAX_TOKENS,
 ): Promise<JudgeCallOutcome> {
   const assembler = new BlockAssembler()
   let stream
@@ -268,7 +269,7 @@ export async function defaultJudgeStreamCall(
         source: { kind: 'user' },
       })],
       temperature: 0,
-      maxTokens: JUDGE_MAX_TOKENS,
+      maxTokens,
       signal,
     })
     for await (const chunk of stream) {

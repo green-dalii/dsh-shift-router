@@ -233,3 +233,25 @@ describe('analyzeDowngrade', () => {
     expect(result.shouldDowngrade).toBe(false)
   })
 })
+
+describe('processRoute window timestamps', () => {
+  it('stamps the window entry with the injected `now` (pure, deterministic)', () => {
+    const cfg = makeConfig()
+    cfg.tiers.fast.models = [{ provider: 'p1', model: 'fast-1', priority: 1 }]
+    const state = createRouterState()
+    state.currentTier = 'fast'
+
+    const now = 1_234_567_890
+    const decision = processRoute(
+      { tier: 'fast', source: 'llm', confidence: 0.9 },
+      state,
+      cfg,
+      registry(['p1/fast-1']),
+      now,
+    )
+
+    expect(decision.action).toBe('stay')
+    expect(state.window).toHaveLength(1)
+    expect(state.window[0]!.timestamp).toBe(now)
+  })
+})

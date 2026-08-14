@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-15
+
+### Changed
+
+- **Orchestration hard caps are now enforced, not just prompted**:
+  - Every `subagent` delegation while an orchestration turn is active increments `orchestration.rounds` (`tools/pre-execute`); every failed (`isError`) subagent result increments `orchestration.escalations` (`tools/result`).
+  - At the cap the `subagent` tool is denied outright and the orchestrator system-prompt section switches to a "wrap up now" notice (`buildCapNotice`).
+- **`routing.mode` is now functional** (was display-only): `auto` = judge + routing + failover + orchestration; `manual` = only explicit `/route-force` overrides (no judge); `off` = fully passive for model selection.
+- **Removed `ux.quietMode` and the `/router quiet` command** — the plugin sends no notifications, so the toggle was dead config.
+- Hardcoded runtime parameters moved into `Config` (all with safe defaults, now range-validated):
+  - `routing.judgeMaxTokens` (was `JUDGE_MAX_TOKENS`), `routing.judgePromptCap` (was `JUDGE_PROMPT_CAP`).
+  - `failover.baseMs` / `failover.maxMs` / `failover.startAttempts4xx` / `failover.speedWindowSize` (were module constants).
+  - `telemetry.callLogCap` (bounds the per-message attribution log).
+- Config schema now range-constrains numeric fields (`min`/`max`/`natural`/`percent`) so invalid configuration fails loudly at load and on `/router config set` — never silently misbehaves. Dropped the `as never` nested-default hacks (leaf defaults cover missing objects).
+- `agent/request-error` attributes the failure to the exact model last put on the wire (`lastRequestProvider`/`lastRequestModel`, recorded in `agent/request`) instead of scanning session events.
+- Telemetry attributes each message to the tier that owns its model (`findTierForModel`) rather than the router's current tier, so manual overrides / same-provider switches are billed to the right tier.
+- Model-availability memo is cleared on every config refresh, so adapter/config changes are re-probed instead of serving stale results.
+- `/router config` surfaces the schema's rejection message on failed `set`/`reset` instead of a generic error.
+- `scope.watch()` disposal is registered as an effect (explicit teardown on HMR reload).
+- `processRoute` stamps window entries with the injected `now` (deterministic, pure).
+
+### Added
+
+- Packaging: `prepare` script (self-contained `tsc` build for git installs), `exports` map, `README.zh-CN.md` in `files`.
+- Tests: 62 unit tests (added failover-policy, cap-enforcement, config-schema, and deterministic-timestamp cases).
+
+### Removed
+
+- `@deepseek-ai/dsh-scope` direct dependency (transitive only).
+
 ## [0.1.0] - 2026-08-14
 
 ### Added

@@ -27,6 +27,24 @@ export const COOLDOWN_MAX_MS = 6 * 60 * 60_000
  */
 export const COOLDOWN_START_ATTEMPTS_4XX = 3 // BASE * 4^2 = 16m
 
+/**
+ * Tunable failover policy — the Config-backed replacement for the module
+ * constants above. Functions accept an optional policy and fall back to the
+ * constants so pure callers (and tests) keep working unchanged.
+ */
+export interface FailoverPolicy {
+  baseMs: number
+  maxMs: number
+  startAttempts4xx: number
+}
+
+/** The module-constant policy, used as the default. */
+export const DEFAULT_FAILOVER_POLICY: FailoverPolicy = {
+  baseMs: COOLDOWN_BASE_MS,
+  maxMs: COOLDOWN_MAX_MS,
+  startAttempts4xx: COOLDOWN_START_ATTEMPTS_4XX,
+}
+
 /** One cooldown entry: when it expires + how many consecutive failures. */
 export interface CooldownEntry {
   until: number
@@ -48,11 +66,12 @@ export function modelKey(provider: string, model: string): string {
 
 /**
  * Record a failure and apply exponential backoff:
- * backoff = BASE * 4^(attempts-1), capped at COOLDOWN_MAX_MS.
+ * backoff = base * 4^(attempts-1), capped at maxMs.
  *
  * 4xx failures (429 / quota) skip the first two tiers and start at 16m:
  * client limits usually outlive server-side blips. `code` is the failover
  * signature ("429", "503", "RATE_LIMIT", …); omitted or 5xx keeps the 1m start.
+ * `policy` tunes the ladder (defaults to the module constants).
  */
 export function markModelFailed(
   cooldowns: CooldownMap,
@@ -60,15 +79,16 @@ export function markModelFailed(
   model: string,
   now: number,
   code?: string,
+  policy: FailoverPolicy = DEFAULT_FAILOVER_POLICY,
 ): void {
   const key = modelKey(provider, model)
   const prev = cooldowns.get(key)
   const is4xx = !!code && code.startsWith('4')
   const attempts = Math.max(
     (prev?.attempts ?? 0) + 1,
-    is4xx ? COOLDOWN_START_ATTEMPTS_4XX : 1,
+    is4xx ? policy.startAttempts4xx : 1,
   )
-  const backoff = Math.min(COOLDOWN_BASE_MS * 4 ** (attempts - 1), COOLDOWN_MAX_MS)
+  const backoff = Math.min(policy.baseMs * 4 ** (attempts - 1), policy.maxMs)
   cooldowns.set(key, { until: now + backoff, attempts })
 }
 
@@ -226,9 +246,9 @@ export function tokensPerSecond(outputTokens: number, elapsedMs: number): number
 }
 
 /** Push a new speed reading into the sliding window (evict oldest beyond limit). */
-export function recordSpeed(speeds: number[], tps: number): void {
+export function recordSpeed(speeds: number[], tps: number, windowSize: number = SPEED_WINDOW_SIZE): void {
   speeds.push(tps)
-  while (speeds.length > SPEED_WINDOW_SIZE) speeds.shift()
+  while (speeds.length > windowSize) speeds.shift()
 }
 
 /**

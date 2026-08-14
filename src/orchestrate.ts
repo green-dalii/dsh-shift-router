@@ -244,9 +244,31 @@ export function shouldOrchestrate(
   return true
 }
 
+// ─── Hard-cap enforcement ────────────────────────────────────────
+
+/**
+ * Rendered in place of the orchestrator prompt once the router's hard caps
+ * are exhausted: the model is told delegation is blocked and to wrap up.
+ * This is plugin-enforced (the subagent tool is denied at `tools/pre-execute`
+ * while the cap is hit), the prompt text is the model-facing explanation.
+ */
+export function buildCapNotice(config: ShiftRouterConfig): string {
+  return `# ⚠ ORCHESTRATION CAP REACHED (dsh-shift-router)
+
+The router's hard caps for this task are exhausted:
+- Delegate→review rounds: **${config.orchestration.maxRounds}** used up.
+- Worker escalations: **${config.orchestration.escalationThreshold}** reached.
+
+**Stop delegating now** — the \`subagent\` tool is blocked by the router for this turn.
+Wrap up with the work already done: verify what exists, summarize what remains,
+and deliver your final answer. Do not attempt further subagent calls.`
+}
+
 /**
  * Hard-cap guard. Returns true when the loop must stop (cap hit) regardless
- * of what the Smart agent wants.
+ * of what the Smart agent wants. `rounds`/`escalations` are incremented by
+ * the plugin from `tools/pre-execute` / `tools/result` while orchestration is
+ * active, so this is an enforced limit, not just prompt guidance.
  */
 export function capHit(state: RouterState, config: ShiftRouterConfig): boolean {
   const orch = state.orchestration

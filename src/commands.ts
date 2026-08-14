@@ -41,10 +41,16 @@ export interface CommandDeps {
   setManualOverrideModel(agent: Agent, provider: string, model: string): void
   clearManualOverride(agent: Agent): void
   subagentAvailable(): boolean
-  /** Persist a partial patch into the shift-router settings namespace. */
-  updateSettings(patch: Record<string, unknown>): Promise<boolean>
-  /** Reset the shift-router settings namespace to the composition base. */
-  resetSettings(): Promise<boolean>
+  /**
+   * Persist a partial patch into the shift-router settings namespace.
+   * Resolves null on success, or a human-readable failure reason.
+   */
+  updateSettings(patch: Record<string, unknown>): Promise<string | null>
+  /**
+   * Reset the shift-router settings namespace to the composition base.
+   * Resolves null on success, or a human-readable failure reason.
+   */
+  resetSettings(): Promise<string | null>
   /** Registered provider routes (ctx.llm.listProviders ids). */
   listProviders(): string[]
   /** Model ids a provider adapter advertises. */
@@ -86,6 +92,11 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
   const stats = formatStats(state, config, now).split('\n')
 
   const sHeader = config.enabled ? '✅' : '⛔'
+  const sMode = config.routing.mode === 'auto'
+    ? 'AUTO'
+    : config.routing.mode === 'manual'
+      ? 'MANUAL (overrides only)'
+      : 'OFF (passive)'
   const sManual = state.manualOverride.active
     ? ` ✅ ${state.manualOverride.tier ?? state.manualOverride.modelId ?? 'active'}`
     : ' ✗'
@@ -97,7 +108,7 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
   const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount
 
   return [
-    `dsh-shift-router — Mode: ${config.routing.mode.toUpperCase()} ${sHeader}`,
+    `dsh-shift-router — Mode: ${sMode} ${sHeader}`,
     `Current: ${formatTierDisplay(state.currentTier, state.currentModelId)}${state.manualOverride.active ? ' (manual)' : ''}`,
     ``,
     `Tiers:`,
@@ -165,11 +176,14 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
   const lines: string[] = [
     'dsh-shift-router — effective configuration (editable here or in Settings → shift-router):',
     `  enabled: ${config.enabled}`,
-    `  orchestration.mode: ${config.orchestration.mode} (maxRounds=${config.orchestration.maxRounds}, escalation=${config.orchestration.escalationThreshold})`,
-    `  routing.judgeTimeout: ${config.routing.judgeTimeout}ms`,
+    `  routing.mode: ${config.routing.mode} (auto = judge+routing; manual = overrides only; off = passive)`,
+    `  orchestration.mode: ${config.orchestration.mode} (maxRounds=${config.orchestration.maxRounds}, escalation=${config.orchestration.escalationThreshold}, requireSmartModel=${config.orchestration.requireSmartModel})`,
+    `  routing.judge: timeout=${config.routing.judgeTimeout}ms maxTokens=${config.routing.judgeMaxTokens} promptCap=${config.routing.judgePromptCap}`,
     `  routing.window: size=${config.routing.window.size} threshold=${config.routing.window.threshold} minConfidence=${config.routing.window.minConfidence ?? 0.5}`,
     `  cacheAware: ${config.routing.cacheAware?.enabled ? 'on' : 'off'} (sameFamilyThreshold=${config.routing.cacheAware?.sameFamilyThreshold}, idleBoundaryMs=${config.routing.cacheAware?.idleBoundaryMs})`,
-    `  ux: quiet=${config.ux.quietMode} verbose=${config.ux.routerLogVerbose}`,
+    `  failover: baseMs=${config.failover.baseMs} maxMs=${config.failover.maxMs} startAttempts4xx=${config.failover.startAttempts4xx} speedWindow=${config.failover.speedWindowSize}`,
+    `  telemetry.callLogCap: ${config.telemetry.callLogCap}`,
+    `  ux: verbose=${config.ux.routerLogVerbose}`,
     `  tiers.fast: ${config.tiers.fast.models.map((m) => `${m.provider}/${m.model}`).join(', ') || '(none)'}`,
     `  tiers.smart: ${config.tiers.smart.models.map((m) => `${m.provider}/${m.model}`).join(', ') || '(none)'}`,
     ``,
@@ -201,8 +215,8 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
 export function registerCommands(deps: CommandDeps): CommandDefinition[] {
   const router: CommandDefinition = {
     name: 'router',
-    description: 'dsh-shift-router: show status, enable/disable, orchestration mode (on|off|status|stats|quiet|verbose|config|orchestrate)',
-    input: { hint: 'status | stats | on | off | quiet | verbose | config | orchestrate auto|off' },
+    description: 'dsh-shift-router: show status, enable/disable, orchestration mode (on|off|status|stats|verbose|config|orchestrate)',
+    input: { hint: 'status | stats | on | off | verbose | config | orchestrate auto|off' },
     handler: ({ agent, rawInput }) => {
       const config = deps.getConfig()
       const arg = rawInput.trim().toLowerCase()
@@ -238,11 +252,6 @@ export function registerCommands(deps: CommandDeps): CommandDefinition[] {
       }
       if (arg === 'config' || arg.startsWith('config ')) {
         return handleConfig(rawInput, deps)
-      }
-      if (arg === 'quiet') {
-        config.ux.quietMode = !config.ux.quietMode
-        deps.onConfigChanged()
-        return { kind: 'success', text: `dsh-shift-router: ${config.ux.quietMode ? '🔇 Quiet' : '🔊 Notifications'}` }
       }
       if (arg === 'verbose' || arg === 'log') {
         config.ux.routerLogVerbose = !config.ux.routerLogVerbose
@@ -281,8 +290,8 @@ async function handleConfig(
   }
 
   if (sub === 'reset') {
-    const ok = await deps.resetSettings()
-    if (!ok) return { kind: 'error', text: 'dsh-shift-router: settings are unavailable (no settings service) — edit the profile cordis.patch.yml row instead' }
+    const error = await deps.resetSettings()
+    if (error) return { kind: 'error', text: `dsh-shift-router: reset failed — ${error}` }
     deps.onConfigChanged()
     return { kind: 'success', text: 'dsh-shift-router: configuration reset to the composition default (cordis.yml)' }
   }
@@ -291,10 +300,10 @@ async function handleConfig(
     const tier = sub === 'set-fast' ? 'fast' : 'smart'
     const ref = parseModelRef(tokens[2] ?? '')
     if (!ref) return { kind: 'error', text: `Usage: /router config ${sub} <provider/model-id>` }
-    const ok = await deps.updateSettings({
+    const error = await deps.updateSettings({
       tiers: { [tier]: { models: [{ provider: ref.provider, model: ref.model, priority: 1 }] } },
     })
-    if (!ok) return { kind: 'error', text: 'dsh-shift-router: settings update failed (invalid value?) — check the model id' }
+    if (error) return { kind: 'error', text: `dsh-shift-router: settings update failed — ${error}` }
     deps.onConfigChanged()
     return { kind: 'success', text: `dsh-shift-router: ${tierEmoji(tier)} ${tier} tier → ${ref.provider}/${ref.model} (persisted)` }
   }
@@ -307,8 +316,8 @@ async function handleConfig(
     }
     const built = pathPatch(path, rawValue)
     if ('error' in built) return { kind: 'error', text: `dsh-shift-router: ${built.error}` }
-    const ok = await deps.updateSettings(built.patch)
-    if (!ok) return { kind: 'error', text: 'dsh-shift-router: settings update failed — the schema rejected the value (JSON numbers/booleans/arrays are parsed automatically)' }
+    const error = await deps.updateSettings(built.patch)
+    if (error) return { kind: 'error', text: `dsh-shift-router: settings update failed — ${error}` }
     deps.onConfigChanged()
     return { kind: 'success', text: `dsh-shift-router: set ${path} = ${rawValue} (persisted)` }
   }

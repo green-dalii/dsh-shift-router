@@ -10,7 +10,7 @@ A DSH adaptation of [pi-shift-router](https://github.com/green-dalii/pi-shift-ro
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)](#development)
 
 </div>
 
@@ -31,7 +31,7 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 - **Instant upgrades, trend-gated downgrades** — one `smart` verdict switches to the strong tier immediately; coming back down requires a sliding-window majority (default 5 turns, ≥60%, low-confidence votes ignored).
 - **Cache-aware routing** — when Fast and Smart share a provider, the router raises the downgrade threshold (0.9) and holds off while the prompt cache is warm, so switching to a cheaper model never costs more than staying put.
 - **Runtime failover** — 429 / 5xx / quota failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
-- **Task-level orchestration** — complex tasks (a `smart` verdict) run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates — with plugin-enforced hard caps.
+- **Task-level orchestration** — complex tasks (a `smart` verdict) run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, each failed worker result counts an escalation, and once a cap is hit the `subagent` tool is denied outright and the system prompt switches to a "wrap up now" notice.
 - **Cost telemetry** — per-tier token/throughput tracking and an optional USD pricing table (`/router stats` shows "what this session would have cost on the Smart model").
 - **Zero-config startup** — a no-op until you configure tiers; then routing just works. Configuration is editable live via the GUI settings panel **and** `/router config` commands (persisted, no restart).
 
@@ -47,6 +47,15 @@ dsh plugin --profile web add /path/to/dsh-shift-router
 ```
 
 The bundle's `cordis.patch.yml` inserts the plugin into any profile that lists it. The plugin loads without any configuration (all defaults are safe); tier models come from the settings panel or the patch row.
+
+Installing from git (`dsh plugin --profile <name> add github:green-dalii/dsh-shift-router`) builds `dist/` automatically via the package's `prepare` script. pnpm ≥ 10 refuses git dependencies' `prepare` scripts by default — add this to the profile's `pnpm-workspace.yaml` and re-`add` if the build is skipped:
+
+```yaml
+allowBuilds:
+  dsh-shift-router: true
+```
+
+> This grants the package permission to run its build script at install time. For a fully lock-down install, use `npm run build` on a source checkout (below) instead.
 
 ### From source (local development)
 
@@ -94,8 +103,10 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `enabled` | `true` | Master switch |
 | `tiers.fast.models` | `[]` | Fast-tier chain (`provider/model` + `priority`); also the Judge's model chain |
 | `tiers.smart.models` | `[]` | Smart-tier chain |
-| `routing.mode` | `auto` | `auto` / `manual` / `off` (informational; `enabled` is the real gate) |
+| `routing.mode` | `auto` | `auto` (default): judge + routing + failover + orchestration; `manual`: no judge, only explicit `/route-force` overrides; `off`: fully passive for model selection (commands/telemetry still work) |
 | `routing.judgeTimeout` | `5000` | Judge call timeout (ms) |
+| `routing.judgeMaxTokens` | `4000` | Max output tokens for a single Judge call |
+| `routing.judgePromptCap` | `6000` | Max prompt characters sent to the Judge (bounds Judge cost) |
 | `routing.window.size` | `5` | Downgrade sliding window size |
 | `routing.window.threshold` | `0.6` | Fast-majority ratio required to downgrade |
 | `routing.window.minConfidence` | `0.5` | Ignore judge verdicts below this confidence |
@@ -103,12 +114,18 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `routing.cacheAware.sameFamilyThreshold` | `0.9` | Downgrade threshold when tiers share a provider |
 | `routing.cacheAware.idleBoundaryMs` | `300000` | Idle gap before a warm cache is considered cold |
 | `orchestration.mode` | `auto` | `auto`: complex → Smart CTO; `off`: plain two-tier routing |
-| `orchestration.maxRounds` | `3` | Delegate→review rounds hard cap |
-| `orchestration.escalationThreshold` | `2` | Worker failures before Smart takes over the phase |
+| `orchestration.maxRounds` | `3` | Delegate→review rounds hard cap (**enforced**: each subagent delegation counts one round; at the cap the subagent tool is denied) |
+| `orchestration.escalationThreshold` | `2` | Failed worker results before Smart must take over the phase (**enforced**: each `isError` subagent result counts) |
 | `orchestration.requireSmartModel` | `true` | Skip orchestration if the Smart model can't be resolved |
-| `ux.quietMode` | `false` | Suppress notifications |
+| `failover.baseMs` | `60000` | Cooldown base delay for 5xx failures (1m) |
+| `failover.maxMs` | `21600000` | Hard cap on the backoff ladder (6h) |
+| `failover.startAttempts4xx` | `3` | 4xx (429/quota) failures start at this attempt (16m), client limits usually outlive server blips |
+| `failover.speedWindowSize` | `5` | Recent tokens/sec readings kept for the `/router stats` average |
+| `telemetry.callLogCap` | `1000` | Max per-message attribution records kept for baseline cost computation |
 | `ux.routerLogVerbose` | `false` | Print router decisions to the harness log |
 | `pricing` | `[]` | Optional `{provider, model, input, output, cacheRead?, cacheWrite?}` USD-per-1M-token table for cost telemetry |
+
+> All numeric fields are range-validated by the schema (e.g. `window.threshold` must be in [0,1], `window.size` a positive integer); invalid values are rejected at load / on `set`, never silently accepted.
 
 ## Commands
 
@@ -117,7 +134,7 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `/router` | Compact status |
 | `/router status` / `/router stats` | Full status: tiers, window, transitions, cooldowns, tokens, cost telemetry |
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
-| `/router quiet` / `/router verbose` | Notification / verbose-log toggles |
+| `/router verbose` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
 | `/router config` | Show effective config + available providers/models + usage |
 | `/router config set <path> <value>` | Set one field (persisted), e.g. `set routing.judgeTimeout 8000`, `set tiers.fast.models [...]` |
@@ -135,6 +152,7 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | Runtime failover | `agent/request-error` waterfall (cooldown + `{kind:'retry'}` same-tier retry) |
 | Judge LLM calls | `ctx.llm.stream()` — reuses the harness's adapters, credentials, and JSON-mode enforcement |
 | Orchestrator instruction | `ctx.systemPrompt.section()` rendered per agent while orchestration is active |
+| Orchestration hard caps | `tools/pre-execute` denies the `subagent` tool at the cap; `tools/result` counts failed workers; the prompt section switches to a "wrap up" notice |
 | Config (GUI + commands) | `dsh-settings` namespace `shift-router` (same store for both surfaces) |
 | Usage telemetry / cooldown recovery | `session/event` `assistant/message` (TokenUsage; a successful message clears the model's cooldown) |
 | Commands | `ctx.commands.register()` |
@@ -150,11 +168,13 @@ The original pi plugin delegated through pi-subagents with `agent: "worker"`, `c
 - **The worker model is pinned by deployment configuration** (`dsh-tool-subagent`'s `agentOptions`), not by the tool call. By default a worker inherits the parent's model.
 - Therefore the orchestrator prompt instructs the CTO to delegate with precise task contracts, review/iterate/escalate within the hard caps, and lists the Fast-tier chain the deployment should have pinned in `tool-subagent.agentOptions` for cost parity.
 
+The caps are enforced by the router, not just described: every `subagent` tool call while an orchestration turn is active increments `orchestration.rounds`; every failed (`isError`) subagent result increments `orchestration.escalations`; once `capHit()` is true the `subagent` tool is **denied** at `tools/pre-execute` and the orchestrator prompt section is replaced by a "wrap up now" notice. `/router status` shows the live counters (`round x/max, esc y/threshold`).
+
 ## Development
 
 ```sh
 npm run build       # tsc → dist/
-npm test            # vitest (52 tests: routing / failover / judge parsing / orchestration)
+npm test            # vitest (62 tests: routing / failover / judge parsing / orchestration / config schema)
 npm run typecheck
 ```
 

@@ -177,3 +177,32 @@ describe('helpers', () => {
     expect(speeds[0]).toBe(3)
   })
 })
+
+describe('tunable failover policy', () => {
+  it('markModelFailed honors a custom baseMs ladder', () => {
+    const c = createCooldowns()
+    const policy = { baseMs: 10_000, maxMs: 80_000, startAttempts4xx: 1 }
+    markModelFailed(c, 'p', 'm', 0, undefined, policy)
+    // 5xx start: attempt 1 → baseMs * 4^0 = 10s
+    expect(c.get('p/m')!.until).toBe(10_000)
+    expect(c.get('p/m')!.attempts).toBe(1)
+    markModelFailed(c, 'p', 'm', 10_000, undefined, policy)
+    // attempt 2 → 10s * 4 = 40s
+    expect(c.get('p/m')!.until).toBe(50_000)
+  })
+
+  it('markModelFailed honors custom maxMs cap and 4xx start', () => {
+    const c = createCooldowns()
+    const policy = { baseMs: 100, maxMs: 1000, startAttempts4xx: 3 }
+    markModelFailed(c, 'p', 'm', 0, '429', policy)
+    // 4xx start at attempt 3 → 100 * 4^2 = 1600 → capped at 1000
+    expect(c.get('p/m')!.until).toBe(1000)
+  })
+
+  it('recordSpeed honors a custom window size', () => {
+    const speeds: number[] = []
+    for (let i = 0; i < 10; i++) recordSpeed(speeds, i, 3)
+    expect(speeds).toHaveLength(3)
+    expect(speeds[0]).toBe(7)
+  })
+})

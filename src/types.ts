@@ -52,16 +52,50 @@ export interface TierConfig {
 
 /** UX configuration (DSH has no status bar; kept for command feedback parity). */
 export interface UXConfig {
-  quietMode: boolean
   /** Verbose logging: print router decisions, judge calls, window state. */
   routerLogVerbose: boolean
 }
 
+/**
+ * Runtime failover policy. The exponential-backoff ladder is
+ * `baseMs * 4^(attempts-1)`, capped at `maxMs`; 4xx-class failures (429 /
+ * quota) skip the first tiers and start at `startAttempts4xx` because
+ * client-side limits usually outlive server-side blips. All configurable so
+ * deployments can tune recovery to their provider's throttling shape.
+ */
+export interface FailoverConfig {
+  /** Base cooldown delay (first 5xx failure): 1 minute. */
+  baseMs: number
+  /** Hard cap on the backoff ladder: 6 hours. */
+  maxMs: number
+  /** Starting attempt count for 4xx failures (baseMs * 4^(n-1) with n = this). */
+  startAttempts4xx: number
+  /** Max recent tokens/sec readings kept for the `/router stats` average. */
+  speedWindowSize: number
+}
+
+/** Telemetry retention / aggregation policy. */
+export interface TelemetryConfig {
+  /** Max per-message attribution records kept for baseline cost computation. */
+  callLogCap: number
+}
+
 /** Routing behaviour config */
 export interface RoutingConfig {
+  /**
+   * `auto` (default): judge + sliding-window routing + failover +
+   * orchestration. `manual`: no judge, no auto-switching — only explicit
+   * `/route-force` overrides take effect (one-shot). `off`: the router is
+   * fully passive for model selection (like `enabled: false`); commands and
+   * telemetry still work.
+   */
   mode: 'auto' | 'manual' | 'off'
   /** LLM Judge timeout in ms */
   judgeTimeout: number
+  /** Max output tokens for a single Judge call. */
+  judgeMaxTokens: number
+  /** Max prompt characters sent to the Judge (bounds Judge cost). */
+  judgePromptCap: number
   /**
    * Sliding window for downgrade gating. Entries whose confidence is
    * below `minConfidence` are ignored. Downgrade fires when
@@ -125,6 +159,10 @@ export interface ShiftRouterConfig {
   routing: RoutingConfig
   ux: UXConfig
   orchestration: OrchestrationConfig
+  /** Runtime failover policy (exponential-backoff ladder). */
+  failover: FailoverConfig
+  /** Telemetry retention policy. */
+  telemetry: TelemetryConfig
   /**
    * Optional per-model pricing used by `/router stats` cost telemetry. DSH
    * usage events carry token counts but no USD, so the router estimates
@@ -165,6 +203,8 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   routing: {
     mode: 'auto',
     judgeTimeout: 5000,
+    judgeMaxTokens: 4000,
+    judgePromptCap: 6000,
     window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
     cacheAware: {
       enabled: true,
@@ -173,7 +213,6 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     },
   },
   ux: {
-    quietMode: false,
     routerLogVerbose: false,
   },
   orchestration: {
@@ -181,6 +220,15 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     maxRounds: 3,
     escalationThreshold: 2,
     requireSmartModel: true,
+  },
+  failover: {
+    baseMs: 60_000,
+    maxMs: 6 * 60 * 60_000,
+    startAttempts4xx: 3,
+    speedWindowSize: 5,
+  },
+  telemetry: {
+    callLogCap: 1000,
   },
   pricing: [],
 }
@@ -216,6 +264,14 @@ export interface RouterState {
   recentSpeeds: number[]
   /** Epoch ms when the current in-flight assistant message started streaming; null when none. */
   streamingStartTime: number | null
+  /**
+   * Provider/model the router last put on the wire for this agent. Set in
+   * `agent/request`; consumed by `agent/request-error` to attribute a failure
+   * to the exact model that served the failed request (no session-event
+   * archaeology).
+   */
+  lastRequestProvider: string | null
+  lastRequestModel: string | null
   /** Cumulative count of fast→smart tier transitions. */
   upgradeCount: number
   /** Cumulative count of smart→fast tier transitions. */

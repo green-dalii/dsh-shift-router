@@ -29,8 +29,10 @@ import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 // Type-only: pull in the Context augmentations (`ctx.tools`, `ctx.systemPrompt`)
-// so the plugin compiles against the running harness's service surface.
+// and tool-pipeline event types so the plugin compiles against the running
+// harness's service surface.
 import type {} from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { Config, deepMergeConfig } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
@@ -53,6 +55,8 @@ import {
 import {
   shouldOrchestrate,
   buildOrchestratorPrompt,
+  buildCapNotice,
+  capHit,
   enterOrchestration,
   exitOrchestration,
   renderTierChain,
@@ -70,9 +74,6 @@ export const inject = ['llm', 'tools', 'commands', 'agents', 'systemPrompt'] as 
 /** Settings namespace shown in the GUI settings panel. */
 export const ROUTER_SETTINGS_NAMESPACE = settingsNamespace('shift-router')
 
-/** Max prompt characters sent to the judge (bounds judge cost). */
-const JUDGE_PROMPT_CAP = 6000
-
 /** Subagent tool name registered by dsh-tool-subagent. */
 const SUBAGENT_TOOL = 'subagent'
 
@@ -88,14 +89,14 @@ function isRoutableAgent(agent: Agent): boolean {
 }
 
 /** Concatenate the text content of the claimed user messages (judge input). */
-function messagesToText(messages: readonly UserMessage[]): string {
+function messagesToText(messages: readonly UserMessage[], cap: number): string {
   const texts: string[] = []
   for (const message of messages) {
     for (const block of message.content) {
       if (block.type === 'text') texts.push(block.text)
     }
   }
-  return texts.join('\n').slice(0, JUDGE_PROMPT_CAP)
+  return texts.join('\n').slice(0, cap)
 }
 
 export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
@@ -118,8 +119,16 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   let configSource: () => ShiftRouterConfig = () => config
   let effectiveConfig: ShiftRouterConfig = structuredClone(config)
   let settingsScope: SettingsScope<ShiftRouterConfig> | undefined
+  // Model availability memo: "does a registered adapter resolve this
+  // provider/model?" — checked once per config and cached. Declared before
+  // the settings block because refreshConfig() clears it.
+  const modelCache = new Map<string, boolean>()
   const refreshConfig = (): void => {
     effectiveConfig = structuredClone(configSource())
+    // Model availability is resolved against the harness's adapter registry;
+    // a config change may point tiers at providers/models that weren't
+    // resolvable before (or vice versa), so drop the memoized results.
+    modelCache.clear()
   }
   ctx.inject(['settings'], (sctx) => {
     const scope = sctx.settings.register(ROUTER_SETTINGS_NAMESPACE, Config, { base: config })
@@ -132,36 +141,51 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       configSource = () => config
       refreshConfig()
     })
-    scope.watch(() => {
+    // Watch disposal is registered as an effect so it is torn down with the
+    // plugin fiber (HMR reload) instead of relying on implicit cleanup.
+    sctx.effect(() => scope.watch(() => {
       refreshConfig()
       if (effectiveConfig.ux.routerLogVerbose) {
         ctx.logger.info('[shift-router] configuration changed')
       }
-    })
+    }))
   })
   const getConfig = (): ShiftRouterConfig => effectiveConfig
 
-  /** Persist a partial patch into the shift-router settings namespace. */
-  async function updateSettings(patch: Record<string, unknown>): Promise<boolean> {
-    if (settingsScope === undefined) return false
+  /**
+   * Persist a partial patch into the shift-router settings namespace.
+   * Returns null on success, or a human-readable failure reason (so commands
+   * can surface the schema's rejection message instead of a generic error).
+   */
+  async function updateSettings(patch: Record<string, unknown>): Promise<string | null> {
+    if (settingsScope === undefined) {
+      return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
+    }
     try {
       await settingsScope.update(patch)
-      return true
+      return null
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
       ctx.logger.warn('[shift-router] settings update failed: %o', error)
-      return false
+      return detail
     }
   }
 
-  /** Reset the shift-router settings namespace to the composition base. */
-  async function resetSettings(): Promise<boolean> {
-    if (settingsScope === undefined) return false
+  /**
+   * Reset the shift-router settings namespace to the composition base.
+   * Returns null on success, or a human-readable failure reason.
+   */
+  async function resetSettings(): Promise<string | null> {
+    if (settingsScope === undefined) {
+      return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
+    }
     try {
       await settingsScope.replace({})
-      return true
+      return null
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
       ctx.logger.warn('[shift-router] settings reset failed: %o', error)
-      return false
+      return detail
     }
   }
 
@@ -183,10 +207,9 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
 
   // ── Model availability probe (ctx.llm-backed, memoized) ─────────────
   // pi's modelRegistry.find is replaced by "does a registered adapter resolve
-  // this provider/model?" — checked once per boot and cached. The warmers
+  // this provider/model?" — checked once per config and cached (see
+  // `modelCache` above; cleared on every config refresh). The warmers
   // populate the sync set before the pure routing functions run.
-  const modelCache = new Map<string, boolean>()
-
   async function warmModel(provider: string, model: string): Promise<boolean> {
     const key = `${provider}/${model}`
     const cached = modelCache.get(key)
@@ -231,7 +254,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
 
   // ── The LLM Judge (fast-tier chain walk via ctx.llm) ────────────────
   const judgeStreamCall: JudgeStreamCall = (provider, model, prompt, signal) =>
-    defaultJudgeStreamCall(ctx, prompt, provider, model, signal)
+    defaultJudgeStreamCall(ctx, prompt, provider, model, signal, getConfig().routing.judgeMaxTokens)
 
   // ── Turn start: classify + route + (maybe) orchestrate ──────────────
   ctx.on('agent/pre-step', async (
@@ -242,8 +265,16 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const cfg = getConfig()
     if (!cfg.enabled) return next()
 
+    // Mode gate: `manual` skips the judge and auto-switching (only explicit
+    // `/route-force` overrides apply — they need router state, so ensure it);
+    // `off` makes the router fully passive for model selection.
+    if (cfg.routing.mode !== 'auto') {
+      if (cfg.routing.mode === 'manual') ensureState(agent)
+      return next()
+    }
+
     const state = ensureState(agent)
-    const prompt = messagesToText(messages)
+    const prompt = messagesToText(messages, cfg.routing.judgePromptCap)
     if (!prompt.trim()) return next()
 
     const t0 = Date.now()
@@ -252,6 +283,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     // The judge shares the cooldown map with the turn path: a judge-side
     // 429/5xx marks the model so both the next judge call and the turn path
     // skip it without re-burning the failure.
+    const failoverPolicy = {
+      baseMs: cfg.failover.baseMs,
+      maxMs: cfg.failover.maxMs,
+      startAttempts4xx: cfg.failover.startAttempts4xx,
+    }
     let judgeResult: JudgeResult = { tier: 'fast', source: 'fallback' }
     try {
       judgeResult = await classify(
@@ -260,7 +296,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
         judgeStreamCall,
         cfg.routing.judgeTimeout,
         cooldownPredicate(state.modelCooldowns, Date.now()),
-        (provider, model, code) => markModelFailed(state.modelCooldowns, provider, model, Date.now(), code),
+        (provider, model, code) => markModelFailed(state.modelCooldowns, provider, model, Date.now(), code, failoverPolicy),
         signal,
       )
     } finally {
@@ -316,21 +352,35 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   ): Promise<LlmCallConfig> => {
     if (!isRoutableAgent(agent)) return next()
     const cfg = getConfig()
-    if (!cfg.enabled) return next()
+    if (!cfg.enabled || cfg.routing.mode === 'off') return next()
     const state = stateFor(agent)
     if (!state) return next()
 
     const incoming = await next()
 
+    // Record what actually goes on the wire — `agent/request-error` uses this
+    // to attribute a failure to the exact model that served the request.
+    const recordLastRequest = (wire: LlmCallConfig): void => {
+      state.lastRequestProvider = wire.provider ?? null
+      state.lastRequestModel = wire.model ?? null
+    }
+
     // Manual override: user forced a tier/model for this turn.
     if (state.manualOverride.active) {
+      let wire: LlmCallConfig = incoming
       if (state.manualOverride.provider && state.manualOverride.modelId) {
-        return { ...incoming, provider: state.manualOverride.provider, model: state.manualOverride.modelId }
-      }
-      if (state.manualOverride.tier) {
+        wire = { ...incoming, provider: state.manualOverride.provider, model: state.manualOverride.modelId }
+      } else if (state.manualOverride.tier) {
         const m = await resolveBestModel(state.manualOverride.tier, state)
-        if (m) return { ...incoming, provider: m.provider, model: m.modelId }
+        if (m) wire = { ...incoming, provider: m.provider, model: m.modelId }
       }
+      recordLastRequest(wire)
+      return wire
+    }
+
+    // Manual mode never auto-switches models; it only honors overrides.
+    if (cfg.routing.mode !== 'auto') {
+      recordLastRequest(incoming)
       return incoming
     }
 
@@ -338,10 +388,18 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     // cooldown health — after `agent/request-error` marks a model down, the
     // retry lands on the next healthy model in the SAME tier.
     const m = await resolveBestModel(state.currentTier, state)
-    if (!m) return incoming
-    if (incoming.provider === m.provider && incoming.model === m.modelId) return incoming
+    if (!m) {
+      recordLastRequest(incoming)
+      return incoming
+    }
+    if (incoming.provider === m.provider && incoming.model === m.modelId) {
+      recordLastRequest(incoming)
+      return incoming
+    }
     vlog(`model: ${incoming.provider}/${incoming.model} → ${m.provider}/${m.modelId} (tier ${m.tier})`)
-    return { ...incoming, provider: m.provider, model: m.modelId }
+    const wire = { ...incoming, provider: m.provider, model: m.modelId }
+    recordLastRequest(wire)
+    return wire
   })
 
   // ── Runtime failover: 429/5xx → cooldown + same-tier retry ──────────
@@ -351,7 +409,9 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   ): Promise<RequestErrorAction> => {
     if (!isRoutableAgent(agent)) return next()
     const cfg = getConfig()
-    if (!cfg.enabled) return next()
+    // Failover is an auto-mode behavior: manual mode hands control to the
+    // user, off mode is fully passive.
+    if (!cfg.enabled || cfg.routing.mode !== 'auto') return next()
     const state = stateFor(agent)
     if (!state) return next()
     if (state.manualOverride.active) return next() // user forced a model — don't override
@@ -359,21 +419,20 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const det = detectFailoverError(failure)
     if (!det) return next() // auth/config/network — not failover-worthy
 
-    // The failing model is the one the last request/header logged for this
-    // provider (the request that failed was built from it).
+    // Attribute the failure to the exact model this agent last put on the
+    // wire for the failed provider (recorded in `agent/request`), falling
+    // back to the router's current model. No session-event archaeology.
     let model: string | null = null
-    for (let i = agent.session.events.length - 1; i >= 0; i--) {
-      const event = agent.session.events[i]
-      if (event?.type === 'request/header' && event.data.header.config.provider === provider) {
-        model = event.data.header.config.model
-        break
-      }
-    }
-    if (!model) model = state.currentProvider === provider ? state.currentModelId : null
+    if (state.lastRequestProvider === provider) model = state.lastRequestModel
+    if (!model && state.currentProvider === provider) model = state.currentModelId
     if (!model) return next()
 
     const now = Date.now()
-    markModelFailed(state.modelCooldowns, provider, model, now, det.code)
+    markModelFailed(state.modelCooldowns, provider, model, now, det.code, {
+      baseMs: cfg.failover.baseMs,
+      maxMs: cfg.failover.maxMs,
+      startAttempts4xx: cfg.failover.startAttempts4xx,
+    })
 
     // Fail over within the tier that owns the failed model.
     const failTier = findTierForModel(cfg, provider, model) ?? state.currentTier
@@ -405,9 +464,48 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     if (!state) return
     if (state.manualOverride.active) clearManualOverride(state)
     if (state.orchestration.active) {
+      if (capHit(state, getConfig())) {
+        vlog('🪄 orchestration cap hit — turn closed, orchestrator state released')
+      }
       exitOrchestration(state)
       vlog('🪄 orchestration turn ended — exited orchestrator state')
     }
+  })
+
+  // ── Orchestration hard caps (enforced, not just prompted) ──────────
+  // While an orchestration turn is active, the router counts each subagent
+  // delegation as one round and each failed worker result as one escalation.
+  // Once `capHit()` is true the subagent tool is denied outright and the
+  // system-prompt section switches to a "wrap up" notice.
+  ctx.on('tools/pre-execute', async (exec: ToolExecution, next): Promise<PreToolDecision> => {
+    if (exec.name !== SUBAGENT_TOOL) return next()
+    const agent = exec.agent
+    const state = agent ? stateFor(agent) : undefined
+    if (!state?.orchestration.active) return next()
+    const cfg = getConfig()
+    if (!cfg.enabled || cfg.routing.mode !== 'auto') return next()
+    if (capHit(state, cfg)) {
+      const { maxRounds, escalationThreshold } = cfg.orchestration
+      return {
+        kind: 'deny',
+        reason: `dsh-shift-router: orchestration hard cap reached (rounds ${state.orchestration.rounds}/${maxRounds}, escalations ${state.orchestration.escalations}/${escalationThreshold}) — stop delegating and wrap up the task now`,
+      }
+    }
+    state.orchestration.rounds += 1
+    vlog(`🪄 orchestration delegation ${state.orchestration.rounds}/${cfg.orchestration.maxRounds} (subagent call)`)
+    return next()
+  })
+
+  ctx.on('tools/result', (exec: ToolExecution, result: { isError: boolean }): undefined => {
+    if (exec.name !== SUBAGENT_TOOL) return undefined
+    const agent = exec.agent
+    const state = agent ? stateFor(agent) : undefined
+    if (!state?.orchestration.active) return undefined
+    if (result.isError) {
+      state.orchestration.escalations += 1
+      vlog(`🪄 orchestration escalation ${state.orchestration.escalations}/${getConfig().orchestration.escalationThreshold} (worker failure)`)
+    }
+    return undefined
   })
 
   // ── Telemetry + recovery from assistant messages ────────────────────
@@ -439,9 +537,14 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     state.totalOutputTokens += tokens.output
     state.lastActivityAt = now
 
-    const pricing = getModelPricing(getConfig().pricing, provider, model)
+    // Attribute the message to the tier that actually owns this model (a
+    // manual override or a same-provider switch can run a model that isn't
+    // the router's current tier).
+    const cfg = getConfig()
+    const tier = findTierForModel(cfg, provider, model) ?? state.currentTier
+    const pricing = getModelPricing(cfg.pricing, provider, model)
     const cost = estimateCost(pricing, tokens)
-    const tierUsage = state.tierUsage[state.currentTier]
+    const tierUsage = state.tierUsage[tier]
     tierUsage.calls += 1
     tierUsage.tokens.input += tokens.input
     tierUsage.tokens.output += tokens.output
@@ -449,19 +552,23 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     tierUsage.tokens.cacheWrite += tokens.cacheWrite
     tierUsage.cost += cost
     state.callLog.push({
-      tier: state.currentTier,
+      tier,
       provider,
       modelId: model,
       tokens,
       cost,
     })
+    // Bound the attribution log so very long sessions can't grow it (and the
+    // `/router stats` baseline walk) without limit.
+    const callLogCap = cfg.telemetry.callLogCap
+    if (state.callLog.length > callLogCap) state.callLog = state.callLog.slice(-callLogCap)
 
     // Throughput from wall-clock elapsed since the first chunk.
     const startTime = state.streamingStartTime
     if (startTime !== null && tokens.output > 0) {
       const elapsed = now - startTime
       const tps = tokensPerSecond(tokens.output, elapsed)
-      if (tps > 0) recordSpeed(state.recentSpeeds, tps)
+      if (tps > 0) recordSpeed(state.recentSpeeds, tps, cfg.failover.speedWindowSize)
     }
     state.streamingStartTime = null
     vlog(`${tokens.output} tokens (total ${state.totalOutputTokens.toLocaleString()})`)
@@ -485,7 +592,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       if (!agent) return ''
       const state = stateFor(agent)
       if (!state?.orchestration.active) return ''
-      return buildOrchestratorPrompt(getConfig(), cooldownPredicate(state.modelCooldowns, Date.now()))
+      const cfg = getConfig()
+      // Hard cap reached → replace the orchestrator instruction with a
+      // "wrap up now" notice (the subagent tool is denied at the same time).
+      if (capHit(state, cfg)) return buildCapNotice(cfg)
+      return buildOrchestratorPrompt(cfg, cooldownPredicate(state.modelCooldowns, Date.now()))
     },
   })
 
