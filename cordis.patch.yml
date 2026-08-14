@@ -1,0 +1,8 @@
+# dsh-shift-router — bundle patch layer
+#
+# Installed through `dsh plugin add ./dsh-shift-router`, this patch inserts the
+# plugin row into any profile that lists the bundle. For a source checkout the
+# absolute path form also works (see README).
+- insert:
+    - id: shift-router
+      name: dsh-shift-router
