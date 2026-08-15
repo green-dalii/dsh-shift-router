@@ -89,14 +89,15 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
    ```
 
 2. **哪些能热重载、哪些不能**（已对照当前实现实测）：
-   - ✅ **配置改动** —— 编辑 profile patch（或 home patch）会以新配置重新执行受影响插件的 `apply()`，无需重启。插件自身配置也通过 settings 命名空间热生效（`/router config set` 与 GUI 面板本来就不依赖 HMR）。
+   - ✅ **配置改动** —— 编辑 profile patch（或 home patch）会以新配置重新执行受影响插件的 `apply()`，无需重启。插件自身配置也通过 settings 命名空间热生效（`/router config set` 与 GUI 卡片本来就不依赖 HMR）。
    - ❌ **模块（代码）改动** —— 当前 HMR 的 accepted 依赖图只覆盖 harness 自身模块；修改外部插件的编译产物（如 `dist/index.js`）在现行版本中不会触发重载，因此代码改动仍需重启。这正是上游 TODO 所指的未经测试的 "reload lifecycle"，不是本插件的局限。
+   - ❌ **client 包元数据** —— `dsh.client` manifest 与 `exports["./client"]` 在进程内缓存，新增/修正后必须重启 profile；仅 `dist/client.js` 内容变化可走 client HMR 重建链。
 
    实践建议：用 `/router config` / 设置面板做配置（始终实时）；改模型就编辑 patch（开启 HMR 后实时）；只有改动插件代码时才需要重启。
 
 ## 配置
 
-配置位于 **`shift-router`** settings 命名空间：可在 GUI（Settings → shift-router）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
+配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「模型路由」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
@@ -127,6 +128,15 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 > 所有数字字段都经 schema 范围校验（如 `window.threshold` 必须在 [0,1]、`window.size` 必须是正整数）；非法值在加载 / `set` 时被拒绝，绝不静默接受。
 
+### GUI 配置卡片
+
+插件随包构建一个浏览器端（client）模块，在 GUI 的设置页注册一张 **「模型路由」** 卡片：
+
+- **位置**：设置 → 插件 → 插件配置（该页由官方 `dsh-client-ui-settings-plugins` 提供，卡片注册进 `settings.plugin.item` 槽位）。
+- **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举），支持分段保存、单字段恢复默认、覆盖标记；与 `/router config` 读写同一个 `shift-router` 设置命名空间，二者实时一致。
+- **边界**：`tiers.*.models` 与 `pricing` 这类复杂字段仍由 `/router config` 或 patch 行编辑（卡片保持精简）。
+- **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片；用 `dsh plugin --profile <name> add /path/to/dsh-shift-router` 安装后**重启 profile** 即生效（client 包元数据在进程内缓存）。
+
 ## 命令
 
 | 命令 | 作用 |
@@ -155,7 +165,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | 运行时故障转移 | `agent/request-error` waterfall（冷却 + `{kind:'retry'}` 同层重试） |
 | 裁判 LLM 调用 | `ctx.llm.stream()` —— 复用 harness 的适配器、凭证与 JSON 模式强制 |
 | 编排指令 | `ctx.systemPrompt.section()`，编排激活时按 Agent 渲染 |
-| 配置（GUI + 命令） | `dsh-settings` 命名空间 `shift-router`；`/router config` 是基于它的带编号编辑器（`settings.update` / `settings.mutate` 路径 op） |
+| 配置（GUI + 命令） | `dsh-settings` 命名空间 `shift-router`；`/router config` 是基于它的带编号编辑器（`settings.update` / `settings.mutate` 路径 op）；GUI 卡片是 client 模块，经 `settingsScope.bind` + `settings.plugin.item` 槽位渲染同一命名空间 |
 | 用量遥测 / 冷却恢复 | `session/event` 的 `assistant/message`（TokenUsage；一次成功回复会清除该模型的冷却） |
 | 命令 | `ctx.commands.register()` |
 | 分层链提示词变量 | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |
@@ -175,8 +185,8 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 ## 开发
 
 ```sh
-npm run build       # tsc → dist/
-npm test            # vitest（62 个测试：路由 / 故障转移 / 裁判解析 / 编排 / 配置 schema）
+npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
+npm test            # vitest（92 个测试：路由 / 故障转移 / 裁判解析 / 编排 / 配置 schema / client 表单模型）
 npm run typecheck
 ```
 
@@ -205,7 +215,13 @@ src/
 ├── tier.ts         # 分层模型解析 + 展示
 ├── orchestrate.ts  # 编排 prompt + 生命周期 + 上限
 ├── stats.ts        # 遥测快照（token / 吞吐 / 成本估算）
-└── commands.ts     # /router 与 /route-force
+├── commands.ts     # /router 与 /route-force
+└── client/         # 浏览器端（GUI 设置卡片）
+    ├── index.tsx       # client 入口：settings.plugin.item 槽位注册
+    ├── controller.ts   # 暂存表单 → settings 作用域写（每 section 一次）
+    ├── form-model.ts   # 纯逻辑：字段注册表 / 草稿解析 / 保存计划
+    ├── ShiftRouterCard.tsx  # 卡片组件（DSW 设计令牌）
+    └── locales.ts      # zh/en 字典
 ```
 
 纯逻辑（router / failover / 裁判解析 / 编排）在隔离环境中做单元测试；DSH 接线由 headless e2e 覆盖。

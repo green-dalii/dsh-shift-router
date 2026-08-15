@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-15
+
+### Added
+
+- **GUI configuration card** — the package now ships a browser-side (client)
+  module that registers a "Model router" card in the GUI's Settings → Plugins
+  → Plugin configuration section (the `settings.plugin.item` slot of the
+  official `dsh-client-ui-settings-plugins` section). The card:
+  - renders every **scalar** leaf of the `shift-router` settings namespace as
+    a form (booleans, numbers, enums), grouped by section, with staged saving,
+    per-field reset-to-default, override markers, and a read-only notice when
+    the deployment stores settings read-only;
+  - writes the same namespace `/router config` edits (per-section
+    `settings.mutate`-equivalent scope writes, revision-fenced), so the two
+    surfaces stay consistent in real time;
+  - is built by the extended `npm run build` pipeline (`tsc` host → `tsc`
+    client → `tsdown` client bundle, `dist/client.js`, CJS closure-factory per
+    the `packages/client/tsdown.client.ts` protocol) and discovered through
+    the `dsh.client` manifest — the plugin must be mounted by package name
+    (`dsh-shift-router`) for the card to be served.
+- Tests: 92 unit tests (added the client form model: path helpers, draft
+  parsing, section-patch save plan, and GUI/CLI field-registry parity against
+  `CONFIG_FIELDS`).
+
+### Changed
+
+- `package.json`: new `dsh.client` manifest, `exports["./client"]`, and a
+  two-program `build`/`typecheck` (`tsconfig.client.json` + `tsdown.config.ts`).
+
 ## [0.3.0] - 2026-08-15
 
 ### Added

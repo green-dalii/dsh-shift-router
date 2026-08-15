@@ -89,14 +89,15 @@ DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, b
    ```
 
 2. **What hot-reloads and what doesn't** (verified against the current implementation):
-   - ✅ **Configuration changes** — editing this profile patch (or the home patch) re-runs the affected plugin's `apply()` with the new config, no restart. The plugin's own config is also hot through the settings namespace (`/router config set` and the GUI panel apply live without HMR at all).
+   - ✅ **Configuration changes** — editing this profile patch (or the home patch) re-runs the affected plugin's `apply()` with the new config, no restart. The plugin's own config is also hot through the settings namespace (`/router config set` and the GUI card apply live without HMR at all).
    - ❌ **Module (code) changes** — the HMR accepted-dependency graph currently covers the harness's own modules only; editing an external plugin's compiled files (e.g. `dist/index.js`) does not trigger a reload in the current release, so code changes still require a restart. This is the untested "reload lifecycle" the upstream TODO refers to, not a limitation of this plugin.
+   - ❌ **Client package metadata** — the `dsh.client` manifest and `exports["./client"]` are cached in-process; adding/fixing them requires a profile restart (only `dist/client.js` content changes ride the client HMR rebuild chain).
 
    In practice: configure with `/router config` / the settings panel (always live), switch models by editing the patch (live once HMR is on), and restart only when you change plugin code.
 
 ## Configuration
 
-Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (Settings → shift-router), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
+Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Model router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -127,6 +128,15 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 
 > All numeric fields are range-validated by the schema (e.g. `window.threshold` must be in [0,1], `window.size` a positive integer); invalid values are rejected at load / on `set`, never silently accepted.
 
+### GUI configuration card
+
+The package ships a browser-side (client) module that registers a **"Model router"** card in the GUI settings page:
+
+- **Where**: Settings → Plugins → Plugin configuration (that page is provided by the official `dsh-client-ui-settings-plugins`; the card registers into the `settings.plugin.item` slot).
+- **What**: a form over every **scalar** leaf field (booleans, numbers, enums) with staged saving, per-field reset to default, and override markers. It reads and writes the same `shift-router` settings namespace as `/router config`, so the two surfaces stay consistent in real time.
+- **Boundary**: complex fields (`tiers.*.models`, `pricing`) stay with `/router config` and the profile patch (the card stays lean).
+- **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card. Install with `dsh plugin --profile <name> add /path/to/dsh-shift-router` and **restart the profile** (client package metadata is cached in-process).
+
 ## Commands
 
 | Command | Effect |
@@ -156,7 +166,7 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | Judge LLM calls | `ctx.llm.stream()` — reuses the harness's adapters, credentials, and JSON-mode enforcement |
 | Orchestrator instruction | `ctx.systemPrompt.section()` rendered per agent while orchestration is active |
 | Orchestration hard caps | `tools/pre-execute` denies the `subagent` tool at the cap; `tools/result` counts failed workers; the prompt section switches to a "wrap up" notice |
-| Config (GUI + commands) | `dsh-settings` namespace `shift-router`; `/router config` is a numbered editor over it (`settings.update` / `settings.mutate` path ops) |
+| Config (GUI + commands) | `dsh-settings` namespace `shift-router`; `/router config` is a numbered editor over it (`settings.update` / `settings.mutate` path ops); the GUI card is a client module binding the same namespace via `settingsScope` + the `settings.plugin.item` slot |
 | Usage telemetry / cooldown recovery | `session/event` `assistant/message` (TokenUsage; a successful message clears the model's cooldown) |
 | Commands | `ctx.commands.register()` |
 | Tier-chain prompt variables | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |
@@ -176,8 +186,8 @@ The caps are enforced by the router, not just described: every `subagent` tool c
 ## Development
 
 ```sh
-npm run build       # tsc → dist/
-npm test            # vitest (62 tests: routing / failover / judge parsing / orchestration / config schema)
+npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
+npm test            # vitest (92 tests: routing / failover / judge parsing / orchestration / config schema / client form model)
 npm run typecheck
 ```
 
@@ -206,7 +216,13 @@ src/
 ├── tier.ts         # tier model resolution + display
 ├── orchestrate.ts  # orchestrator prompt + lifecycle + caps
 ├── stats.ts        # telemetry snapshot (tokens / throughput / cost estimate)
-└── commands.ts     # /router and /route-force
+├── commands.ts     # /router and /route-force
+└── client/         # browser half (GUI settings card)
+    ├── index.tsx       # client entry: registers into the settings.plugin.item slot
+    ├── controller.ts   # staged form → settings-scope writes (one per section)
+    ├── form-model.ts   # pure logic: field registry / draft parsing / save plan
+    ├── ShiftRouterCard.tsx  # card component (DSW design tokens)
+    └── locales.ts      # zh/en dictionaries
 ```
 
 Pure logic (router / failover / judge parsing / orchestration) is unit-tested in isolation; DSH wiring is exercised by the headless e2e.
