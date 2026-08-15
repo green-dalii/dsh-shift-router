@@ -135,7 +135,22 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 - **位置**：设置 → 插件 → 插件配置（该页由官方 `dsh-client-ui-settings-plugins` 提供，卡片注册进 `settings.plugin.item` 槽位）。
 - **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举），支持分段保存、单字段恢复默认、覆盖标记；与 `/router config` 读写同一个 `shift-router` 设置命名空间，二者实时一致。
 - **边界**：`tiers.*.models` 与 `pricing` 这类复杂字段仍由 `/router config` 或 patch 行编辑（卡片保持精简）。
-- **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片；用 `dsh plugin --profile <name> add /path/to/dsh-shift-router` 安装后**重启 profile** 即生效（client 包元数据在进程内缓存）。
+- **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片。
+
+#### 上游限制：Web 设置白名单（0.1.0-rc.6）
+
+当前 Harness 的 Web API 代理（`@deepseek-ai/dsh-host-apiproxy`）**白名单**了浏览器可读写的 settings 命名空间（`WEB_SETTINGS_NAMESPACES`）；官方卡片（`shell`、`agent-loop`、`web-search-deepseek`）都在名单上，而第三方命名空间会被从浏览器的 `settings.describe` 响应中过滤掉——即使插件已在服务端注册。上游代码注释明确写着"把该决定移到 `settings.register()`（让插件自行暴露配置）是 deferred work"，且该名单不可通过配置扩展。
+
+因此要让卡片在 Web 端可见，需要把 `shift-router` 加入名单（一次性、幂等）：
+
+```sh
+npm run build
+dsh plugin --profile web add /path/to/dsh-shift-router
+node scripts/expose-gui-settings.mjs --profile web   # 把 shift-router 加入白名单
+# 重启 profile（client 包元数据与 apiproxy 都在进程内缓存）
+```
+
+`scripts/expose-gui-settings.mjs` 修改 profile 安装的 `dsh-host-apiproxy/lib/index.js`（幂等；升级/重装依赖后重跑即可）。
 
 ## 命令
 
@@ -186,7 +201,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（92 个测试：路由 / 故障转移 / 裁判解析 / 编排 / 配置 schema / client 表单模型）
+npm test            # vitest（95 个测试：路由 / 故障转移 / 裁判解析 / 编排 / 配置 schema / client 表单模型 / 白名单补丁逻辑）
 npm run typecheck
 ```
 

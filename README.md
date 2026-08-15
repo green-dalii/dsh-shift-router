@@ -135,7 +135,22 @@ The package ships a browser-side (client) module that registers a **"Model route
 - **Where**: Settings → Plugins → Plugin configuration (that page is provided by the official `dsh-client-ui-settings-plugins`; the card registers into the `settings.plugin.item` slot).
 - **What**: a form over every **scalar** leaf field (booleans, numbers, enums) with staged saving, per-field reset to default, and override markers. It reads and writes the same `shift-router` settings namespace as `/router config`, so the two surfaces stay consistent in real time.
 - **Boundary**: complex fields (`tiers.*.models`, `pricing`) stay with `/router config` and the profile patch (the card stays lean).
-- **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card. Install with `dsh plugin --profile <name> add /path/to/dsh-shift-router` and **restart the profile** (client package metadata is cached in-process).
+- **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
+
+#### Upstream limitation: the Web settings whitelist (0.1.0-rc.6)
+
+The current Harness Web API proxy (`@deepseek-ai/dsh-host-apiproxy`) **whitelists** which settings namespaces the browser may read and write (`WEB_SETTINGS_NAMESPACES`). The official cards (`shell`, `agent-loop`, `web-search-deepseek`) are on the list; a third-party namespace is filtered out of the browser's `settings.describe` response even though the plugin registered it server-side. The upstream comment explicitly calls moving that decision to `settings.register()` (letting a plugin self-expose) "deferred work", and the list is not configurable.
+
+So the card needs `shift-router` added to the whitelist (one-time, idempotent):
+
+```sh
+npm run build
+dsh plugin --profile web add /path/to/dsh-shift-router
+node scripts/expose-gui-settings.mjs --profile web   # adds shift-router to the whitelist
+# restart the profile (client package metadata and the apiproxy are cached in-process)
+```
+
+`scripts/expose-gui-settings.mjs` patches the profile's installed `dsh-host-apiproxy/lib/index.js` (idempotent; re-run after upgrading/reinstalling the dependency).
 
 ## Commands
 
@@ -187,7 +202,7 @@ The caps are enforced by the router, not just described: every `subagent` tool c
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (92 tests: routing / failover / judge parsing / orchestration / config schema / client form model)
+npm test            # vitest (95 tests: routing / failover / judge parsing / orchestration / config schema / client form model / whitelist patch)
 npm run typecheck
 ```
 

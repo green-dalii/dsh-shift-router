@@ -25,9 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the `packages/client/tsdown.client.ts` protocol) and discovered through
     the `dsh.client` manifest — the plugin must be mounted by package name
     (`dsh-shift-router`) for the card to be served.
-- Tests: 92 unit tests (added the client form model: path helpers, draft
-  parsing, section-patch save plan, and GUI/CLI field-registry parity against
-  `CONFIG_FIELDS`).
+  - **Upstream whitelist caveat (0.1.0-rc.6)**: the Web API proxy
+    (`@deepseek-ai/dsh-host-apiproxy`) only serves settings namespaces on its
+    hardcoded `WEB_SETTINGS_NAMESPACES` list to the browser; a third-party
+    namespace is filtered out of `settings.describe` even when registered.
+    `scripts/expose-gui-settings.mjs` adds `shift-router` to that list in the
+    profile's installed copy (idempotent) — run it once per profile and
+    restart; the README documents the upstream "deferred work" comment.
+- Tests: 95 unit tests (added the client form model: path helpers, draft
+  parsing, section-patch save plan, GUI/CLI field-registry parity against
+  `CONFIG_FIELDS`, and the whitelist-patch logic).
 
 ### Changed
 
