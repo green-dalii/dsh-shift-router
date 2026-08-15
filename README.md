@@ -136,8 +136,11 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
 | `/router verbose` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
-| `/router config` | Show effective config + available providers/models + usage |
-| `/router config set <path> <value>` | Set one field (persisted), e.g. `set routing.judgeTimeout 8000`, `set tiers.fast.models [...]` |
+| `/router config` | Interactive editor: numbered field list with current values + available providers + usage |
+| `/router config get <N\|path>` | Show one field's current value, e.g. `get 4` or `get routing.judgeTimeout` |
+| `/router config set <N\|path> <value>` | Set one field (persisted), e.g. `set 4 8000`, `set tiers.fast.models [...]` (JSON values auto-parsed) |
+| `/router config unset <N\|path>` | Clear a user override — the field reverts to its composition default |
+| `/router config diff` | List the overrides the user layer currently holds |
 | `/router config set-fast <provider/model>` | Replace the Fast tier chain with one model |
 | `/router config set-smart <provider/model>` | Replace the Smart tier chain with one model |
 | `/router config reset` | Restore the composition default |
@@ -153,7 +156,7 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | Judge LLM calls | `ctx.llm.stream()` — reuses the harness's adapters, credentials, and JSON-mode enforcement |
 | Orchestrator instruction | `ctx.systemPrompt.section()` rendered per agent while orchestration is active |
 | Orchestration hard caps | `tools/pre-execute` denies the `subagent` tool at the cap; `tools/result` counts failed workers; the prompt section switches to a "wrap up" notice |
-| Config (GUI + commands) | `dsh-settings` namespace `shift-router` (same store for both surfaces) |
+| Config (GUI + commands) | `dsh-settings` namespace `shift-router`; `/router config` is a numbered editor over it (`settings.update` / `settings.mutate` path ops) |
 | Usage telemetry / cooldown recovery | `session/event` `assistant/message` (TokenUsage; a successful message clears the model's cooldown) |
 | Commands | `ctx.commands.register()` |
 | Tier-chain prompt variables | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |

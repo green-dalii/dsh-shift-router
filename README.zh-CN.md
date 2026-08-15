@@ -136,8 +136,11 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `/router on` / `/router off` | 启用 / 停用（会话级） |
 | `/router verbose` | 详细日志开关 |
 | `/router orchestrate auto\|off` | 编排模式 |
-| `/router config` | 显示生效配置 + 可用 providers/models + 用法 |
-| `/router config set <path> <value>` | 设置单个字段（持久化），如 `set routing.judgeTimeout 8000`、`set tiers.fast.models [...]` |
+| `/router config` | 交互式编辑器：带编号的字段列表（含当前值）+ 可用 providers + 用法 |
+| `/router config get <N\|path>` | 显示单个字段当前值，如 `get 4` 或 `get routing.judgeTimeout` |
+| `/router config set <N\|path> <value>` | 设置单个字段（持久化），如 `set 4 8000`、`set tiers.fast.models [...]`（JSON 值自动解析） |
+| `/router config unset <N\|path>` | 清除用户覆盖——字段回退到组合默认值 |
+| `/router config diff` | 列出用户层当前持有的覆盖项 |
 | `/router config set-fast <provider/model>` | 用单个模型替换 Fast 层模型链 |
 | `/router config set-smart <provider/model>` | 用单个模型替换 Smart 层模型链 |
 | `/router config reset` | 恢复组合默认值 |
@@ -152,7 +155,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | 运行时故障转移 | `agent/request-error` waterfall（冷却 + `{kind:'retry'}` 同层重试） |
 | 裁判 LLM 调用 | `ctx.llm.stream()` —— 复用 harness 的适配器、凭证与 JSON 模式强制 |
 | 编排指令 | `ctx.systemPrompt.section()`，编排激活时按 Agent 渲染 |
-| 配置（GUI + 命令） | `dsh-settings` 命名空间 `shift-router`（两个入口共用同一存储） |
+| 配置（GUI + 命令） | `dsh-settings` 命名空间 `shift-router`；`/router config` 是基于它的带编号编辑器（`settings.update` / `settings.mutate` 路径 op） |
 | 用量遥测 / 冷却恢复 | `session/event` 的 `assistant/message`（TokenUsage；一次成功回复会清除该模型的冷却） |
 | 命令 | `ctx.commands.register()` |
 | 分层链提示词变量 | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |

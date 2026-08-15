@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-15
+
+### Added
+
+- **Interactive `/router config` editor** — the command now renders a numbered
+  field list with current values (one row per editable leaf, type-annotated),
+  plus four editing subcommands:
+  - `get <N|path>` — show one field's current value.
+  - `set <N|path> <value>` — set one field by index or dotted path (JSON
+    values auto-parsed); indexes are stable (registry order).
+  - `unset <N|path>` — clear a single user override via the official
+    `settings.mutate` path-op write (`{op:'unset'}`), so the field reverts to
+    its composition default without touching the rest of the user section.
+  - `diff` — list the raw user-section overrides the settings layer currently
+    holds, each with its effective value.
+- Tests: 72 unit tests (added `/router config` editor helpers: field registry
+  integrity, index/path resolution, path reading, value formatting, leaf
+  flattening).
+
 ## [0.2.0] - 2026-08-15
 
 ### Changed

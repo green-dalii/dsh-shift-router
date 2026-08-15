@@ -14,6 +14,7 @@
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
+import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { ShiftRouterConfig, RouterState, Tier } from './types.js'
 import { TIERS } from './types.js'
 import {
@@ -51,10 +52,117 @@ export interface CommandDeps {
    * Resolves null on success, or a human-readable failure reason.
    */
   resetSettings(): Promise<string | null>
+  /**
+   * Apply path-addressed edits (set/unset) to the user section — the official
+   * write path for clearing a single override. Resolves null on success or a
+   * human-readable failure reason.
+   */
+  mutateSettings(ops: readonly SettingsPathOp[]): Promise<string | null>
+  /**
+   * The raw user section of the shift-router namespace (the overrides the
+   * user actually set), or undefined while settings are unavailable or the
+   * user has never written anything.
+   */
+  userSettings(): Record<string, unknown> | undefined
   /** Registered provider routes (ctx.llm.listProviders ids). */
   listProviders(): string[]
   /** Model ids a provider adapter advertises. */
   listModels(provider: string): Promise<string[]>
+}
+
+// ─── Editable-config field registry ────────────────────────────────
+// The single source of truth for `/router config`'s numbered editor: every
+// leaf the user can change, with its type (drives the value hint) and an
+// optional enum/unit annotation.
+
+export interface ConfigField {
+  /** Dotted path inside the shift-router config. */
+  path: string
+  type: 'boolean' | 'number' | 'enum' | 'modelList' | 'pricing'
+  /** Allowed values for `enum` fields. */
+  enum?: readonly string[]
+  /** Display hint, e.g. "ms", "[0,1]". */
+  hint?: string
+}
+
+export const CONFIG_FIELDS: ConfigField[] = [
+  { path: 'enabled', type: 'boolean' },
+  { path: 'routing.mode', type: 'enum', enum: ['auto', 'manual', 'off'] },
+  { path: 'routing.judgeTimeout', type: 'number', hint: 'ms' },
+  { path: 'routing.judgeMaxTokens', type: 'number' },
+  { path: 'routing.judgePromptCap', type: 'number' },
+  { path: 'routing.window.size', type: 'number' },
+  { path: 'routing.window.threshold', type: 'number', hint: '[0,1]' },
+  { path: 'routing.window.minConfidence', type: 'number', hint: '[0,1]' },
+  { path: 'routing.cacheAware.enabled', type: 'boolean' },
+  { path: 'routing.cacheAware.sameFamilyThreshold', type: 'number', hint: '[0,1]' },
+  { path: 'routing.cacheAware.idleBoundaryMs', type: 'number', hint: 'ms' },
+  { path: 'orchestration.mode', type: 'enum', enum: ['auto', 'off'] },
+  { path: 'orchestration.maxRounds', type: 'number' },
+  { path: 'orchestration.escalationThreshold', type: 'number' },
+  { path: 'orchestration.requireSmartModel', type: 'boolean' },
+  { path: 'failover.baseMs', type: 'number', hint: 'ms' },
+  { path: 'failover.maxMs', type: 'number', hint: 'ms' },
+  { path: 'failover.startAttempts4xx', type: 'number' },
+  { path: 'failover.speedWindowSize', type: 'number' },
+  { path: 'telemetry.callLogCap', type: 'number' },
+  { path: 'ux.routerLogVerbose', type: 'boolean' },
+  { path: 'tiers.fast.models', type: 'modelList' },
+  { path: 'tiers.smart.models', type: 'modelList' },
+  { path: 'pricing', type: 'pricing' },
+]
+
+/** Read a dotted path from an object (undefined when absent). */
+export function readPath(obj: unknown, path: string): unknown {
+  let current: unknown = obj
+  for (const segment of path.split('.')) {
+    if (current === null || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[segment]
+  }
+  return current
+}
+
+/** Human-readable display of one field's current value. */
+export function formatFieldValue(value: unknown, type: ConfigField['type']): string {
+  if (value === undefined || value === null) return '(unset)'
+  if (type === 'modelList') {
+    const list = Array.isArray(value) ? value as { provider?: string; model?: string }[] : []
+    if (list.length === 0) return '(none)'
+    return list.map((m) => `${m.provider}/${m.model}`).join(', ')
+  }
+  if (Array.isArray(value)) return JSON.stringify(value)
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+/**
+ * Resolve a user-supplied field reference: a 1-based index into
+ * {@link CONFIG_FIELDS} or an exact dotted path. Null when unmatched.
+ */
+export function resolveFieldSpec(input: string): ConfigField | null {
+  const trimmed = input.trim()
+  if (/^\d+$/.test(trimmed)) {
+    const index = Number(trimmed)
+    return CONFIG_FIELDS[index - 1] ?? null
+  }
+  return CONFIG_FIELDS.find((field) => field.path === trimmed) ?? null
+}
+
+/** Flatten a nested object to leaf `path → value` pairs (for `diff`). */
+export function flattenLeaves(
+  obj: Record<string, unknown>,
+  prefix = '',
+): { path: string; value: unknown }[] {
+  const out: { path: string; value: unknown }[] = []
+  for (const [key, value] of Object.entries(obj)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      out.push(...flattenLeaves(value as Record<string, unknown>, path))
+    } else {
+      out.push({ path, value })
+    }
+  }
+  return out
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -171,24 +279,22 @@ function pathPatch(path: string, rawValue: string): { patch: Record<string, unkn
   return { patch }
 }
 
-/** Human-readable config summary + available providers/models. */
+/** Human-readable config summary: numbered field list + providers + usage. */
 async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Promise<string> {
   const lines: string[] = [
-    'dsh-shift-router — effective configuration (editable here or in Settings → shift-router):',
-    `  enabled: ${config.enabled}`,
-    `  routing.mode: ${config.routing.mode} (auto = judge+routing; manual = overrides only; off = passive)`,
-    `  orchestration.mode: ${config.orchestration.mode} (maxRounds=${config.orchestration.maxRounds}, escalation=${config.orchestration.escalationThreshold}, requireSmartModel=${config.orchestration.requireSmartModel})`,
-    `  routing.judge: timeout=${config.routing.judgeTimeout}ms maxTokens=${config.routing.judgeMaxTokens} promptCap=${config.routing.judgePromptCap}`,
-    `  routing.window: size=${config.routing.window.size} threshold=${config.routing.window.threshold} minConfidence=${config.routing.window.minConfidence ?? 0.5}`,
-    `  cacheAware: ${config.routing.cacheAware?.enabled ? 'on' : 'off'} (sameFamilyThreshold=${config.routing.cacheAware?.sameFamilyThreshold}, idleBoundaryMs=${config.routing.cacheAware?.idleBoundaryMs})`,
-    `  failover: baseMs=${config.failover.baseMs} maxMs=${config.failover.maxMs} startAttempts4xx=${config.failover.startAttempts4xx} speedWindow=${config.failover.speedWindowSize}`,
-    `  telemetry.callLogCap: ${config.telemetry.callLogCap}`,
-    `  ux: verbose=${config.ux.routerLogVerbose}`,
-    `  tiers.fast: ${config.tiers.fast.models.map((m) => `${m.provider}/${m.model}`).join(', ') || '(none)'}`,
-    `  tiers.smart: ${config.tiers.smart.models.map((m) => `${m.provider}/${m.model}`).join(', ') || '(none)'}`,
-    ``,
-    'Available providers:',
+    'dsh-shift-router — effective configuration (editor: /router config get|set|unset <N|path>):',
   ]
+  for (let i = 0; i < CONFIG_FIELDS.length; i++) {
+    const field = CONFIG_FIELDS[i]!
+    const value = formatFieldValue(readPath(config, field.path), field.type)
+    const annotation = field.enum
+      ? ` (${field.enum.join('|')})`
+      : field.hint
+        ? ` (${field.hint})`
+        : ''
+    lines.push(`  ${String(i + 1).padStart(2)}. ${field.path.padEnd(36)} = ${value}${annotation}`)
+  }
+  lines.push('', 'Available providers:')
   const providers = deps.listProviders()
   if (providers.length === 0) {
     lines.push('  (none — no LLM adapter registered)')
@@ -198,14 +304,17 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
     lines.push(`  ${provider}: ${models.length > 0 ? models.slice(0, 12).join(', ') + (models.length > 12 ? ' …' : '') : '(no advertised model list)'}`)
   }
   lines.push(
-    ``,
+    '',
     'Usage:',
-    '  /router config set <path> <value>      — set one field, e.g. `set routing.judgeTimeout 8000`',
-    '                                          or `set tiers.fast.models [{"provider":"opencode-go","model":"deepseek-v4-flash","priority":1}]`',
-    '  /router config set-fast <provider/model>   — set the Fast tier model (replaces the chain)',
-    '  /router config set-smart <provider/model>  — set the Smart tier model (replaces the chain)',
-    '  /router config reset                   — restore the composition default (cordis.yml)',
-    'Values persist to the shift-router settings namespace (GUI panel edits the same store).',
+    '  /router config get <N|path>      — show one field, e.g. `get 4` or `get routing.judgeTimeout`',
+    '  /router config set <N|path> <v>  — set one field (JSON values auto-parsed), e.g. `set 4 8000`,',
+    '                                     `set tiers.fast.models [{"provider":"opencode-go","model":"deepseek-v4-flash","priority":1}]`',
+    '  /router config unset <N|path>    — clear a user override (revert to composition default)',
+    '  /router config diff              — show the overrides the user layer currently holds',
+    '  /router config set-fast <provider/model> — replace the Fast tier chain with one model',
+    '  /router config set-smart <provider/model> — replace the Smart tier chain with one model',
+    '  /router config reset             — restore the composition default (cordis.yml)',
+    'Values persist to the shift-router settings namespace (the same store the GUI settings panel will bind).',
   )
   return lines.join('\n')
 }
@@ -289,6 +398,46 @@ async function handleConfig(
     return { kind: 'success', text: await configSummary(config, deps) }
   }
 
+  if (sub === 'get') {
+    const field = resolveFieldSpec(tokens[2] ?? '')
+    if (!field) {
+      return { kind: 'error', text: 'Usage: /router config get <N|path> — e.g. `get 4` or `get routing.judgeTimeout`; use `/router config` for the numbered list' }
+    }
+    const value = formatFieldValue(readPath(config, field.path), field.type)
+    return { kind: 'success', text: `dsh-shift-router: ${field.path} = ${value}` }
+  }
+
+  if (sub === 'unset') {
+    const field = resolveFieldSpec(tokens[2] ?? '')
+    if (!field) {
+      return { kind: 'error', text: 'Usage: /router config unset <N|path> — e.g. `unset 4` clears the user override so the composition default applies' }
+    }
+    const error = await deps.mutateSettings([{ op: 'unset', path: field.path.split('.') }])
+    if (error) return { kind: 'error', text: `dsh-shift-router: unset failed — ${error}` }
+    deps.onConfigChanged()
+    return { kind: 'success', text: `dsh-shift-router: cleared user override for ${field.path} — reverts to the composition default` }
+  }
+
+  if (sub === 'diff') {
+    const user = deps.userSettings()
+    if (user === undefined) {
+      return { kind: 'success', text: 'dsh-shift-router: no user overrides (settings service unavailable or the user layer is empty)' }
+    }
+    const leaves = flattenLeaves(user)
+    if (leaves.length === 0) {
+      return { kind: 'success', text: 'dsh-shift-router: no user overrides — everything uses the composition defaults' }
+    }
+    const lines = leaves.map(({ path, value }) => {
+      const field = CONFIG_FIELDS.find((f) => f.path === path)
+      const effective = formatFieldValue(readPath(config, path), field?.type ?? 'pricing')
+      return `  ${path.padEnd(36)} = ${JSON.stringify(value)}  (effective: ${effective})`
+    })
+    return {
+      kind: 'success',
+      text: ['dsh-shift-router — user overrides (unset <N|path> to revert):', ...lines].join('\n'),
+    }
+  }
+
   if (sub === 'reset') {
     const error = await deps.resetSettings()
     if (error) return { kind: 'error', text: `dsh-shift-router: reset failed — ${error}` }
@@ -309,22 +458,26 @@ async function handleConfig(
   }
 
   if (sub === 'set') {
-    const path = tokens[2] ?? ''
-    const rawValue = tokens.slice(3).join(' ')
-    if (!path || !rawValue) {
-      return { kind: 'error', text: 'Usage: /router config set <path> <value> — e.g. `set routing.judgeTimeout 8000` or `set tiers.fast.models [...]`' }
+    const spec = tokens[2] ?? ''
+    const field = resolveFieldSpec(spec)
+    if (!field) {
+      return { kind: 'error', text: 'Usage: /router config set <N|path> <value> — e.g. `set 4 8000` or `set tiers.fast.models [...]`' }
     }
-    const built = pathPatch(path, rawValue)
+    const rawValue = tokens.slice(3).join(' ')
+    if (!rawValue) {
+      return { kind: 'error', text: `Usage: /router config set ${field.path} <value>` }
+    }
+    const built = pathPatch(field.path, rawValue)
     if ('error' in built) return { kind: 'error', text: `dsh-shift-router: ${built.error}` }
     const error = await deps.updateSettings(built.patch)
     if (error) return { kind: 'error', text: `dsh-shift-router: settings update failed — ${error}` }
     deps.onConfigChanged()
-    return { kind: 'success', text: `dsh-shift-router: set ${path} = ${rawValue} (persisted)` }
+    return { kind: 'success', text: `dsh-shift-router: set ${field.path} = ${rawValue} (persisted)` }
   }
 
   return {
     kind: 'error',
-    text: 'Usage: /router config [show] | set <path> <value> | set-fast <provider/model> | set-smart <provider/model> | reset',
+    text: 'Usage: /router config [show] | get <N|path> | set <N|path> <value> | unset <N|path> | diff | set-fast <provider/model> | set-smart <provider/model> | reset',
   }
 }
 

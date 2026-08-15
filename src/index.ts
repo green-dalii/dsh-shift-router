@@ -26,6 +26,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision, RequestErrorAction } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type SettingsProvider from '@deepseek-ai/dsh-settings'
+import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 // Type-only: pull in the Context augmentations (`ctx.tools`, `ctx.systemPrompt`)
@@ -119,6 +121,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   let configSource: () => ShiftRouterConfig = () => config
   let effectiveConfig: ShiftRouterConfig = structuredClone(config)
   let settingsScope: SettingsScope<ShiftRouterConfig> | undefined
+  let settingsProvider: SettingsProvider | undefined
   // Model availability memo: "does a registered adapter resolve this
   // provider/model?" — checked once per config and cached. Declared before
   // the settings block because refreshConfig() clears it.
@@ -131,6 +134,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     modelCache.clear()
   }
   ctx.inject(['settings'], (sctx) => {
+    settingsProvider = sctx.settings
     const scope = sctx.settings.register(ROUTER_SETTINGS_NAMESPACE, Config, { base: config })
     settingsScope = scope
     configSource = () => scope.get()
@@ -187,6 +191,39 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       ctx.logger.warn('[shift-router] settings reset failed: %o', error)
       return detail
     }
+  }
+
+  /**
+   * Apply path-addressed edits (set/unset) to the user section — the official
+   * write path for clearing a single override (`unset`) that a merge-only
+   * patch cannot express. Returns null on success or a failure reason.
+   */
+  async function mutateSettings(ops: readonly SettingsPathOp[]): Promise<string | null> {
+    if (settingsProvider === undefined) {
+      return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
+    }
+    try {
+      await settingsProvider.mutate(ROUTER_SETTINGS_NAMESPACE, ops)
+      return null
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      ctx.logger.warn('[shift-router] settings mutate failed: %o', error)
+      return detail
+    }
+  }
+
+  /**
+   * The raw user section of the shift-router namespace (the overrides the
+   * user actually set, as opposed to the resolved value). Used by
+   * `/router config diff`. Undefined while the settings service is absent or
+   * the user has never written anything.
+   */
+  function userSettings(): Record<string, unknown> | undefined {
+    if (settingsProvider === undefined) return undefined
+    const descriptor = settingsProvider.describe({}).find((d) => d.ns === ROUTER_SETTINGS_NAMESPACE)
+    if (descriptor?.user === undefined || descriptor.user === null) return undefined
+    if (typeof descriptor.user !== 'object' || Array.isArray(descriptor.user)) return undefined
+    return descriptor.user as Record<string, unknown>
   }
 
   // ── Per-agent router state ───────────────────────────────────────────
@@ -632,6 +669,8 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     subagentAvailable: () => ctx.tools.get(SUBAGENT_TOOL) !== undefined,
     updateSettings,
     resetSettings,
+    mutateSettings,
+    userSettings,
     listProviders: () => ctx.llm.listProviders().map((p) => p.id),
     listModels: async (provider) => {
       try {
