@@ -1,6 +1,6 @@
 {
   "name": "dsh-shift-router",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Two-tier model router for DeepSeek Harness — automatic execution/judgment routing with LLM Judge, multi-model fallback chains, and exponential-backoff runtime failover. A DSH adaptation of pi-shift-router.",
   "keywords": [
     "dsh-plugin",

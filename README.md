@@ -97,7 +97,7 @@ DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, b
 
 ## Configuration
 
-Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Model router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
+Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Shift-Router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -130,11 +130,11 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 
 ### GUI configuration card
 
-The package ships a browser-side (client) module that registers a **"Model router"** card in the GUI settings page:
+The package ships a browser-side (client) module that registers a **"Shift-Router"** card in the GUI settings page:
 
 - **Where**: Settings → Plugins → Plugin configuration (that page is provided by the official `dsh-client-ui-settings-plugins`; the card registers into the `settings.plugin.item` slot).
-- **What**: a form over every **scalar** leaf field (booleans, numbers, enums) with staged saving, per-field reset to default, and override markers. It reads and writes the same `shift-router` settings namespace as `/router config`, so the two surfaces stay consistent in real time.
-- **Boundary**: complex fields (`tiers.*.models`, `pricing`) stay with `/router config` and the profile patch (the card stays lean).
+- **What**: a form over every scalar leaf field (booleans, numbers, enums) **plus the two tier model chains**, grouped into seven sections (General / Models / Routing / Orchestration / Failover / Telemetry / Logs & UX) with sub-groups for the routing section (Judge / Decision window / Cache-aware). Scalar fields use the compact settings-row pattern — label + hint on the left, control right-aligned on the same line — so each field is one tight row instead of three stacked lines. Controls use the host-plane design tokens: toggle switches (contrast-safe in light and dark themes), a styled select for enums, unit suffixes inside numeric inputs (`ms`, `tokens`, `0–1`, …), and an ordered row editor for model chains — the row order is the in-tier fallback order, so the first available model wins and the rest are its fallbacks. The provider/model dropdowns are auto-loaded from **DSH's runtime model catalog** (`llm.models` — the same catalog the DSH settings surface reads): only providers with a currently advertised model list appear, no dormant-directory noise, and nothing is hardcoded, so the card works with any deployment's configured models. A "Custom…" escape covers values outside the catalog. Staged saving, per-field reset to default, and override markers work exactly like the official cards.
+- **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the tier model chains are editable in the card.
 - **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
 
 #### Upstream limitation: the Web settings whitelist (0.1.0-rc.6)

@@ -15,19 +15,26 @@ import {
   CARD_FIELDS,
   buildPlan,
   deepEqual,
+  formatRows,
   formatValue,
   hasPath,
-  parseDraft,
+  parseStaged,
   readPath,
   type CardField,
+  type ModelRow,
   type SectionPatch,
   type StagedDraft,
 } from './form-model.js'
+import { EMPTY_CATALOG, loadModelCatalog, type LlmCatalogApi, type ModelCatalog } from './model-catalog.js'
 
-/** One field's rendered state: the control's text and its override marker. */
+/** One field's rendered state: the control's text or rows and its override marker. */
 export interface FieldState {
   path: string
+  kind: 'scalar' | 'models'
+  /** Scalar controls: the draft text. */
   text: string
+  /** Model-chain controls: the draft rows. */
+  rows: ModelRow[]
   /** Whether a save of the current draft would leave an override. */
   overridden: boolean
   /** Whether the current draft is not a value the field accepts. */
@@ -43,6 +50,8 @@ export interface ShiftRouterCardState {
   saving: boolean
   failed: boolean
   fields: FieldState[]
+  /** The deployment's configured model catalog (dropdown sources). */
+  catalog: ModelCatalog
 }
 
 /** The face the slot registration injects into the card component. */
@@ -50,7 +59,10 @@ export interface ShiftRouterCardFace {
   hooks: {
     shiftRouterCard: SnapshotStore<ShiftRouterCardState>
   }
+  /** Stage one scalar control's text. */
   edit(field: string, text: string): void
+  /** Stage a model chain's rows. */
+  editRows(field: string, rows: ModelRow[]): void
   resetField(field: string): void
   save(): Promise<void>
   discard(): void
@@ -61,16 +73,28 @@ export class ShiftRouterCardController {
   private readonly scope: SettingsScope<unknown>
   private readonly fields: readonly CardField[]
   private readonly staged = new Map<string, StagedDraft>()
+  private catalog: ModelCatalog = EMPTY_CATALOG
   private saving = false
   private failed = false
   private readonly listeners = new Set<() => void>()
   readonly store: SnapshotStore<ShiftRouterCardState>
 
-  constructor(scope: SettingsScope<unknown>, fields: readonly CardField[] = CARD_FIELDS) {
+  constructor(
+    scope: SettingsScope<unknown>,
+    api?: LlmCatalogApi,
+    fields: readonly CardField[] = CARD_FIELDS,
+  ) {
     this.scope = scope
     this.fields = fields
     this.store = createSnapshotStore(this.projection())
     this.scope.subscribe(() => this.publish())
+    if (api !== undefined) void this.refreshCatalog(api)
+  }
+
+  /** Load the configured-model catalog in the background and republish. */
+  private async refreshCatalog(api: LlmCatalogApi): Promise<void> {
+    this.catalog = await loadModelCatalog(api)
+    this.publish()
   }
 
   private snapshot(): SettingsScopeSnapshot<unknown> {
@@ -88,21 +112,51 @@ export class ShiftRouterCardController {
       saving: this.saving,
       failed: this.failed,
       fields: this.fields.map((field) => this.fieldState(field)),
+      catalog: this.catalog,
     }
   }
 
   private fieldState(field: CardField): FieldState {
     const snap = this.snapshot()
     const staged = this.staged.get(field.path)
-    const effective = readPath(snap.value, field.path)
     const stored = hasPath(snap.user, field.path)
-    if (staged === undefined) {
-      return { path: field.path, text: formatValue(effective, field), overridden: stored, invalid: false }
+    if (field.type === 'models') {
+      if (staged === undefined) {
+        return {
+          path: field.path,
+          kind: 'models',
+          text: '',
+          rows: formatRows(readPath(snap.value, field.path)),
+          overridden: stored,
+          invalid: false,
+        }
+      }
+      const parsed = parseStaged(field, staged)
+      return {
+        path: field.path,
+        kind: 'models',
+        text: '',
+        rows: staged.rows ?? [],
+        overridden: parsed?.kind === 'set',
+        invalid: parsed === undefined,
+      }
     }
-    const parsed = staged.clear ? { kind: 'clear' as const } : parseDraft(staged.text, field)
+    if (staged === undefined) {
+      return {
+        path: field.path,
+        kind: 'scalar',
+        text: formatValue(readPath(snap.value, field.path), field),
+        rows: [],
+        overridden: stored,
+        invalid: false,
+      }
+    }
+    const parsed = parseStaged(field, staged)
     return {
       path: field.path,
-      text: staged.text,
+      kind: 'scalar',
+      text: staged.text ?? '',
+      rows: [],
       overridden: !staged.clear && parsed?.kind === 'set',
       invalid: parsed === undefined,
     }
@@ -119,12 +173,22 @@ export class ShiftRouterCardController {
     this.publish()
   }
 
+  /** Stage a model chain's rows. */
+  editRows(field: string, rows: ModelRow[]): void {
+    this.staged.set(field, { rows, clear: false })
+    this.publish()
+  }
+
   /** Stage a clear: the field re-inherits the composition layer. */
   resetField(fieldPath: string): void {
     const field = this.fields.find((candidate) => candidate.path === fieldPath)
     if (field === undefined) return
     const base = readPath(this.snapshot().base, field.path)
-    this.staged.set(fieldPath, { text: formatValue(base, field), clear: true })
+    if (field.type === 'models') {
+      this.staged.set(fieldPath, { rows: formatRows(base), clear: true })
+    } else {
+      this.staged.set(fieldPath, { text: formatValue(base, field), clear: true })
+    }
     this.publish()
   }
 
@@ -175,6 +239,7 @@ export class ShiftRouterCardController {
     return {
       hooks: { shiftRouterCard: this.store },
       edit: (field, text) => this.edit(field, text),
+      editRows: (field, rows) => this.editRows(field, rows),
       resetField: (field) => this.resetField(field),
       save: () => this.save(),
       discard: () => this.discard(),

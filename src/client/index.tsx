@@ -19,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { ShiftRouterCardController } from './controller.js'
+import type { LlmCatalogApi } from './model-catalog.js'
 import { ShiftRouterCard } from './ShiftRouterCard.js'
 import { en, zh, type ShiftRouterCardKey } from './locales.js'
 
@@ -49,7 +50,14 @@ export const inject = ['slots', 'locale', 'settingsScope']
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'shift-router: card dictionaries')
-  const controller = new ShiftRouterCardController(ctx.settingsScope.bind({ namespace: NS }))
+  // `connection` (dsh-client-connection) provides the api the model dropdowns
+  // read the deployment's configured models from; it may be absent in exotic
+  // shells, in which case the card falls back to free-text model rows.
+  const connection = ctx.get('connection') as { api?: unknown } | undefined
+  const controller = new ShiftRouterCardController(
+    ctx.settingsScope.bind({ namespace: NS }),
+    connection?.api as LlmCatalogApi | undefined,
+  )
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
     name: 'settings.plugin.item',
     id: 'shift-router',

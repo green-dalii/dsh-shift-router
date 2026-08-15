@@ -97,7 +97,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 ## 配置
 
-配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「模型路由」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
+配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「Shift-Router」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
@@ -130,11 +130,11 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 ### GUI 配置卡片
 
-插件随包构建一个浏览器端（client）模块，在 GUI 的设置页注册一张 **「模型路由」** 卡片：
+插件随包构建一个浏览器端（client）模块，在 GUI 的设置页注册一张 **「Shift-Router」** 卡片：
 
 - **位置**：设置 → 插件 → 插件配置（该页由官方 `dsh-client-ui-settings-plugins` 提供，卡片注册进 `settings.plugin.item` 槽位）。
-- **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举），支持分段保存、单字段恢复默认、覆盖标记；与 `/router config` 读写同一个 `shift-router` 设置命名空间，二者实时一致。
-- **边界**：`tiers.*.models` 与 `pricing` 这类复杂字段仍由 `/router config` 或 patch 行编辑（卡片保持精简）。
+- **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举）**以及两层模型链**，分七个分组（通用 / 模型 / 路由 / 编排 / 故障转移 / 遥测 / 日志与体验），路由分组下再分子组（裁判 / 决策窗口 / 缓存感知）。标量字段采用紧凑的「设置行」版式——左侧标签 + 说明，右侧同行右对齐控件——每个字段只占一行，不再上下堆叠三层。控件全部使用宿主平面设计令牌：开关用拨动开关（浅色/深色主题下对比度都清晰）、枚举用带箭头的下拉、数字输入框内嵌单位后缀（`ms`、`tokens`、`0–1` 等）、模型链用有序行编辑器——**行的顺序就是层内回退顺序**：优先命中排在最前的可用模型，其余作为后备。**provider/model 下拉自动载入 DSH 运行时模型目录**（`llm.models`，与设置页模型目录同源）：只列出当前有模型清单的 provider，无休眠目录噪音，且插件不硬编码任何模型，跟随任何部署的 DSH 实际配置。另有「自定义…」入口填写目录之外的取值。分段保存、单字段恢复默认与覆盖标记与官方卡片完全一致。
+- **边界**：仅 `pricing`（可选的 USD 计价表）仍由 `/router config` 或 patch 行编辑；两层模型链都可以在卡片中直接编辑。
 - **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片。
 
 #### 上游限制：Web 设置白名单（0.1.0-rc.6）

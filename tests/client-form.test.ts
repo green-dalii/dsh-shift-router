@@ -4,7 +4,8 @@
  * The GUI card's staged-edit → section-patch logic is pure and runs in both
  * the browser bundle and this test suite. The cross-check with the host CLI's
  * `CONFIG_FIELDS` keeps the two field registries from drifting: every scalar
- * leaf the CLI editor exposes must be editable in the GUI card too.
+ * leaf the CLI editor exposes must be editable in the GUI card too, and the
+ * two tier model chains must be exposed with matching paths.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -13,9 +14,11 @@ import {
   buildPlan,
   deepEqual,
   deletePath,
+  formatRows,
   formatValue,
   hasPath,
   parseDraft,
+  parseModelRows,
   readPath,
   setPath,
   type CardField,
@@ -68,9 +71,9 @@ describe('path helpers', () => {
 
 // ─── draft parsing / formatting ──────────────────────────────────────
 
-const numberField: CardField = { path: 'a', section: 'a', key: 'a', type: 'number', labelKey: 'x', hintKey: 'y' }
-const boolField: CardField = { path: 'b', section: 'b', key: 'b', type: 'boolean', labelKey: 'x', hintKey: 'y' }
-const enumField: CardField = { path: 'c', section: 'c', key: 'c', type: 'enum', enum: ['auto', 'off'], labelKey: 'x', hintKey: 'y' }
+const numberField: CardField = { path: 'a', section: 'a', display: 'a', key: 'a', type: 'number', labelKey: 'x', hintKey: 'y' }
+const boolField: CardField = { path: 'b', section: 'b', display: 'b', key: 'b', type: 'boolean', labelKey: 'x', hintKey: 'y' }
+const enumField: CardField = { path: 'c', section: 'c', display: 'c', key: 'c', type: 'enum', enum: ['auto', 'off'], labelKey: 'x', hintKey: 'y' }
 
 describe('draft parsing', () => {
   it('formats effective values as control text', () => {
@@ -98,6 +101,48 @@ describe('draft parsing', () => {
   })
 })
 
+// ─── model chains ────────────────────────────────────────────────────
+
+describe('model chain drafts', () => {
+  it('formats a stored chain into rows, defaulting priority to row order', () => {
+    expect(formatRows(undefined)).toEqual([])
+    expect(formatRows([
+      { provider: 'p1', model: 'm1', priority: 4 },
+      { provider: 'p2', model: 'm2' },
+      'junk',
+    ])).toEqual([
+      { provider: 'p1', model: 'm1', priority: 4 },
+      { provider: 'p2', model: 'm2', priority: 2 },
+      { provider: '', model: '', priority: 3 },
+    ])
+  })
+
+  it('parses complete rows and re-derives priority from row order', () => {
+    expect(parseModelRows([
+      { provider: '  opencode-go ', model: 'deepseek-v4-flash', priority: 9 },
+      { provider: 'other', model: 'smart-model', priority: 1 },
+    ])).toEqual({
+      kind: 'set',
+      value: [
+        { provider: 'opencode-go', model: 'deepseek-v4-flash', priority: 1 },
+        { provider: 'other', model: 'smart-model', priority: 2 },
+      ],
+    })
+  })
+
+  it('drops fully blank rows', () => {
+    expect(parseModelRows([
+      { provider: 'p', model: 'm', priority: 1 },
+      { provider: '  ', model: '', priority: 2 },
+    ])).toEqual({ kind: 'set', value: [{ provider: 'p', model: 'm', priority: 1 }] })
+  })
+
+  it('invalidates a row with only one side filled', () => {
+    expect(parseModelRows([{ provider: 'p', model: '', priority: 1 }])).toBeUndefined()
+    expect(parseModelRows([{ provider: '', model: 'm', priority: 1 }])).toBeUndefined()
+  })
+})
+
 // ─── save plan ───────────────────────────────────────────────────────
 
 function staged(entries: Record<string, StagedDraft>): Map<string, StagedDraft> {
@@ -107,6 +152,10 @@ function staged(entries: Record<string, StagedDraft>): Map<string, StagedDraft> 
 const snapshot = (partial: Record<string, unknown>) => ({
   value: {
     enabled: true,
+    tiers: {
+      fast: { models: [] },
+      smart: { models: [] },
+    },
     routing: {
       mode: 'auto',
       judgeTimeout: 5000,
@@ -117,6 +166,10 @@ const snapshot = (partial: Record<string, unknown>) => ({
   },
   base: {
     enabled: true,
+    tiers: {
+      fast: { models: [] },
+      smart: { models: [] },
+    },
     routing: {
       mode: 'auto',
       judgeTimeout: 5000,
@@ -228,6 +281,86 @@ describe('buildPlan', () => {
     expect(plan.patches).toEqual([])
     expect(plan.invalid).toBe(false)
   })
+
+  it('writes a changed tier model chain under the tiers section', () => {
+    const plan = buildPlan(
+      fields,
+      staged({
+        'tiers.fast.models': {
+          rows: [{ provider: 'opencode-go', model: 'deepseek-v4-flash', priority: 1 }],
+          clear: false,
+        },
+      }),
+      snapshot({}),
+    )
+    expect(plan.invalid).toBe(false)
+    expect(plan.patches).toEqual([
+      {
+        op: 'set',
+        section: 'tiers',
+        value: { fast: { models: [{ provider: 'opencode-go', model: 'deepseek-v4-flash', priority: 1 }] } },
+        leaves: [{ key: 'fast.models', value: [{ provider: 'opencode-go', model: 'deepseek-v4-flash', priority: 1 }] }],
+      },
+    ])
+  })
+
+  it('batches both tier chains into one tiers-section write', () => {
+    const plan = buildPlan(
+      fields,
+      staged({
+        'tiers.fast.models': { rows: [{ provider: 'a', model: 'b', priority: 1 }], clear: false },
+        'tiers.smart.models': { rows: [{ provider: 'c', model: 'd', priority: 1 }], clear: false },
+      }),
+      snapshot({}),
+    )
+    expect(plan.patches).toHaveLength(1)
+    expect(plan.patches[0]!.section).toBe('tiers')
+    expect(plan.patches[0]!.value).toEqual({
+      fast: { models: [{ provider: 'a', model: 'b', priority: 1 }] },
+      smart: { models: [{ provider: 'c', model: 'd', priority: 1 }] },
+    })
+  })
+
+  it('treats a model chain equal to the effective value as a no-op', () => {
+    const effective = [{ provider: 'a', model: 'b', priority: 1 }]
+    const plan = buildPlan(
+      fields,
+      staged({
+        'tiers.fast.models': { rows: effective, clear: false },
+      }),
+      snapshot({ value: { tiers: { fast: { models: effective } } } }),
+    )
+    expect(plan.patches).toEqual([])
+    expect(plan.invalid).toBe(false)
+  })
+
+  it('invalidates the plan when a model row is half-filled', () => {
+    const plan = buildPlan(
+      fields,
+      staged({
+        'tiers.fast.models': { rows: [{ provider: 'a', model: '', priority: 1 }], clear: false },
+      }),
+      snapshot({}),
+    )
+    expect(plan.invalid).toBe(true)
+    expect(plan.patches).toEqual([])
+  })
+
+  it('clears a stored model chain back to the composition layer', () => {
+    const stored = [{ provider: 'a', model: 'b', priority: 1 }]
+    const plan = buildPlan(
+      fields,
+      staged({ 'tiers.fast.models': { rows: stored, clear: true } }),
+      snapshot({
+        user: { tiers: { fast: { models: stored } } },
+        value: { tiers: { fast: { models: stored } } },
+      }),
+    )
+    expect(plan.invalid).toBe(false)
+    expect(plan.patches).toEqual([
+      { op: 'unset', section: 'tiers', leaves: [{ key: 'fast.models', value: undefined }] },
+    ])
+  })
 })
 
 // ─── registry parity with the CLI editor ─────────────────────────────
@@ -245,18 +378,24 @@ describe('GUI/CLI field registry parity', () => {
     }
   })
 
-  it('does not expose complex fields (model lists / pricing) in the GUI card', () => {
-    const complex = CONFIG_FIELDS.filter((field) => field.type === 'modelList' || field.type === 'pricing')
+  it('exposes the tier model chains with matching paths', () => {
     const gui = new Map(CARD_FIELDS.map((field) => [field.path, field]))
-    for (const cli of complex) {
-      expect(gui.has(cli.path), `${cli.path} must stay CLI-only for now`).toBe(false)
+    for (const path of ['tiers.fast.models', 'tiers.smart.models']) {
+      const card = gui.get(path)
+      expect(card, `missing GUI card field for ${path}`).toBeDefined()
+      expect(card!.type).toBe('models')
     }
   })
 
-  it('has one entry per scalar path and no duplicate sections in the display order', () => {
+  it('keeps pricing CLI-only (no GUI card field)', () => {
+    const gui = new Map(CARD_FIELDS.map((field) => [field.path, field]))
+    expect(gui.has('pricing')).toBe(false)
+  })
+
+  it('has one entry per path, no duplicate display sections, and covers every section in display order', () => {
     const paths = CARD_FIELDS.map((field) => field.path)
     expect(new Set(paths).size).toBe(paths.length)
-    const sections = new Set(CARD_FIELDS.map((field) => field.section))
-    expect(sections.size).toBeGreaterThanOrEqual(4)
+    const displays = new Set(CARD_FIELDS.map((field) => field.display))
+    expect(displays.size).toBeGreaterThanOrEqual(5)
   })
 })
