@@ -13,7 +13,10 @@ v1.6.0 while this project's own releases continued in parallel.
 - **Port baseline**: upstream **v1.0.0** (2026-08-14) — the commit date of this
   project's first commit, matching upstream's task-level-orchestration release.
 - **Alignment target**: upstream **v1.6.0** (`69ffb34`, 2026-09-18).
-- **Aligned through**: *in progress — see the release table below.*
+- **Aligned through**: upstream **v1.6.0**, for the P0 (correctness) + P1
+  (decision core) scope — implemented with all gates green, awaiting a version
+  bump and release. P2/P3 remain open (see Planned). The delivery audit is in
+  [`ALIGNMENT.md`](ALIGNMENT.md).
 - The full audit, including what was deliberately **not** ported and why, lives
   in [`ALIGNMENT.md`](ALIGNMENT.md); the normative contract is
   [`SPEC.md`](SPEC.md).

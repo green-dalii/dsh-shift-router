@@ -168,9 +168,9 @@ node scripts/expose-gui-settings.mjs --profile web   # adds shift-router to the 
 | Command | Effect |
 |---------|--------|
 | `/router` | Compact status |
-| `/router status` / `/router stats` | Full status: tiers, window, transitions, cooldowns, tokens, cost telemetry |
+| `/router status` / `/router stats` | Full status: gear (R → θ), tiers, decision window (holds shown as `h`), the last decision and *why*, the model that actually ran vs the router's intent, transitions, cooldowns, tokens, cost telemetry |
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
-| `/router verbose` | Toggle verbose router logging |
+| `/router verbose` / `/router log` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
 | `/router eco` / `/router default` / `/router sport` | Gear presets: set `routing.economics.mode` (persisted) — cheaper ↔ stickier on Smart |
 | `/router config` | Interactive editor: numbered field list with current values + available providers + usage |

@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 normative contract is now [`SPEC.md`](SPEC.md); the audit — including what was
 deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
 
-> **Status: written docs-first.** This section is authored ahead of the
-> implementation. Each item lands in the commits that follow it, and nothing
-> here is release-ready until the gates in SPEC §14 pass. Kept in one place so
-> the release note is written from the spec rather than reconstructed from the
-> diff.
+> **Status: implemented, not yet released.** This section was authored
+> docs-first and every item has since landed, with the gates in SPEC §14 green
+> (tsc host + client, 182 tests across 11 files, tsdown build, and
+> `npm run test:e2e` against a scratch profile). The delivery audit — including
+> what was deliberately *not* ported and the residual gaps — is in
+> [`ALIGNMENT.md`](ALIGNMENT.md). A version bump and the release itself are the
+> maintainer's call.
 
 > ⚠ **Routing behaviour changes immediately, with no config edit.** The
 > decision rule is replaced (vote counting → expected cost) and two legacy

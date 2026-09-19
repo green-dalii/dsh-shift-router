@@ -163,9 +163,9 @@ node scripts/expose-gui-settings.mjs --profile web   # 把 shift-router 加入�
 | 命令 | 作用 |
 |------|------|
 | `/router` | 简洁状态 |
-| `/router status` / `/router stats` | 完整状态：分层、窗口、切换记录、冷却、token、成本遥测 |
+| `/router status` / `/router stats` | 完整状态：档位（R → θ）、分层、决策窗口（hold 显示为 `h`）、上一次判定及其**原因**、实际运行的模型 vs 路由器意图、切换记录、冷却、token、成本遥测 |
 | `/router on` / `/router off` | 启用 / 停用（会话级） |
-| `/router verbose` | 详细日志开关 |
+| `/router verbose` / `/router log` | 详细日志开关 |
 | `/router orchestrate auto\|off` | 编排模式 |
 | `/router eco` / `/router default` / `/router sport` | 档位预设：设置 `routing.economics.mode`（持久化）——更省 ↔ 更黏在 Smart |
 | `/router config` | 交互式编辑器：带编号的字段列表（含当前值）+ 可用 providers + 用法 |
