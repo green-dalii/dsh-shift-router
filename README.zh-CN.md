@@ -222,15 +222,21 @@ npm run typecheck
 
 ### 端到端测试（无需凭证）
 
-`e2e/` 包含一个注册了 `fake` provider 的假 LLM 适配器，因此无需任何 API key 即可演练完整路由管线：
-
 ```sh
-# 先创建一个挂载本 bundle + @deepseek-ai/dsh-headless 的临时 profile：
-dsh --profile <tmp> --patch e2e/overlay.yml "design a migration plan for our billing system"
-# → ROUTER-E2E: turn ran on fake/fake-smart   （裁判判定 smart → 升级到 Smart 层）
+npm run test:e2e
 ```
 
-e2e 还会验证 settings 命名空间的持久化（`e2e/settings-probe.mjs`）。
+该脚本会建一个临时 `DSH_HOME`，把**本检出**作为 bundle 装进派生出的 `headless` profile，用假适配器跑一轮，并断言：
+
+- `ROUTER-E2E: turn ran on fake/fake-smart` —— 裁判确实跑了、EV 规则确实升级了、并且真的切换了上线模型到 Smart 层；
+- `shift-router` settings 命名空间能完成一次写入并读回（`e2e/settings-probe.mjs`）。
+
+它不会碰你真实的 `DSH_HOME`，跑完自行清理（加 `--keep` 可保留现场）。手工复现：
+
+```sh
+DSH_HOME=/tmp/scratch dsh plugin --profile tmp add /path/to/dsh-shift-router
+DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migration plan"
+```
 
 ## 架构
 

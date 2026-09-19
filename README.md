@@ -233,12 +233,23 @@ npm run typecheck
 `e2e/` contains a fake LLM adapter that registers the `fake` provider, so the whole routing pipeline can be exercised without any API key:
 
 ```sh
-# after creating a scratch profile with this bundle + @deepseek-ai/dsh-headless:
-dsh --profile <tmp> --patch e2e/overlay.yml "design a migration plan for our billing system"
-# → ROUTER-E2E: turn ran on fake/fake-smart   (judge said smart → upgraded to the Smart tier)
+npm run test:e2e
 ```
 
-The e2e also verifies the settings namespace persists (`e2e/settings-probe.mjs`).
+That builds a throwaway `DSH_HOME`, installs **this checkout** as a bundle into a derived
+`headless` profile, runs one turn through the fake adapter, and asserts:
+
+- `ROUTER-E2E: turn ran on fake/fake-smart` — the Judge ran, the EV rule escalated, and the
+  wire model was actually switched to the Smart tier;
+- the `shift-router` settings namespace round-trips a write (`e2e/settings-probe.mjs`).
+
+It never touches your real `DSH_HOME` and cleans up after itself (`--keep` to inspect). To run
+the same thing by hand, install the bundle into a scratch profile and apply the overlay:
+
+```sh
+DSH_HOME=/tmp/scratch dsh plugin --profile tmp add /path/to/dsh-shift-router
+DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migration plan"
+```
 
 ## Architecture
 

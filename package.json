@@ -87,6 +87,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node e2e/run-e2e.mjs",
     "clean": "rm -rf node_modules dist",
     "prepare": "tsc && tsc -p tsconfig.client.json && tsdown"
   },

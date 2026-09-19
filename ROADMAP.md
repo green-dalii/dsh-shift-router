@@ -97,7 +97,7 @@ live here):
 | Examples directory (frontend / ML / cross-provider cost-saving configs) | ongoing | upstream line |
 | CI + coverage thresholds (≥90% lines/functions/statements, ≥85% branches on core modules) | P3 | upstream gate |
 | Packaged-install verification gate (`pack` → `dsh plugin add` → import every dist module) | P3 | DSH analogue of upstream `pack:check` + `check:isolated` |
-| SDK baseline catch-up (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | P3 | prerequisite for adopting newer harness surfaces |
+| **SDK baseline catch-up** (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | **P2 — promoted** | Evidence, not speculation: the harness dispatches adapters through `LlmAdapter.prepareCall`, which does not exist in 0.1.0-rc.6 — a fixture that imports `LlmAdapter` from this package's own dependency tree failed with `registration.adapter.prepareCall is not a function` until the method was declared explicitly. The plugin's own runtime value-imports (`BlockAssembler`, `createUserMessage`, `settingsNamespace`) come from the pinned copy too, so this is a real dual-version hazard, not just a fixture problem. |
 
 ## Explicitly excluded (by design)
 

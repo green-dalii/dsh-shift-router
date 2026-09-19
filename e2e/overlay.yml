@@ -1,0 +1,60 @@
+# dsh-shift-router — credential-free headless E2E overlay
+#
+# Applied on top of a profile that already carries this bundle:
+#
+#   dsh --profile <tmp> --patch e2e/overlay.yml "design a migration plan for our billing system"
+#   # → ROUTER-E2E: turn ran on fake/fake-smart
+#
+# It does two things:
+#   1. appends the fake LLM adapter (`e2e/fake-adapter.mjs`) so the Judge, the
+#      model-availability probe and the agent turn all run without an API key;
+#   2. overrides the `shift-router` row's config to point both tiers at that
+#      fake provider.
+#
+# Relative paths in `insert` entries are anchored beside THIS patch file, so
+# `./fake-adapter.mjs` resolves inside `e2e/` no matter where dsh is invoked.
+#
+# The assertions live in e2e/run-e2e.mjs, which also checks the settings
+# namespace round-trip (`e2e/settings-probe.mjs`).
+
+- insert:
+    - id: shift-router-e2e-adapter
+      name: ./fake-adapter.mjs
+    - id: shift-router-e2e-settings-probe
+      name: ./settings-probe.mjs
+
+# `- id:` (no `insert`) targets the row the bundle patch already added and
+# replaces its `config` wholesale — so every key the router needs is restated
+# here rather than merged.
+- id: shift-router
+  config:
+    enabled: true
+    tiers:
+      fast:
+        label: Fast (e2e)
+        models:
+          - { provider: fake, model: fake-fast, priority: 1 }
+      smart:
+        label: Smart (e2e)
+        models:
+          - { provider: fake, model: fake-smart, priority: 1 }
+    routing:
+      mode: auto
+      economics:
+        reworkPenalty: 3
+        downgradeMemory: 2
+      window:
+        size: 5
+        minConfidence: 0.5
+      cacheAware:
+        enabled: true
+        sameFamilyPenalty: 1.5
+        idleBoundaryMs: 300000
+    # Off on purpose: this E2E asserts the model switch deterministically, and
+    # an orchestrated turn would change the system prompt instead.
+    orchestration:
+      mode: off
+    failover:
+      baseMs: 60000
+      maxMs: 21600000
+      startAttempts4xx: 3

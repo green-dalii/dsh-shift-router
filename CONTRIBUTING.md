@@ -85,7 +85,10 @@ dsh --profile web-e2e web --port 3199
 ```
 
 `e2e/fake-adapter.mjs` is the credential-free LLM adapter used by the headless router
-e2e. For the GUI card, the model dropdowns only show providers that currently advertise
+e2e. Run it with `npm run test:e2e` (`e2e/run-e2e.mjs`): it creates a scratch `DSH_HOME`,
+installs this checkout as a bundle, runs one turn, and asserts both the model switch and the
+settings round-trip. Treat a red e2e as a release blocker — it is the only check that proves
+the *packaged* plugin loads and routes on a real harness. For the GUI card, the model dropdowns only show providers that currently advertise
 models (`llm.models`), so a scratch profile with no registered adapter falls back to
 free-text rows — that is expected, not a bug. To exercise the dropdowns, mount a small
 adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with

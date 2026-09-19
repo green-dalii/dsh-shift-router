@@ -17,6 +17,21 @@ export const inject = ['llm']
 const JUDGE_ANSWER = '{"tier":"smart","confidence":0.9,"reason":"e2e routing test"}'
 
 class FakeAdapter extends LlmAdapter {
+  /**
+   * `prepareCall` is the adapter contract the running harness dispatches
+   * through. This fixture imports `LlmAdapter` from THIS package's dependency
+   * tree, which may be older than the harness that loads it, so declare the
+   * default shape explicitly instead of relying on the base class providing it
+   * (a base class from 0.1.0-rc.6 does not, and the harness then fails with
+   * "registration.adapter.prepareCall is not a function").
+   */
+  async prepareCall(provider, model, signal) {
+    return {
+      model: await this.resolveModel(provider, model, signal),
+      stream: (options) => this.stream(options),
+    }
+  }
+
   stream(options) {
     const isJudge = (options.system ?? '').includes('Judge System Prompt')
     const text = isJudge

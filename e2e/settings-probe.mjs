@@ -1,8 +1,19 @@
 /**
  * Settings probe for the dsh-shift-router e2e test.
+ *
  * Runs inside apply() (keeping the Cordis fiber context), polls until the
- * shift-router settings namespace is registered, updates it, and verifies the
- * write is visible (scope re-resolution + persistence to settings.yaml).
+ * shift-router settings namespace is registered, writes through it, and
+ * verifies the write is visible on a re-resolved scope (i.e. the namespace is
+ * live, not a snapshot).
+ *
+ * Idempotent on purpose: the probe picks a value DIFFERENT from the current
+ * one instead of a fixed 7777, so re-running the e2e against a profile that
+ * already carries a previous run's write still proves the round-trip. (A fixed
+ * target made the second run report `before=7777 after=7777` — a false
+ * failure.) The chosen value alternates between two values so repeated runs
+ * keep exercising both directions.
+ *
+ * Set `SHIFT_ROUTER_E2E_PROBE_OUT` to change the result file location.
  */
 
 import { writeFileSync } from 'node:fs'
@@ -12,6 +23,10 @@ export const name = 'settings-probe'
 export const inject = ['settings']
 
 const NS = settingsNamespace('shift-router')
+const OUT = process.env.SHIFT_ROUTER_E2E_PROBE_OUT ?? '/tmp/dsh-settings-probe.json'
+
+/** Two alternating targets so consecutive runs always change the value. */
+const TARGETS = [7777, 7778]
 
 export async function apply(ctx) {
   const result = { ok: false, detail: '' }
@@ -35,15 +50,19 @@ export async function apply(ctx) {
     } else {
       const before = ctx.settings.get(NS)
       const beforeTimeout = before?.routing?.judgeTimeout
-      await ctx.settings.update(NS, { routing: { judgeTimeout: 7777 } })
-      const after = ctx.settings.get(NS)
-      const afterTimeout = after?.routing?.judgeTimeout
-      result.ok = afterTimeout === 7777 && beforeTimeout !== 7777
-      result.detail = `before=${beforeTimeout} after=${afterTimeout}`
+      const target = TARGETS.find((value) => value !== beforeTimeout) ?? TARGETS[0]
+
+      await ctx.settings.update(NS, { routing: { judgeTimeout: target } })
+
+      // Re-read through the service (not the earlier snapshot) to prove the
+      // write is observable on a re-resolved scope.
+      const afterTimeout = ctx.settings.get(NS)?.routing?.judgeTimeout
+      result.ok = afterTimeout === target && afterTimeout !== beforeTimeout
+      result.detail = `before=${beforeTimeout} after=${afterTimeout} target=${target}`
     }
   } catch (error) {
     result.detail = `error: ${error?.message ?? String(error)}`
   }
-  writeFileSync('/tmp/dsh-settings-probe.json', JSON.stringify(result, null, 2))
+  writeFileSync(OUT, JSON.stringify(result, null, 2))
   ctx.logger.warn(`[settings-probe] ${result.ok ? 'OK' : 'FAILED'} ${result.detail}`)
 }
