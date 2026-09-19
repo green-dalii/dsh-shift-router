@@ -424,8 +424,18 @@ export function registerCommands(deps: CommandDeps): CommandDefinition[] {
         if (failure !== null) {
           return { kind: 'error', text: `dsh-shift-router: could not persist the gear (${failure})` }
         }
-        const next = deps.getConfig()
-        const theta = effectiveTheta(next)
+        // Report the gear from what we just wrote rather than from a read-back:
+        // `settings.update` resolves through the settings service, and the
+        // plugin's own config refresh rides a watch that may land later. A
+        // confirmation that shows the OLD R/θ would read as "the gear did
+        // nothing".
+        const current = deps.getConfig()
+        const applied: ShiftRouterConfig = {
+          ...current,
+          routing: { ...current.routing, economics: { ...current.routing.economics, mode } },
+        }
+        const theta = effectiveTheta(applied)
+        const cacheFactor = sameFamilyThetaFactor(applied)
         const blurb = mode === 'eco'
           ? 'cheapest: only clearly-needed turns escalate'
           : mode === 'sport'
@@ -433,8 +443,8 @@ export function registerCommands(deps: CommandDeps): CommandDefinition[] {
             : 'balanced'
         return {
           kind: 'success',
-          text: `🚗 Gear ${mode} — R=${effectiveReworkPenalty(next)}, θ=${theta.toFixed(2)}` +
-            `${sameFamilyThetaFactor(next) > 1 ? ` (base ÷ cache divisor ${sameFamilyThetaFactor(next)})` : ''}` +
+          text: `🚗 Gear ${mode} — R=${effectiveReworkPenalty(applied)}, θ=${theta.toFixed(2)}` +
+            `${cacheFactor > 1 ? ` (base ÷ cache divisor ${cacheFactor})` : ''}` +
             `, was ${previousTheta.toFixed(2)} — ${blurb}`,
         }
       }

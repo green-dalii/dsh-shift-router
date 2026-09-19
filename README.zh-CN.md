@@ -12,7 +12,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-160%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen)](#development)
 
 </div>
 
@@ -216,7 +216,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 把 shift-router 加入�
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（10 个文件、160 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 配置注册表与 GUI 表单模型 / 白名单补丁逻辑）
+npm test            # vitest（11 个文件、182 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 配置注册表与 GUI 表单模型 / 白名单补丁逻辑）
 npm run typecheck
 ```
 
