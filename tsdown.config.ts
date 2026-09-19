@@ -24,7 +24,7 @@ export default defineConfig({
     neverBundle: [
       'react',
       'react/jsx-runtime',
-      '@deepseek-ai/dsh-client-runtime/client',
+      '@deepseek-ai/dsh-client-store',
     ],
   },
   define: {
