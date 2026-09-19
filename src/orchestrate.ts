@@ -195,7 +195,6 @@ export function createOrchestrationState(): RouterState['orchestration'] {
     rounds: 0,
     escalations: 0,
     workerFailStreak: 0,
-    startedAt: null,
   }
 }
 
@@ -212,7 +211,6 @@ export function enterOrchestration(state: RouterState): void {
   const orch = state.orchestration
   if (!orch.active) {
     orch.active = true
-    orch.startedAt = Date.now()
     orch.rounds = 0
     orch.escalations = 0
     orch.workerFailStreak = 0
@@ -267,6 +265,35 @@ export function shouldOrchestrate(
   if (judgeOrchestrate === false) return false
   if (!subagentToolAvailable) return false
   return true
+}
+
+/** What the harness reports about model-selectable subagent delegation. */
+export interface WorkerModelSelection {
+  enabled: boolean
+  routes: number
+}
+
+/**
+ * The warning to log for the worker-model self-check (SPEC §7.4), or null when
+ * nothing should be said.
+ *
+ * `undefined` means the harness exposes no `subagent-model-selection` service,
+ * which is NOT "unknown": without that service there is no model-selectable
+ * delegation, so it is precisely the case worth warning about. Only a
+ * positively-confirmed enabled allowlist with at least one route is silent.
+ */
+export function workerModelSelectionWarning(
+  selection: WorkerModelSelection | undefined,
+): string | null {
+  if (selection !== undefined && selection.enabled && selection.routes > 0) return null
+  const state = selection === undefined
+    ? 'unavailable on this harness'
+    : selection.enabled
+      ? 'enabled but with no authorised routes'
+      : 'disabled'
+  return `orchestration is on but model-selectable subagent delegation is ${state} `
+    + `(enable the harness "subagent-model-selection" setting and list the Fast-tier routes in allowedModels) — `
+    + `workers will otherwise inherit the Smart model, so delegation loses its cost advantage`
 }
 
 /**

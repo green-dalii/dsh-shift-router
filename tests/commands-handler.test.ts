@@ -208,6 +208,41 @@ describe('/router status', () => {
     expect(text).toContain('routing.window.threshold=0.9')
   })
 
+  it('stays silent for the INERT legacy window threshold default', async () => {
+    // 0.6 is the pre-EV default: a config still carrying it is a wizard
+    // snapshot, not an override.
+    const h = harness()
+    h.config.routing.window.threshold = 0.6
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).not.toContain('legacy override')
+  })
+
+  it('stays silent for the INERT legacy cache-threshold default', async () => {
+    // 0.9 is the pre-EV default here too — reporting it would claim a cache
+    // divisor that `sameFamilyThetaFactor` does not apply.
+    const h = harness()
+    h.config.routing.cacheAware!.sameFamilyThreshold = 0.9
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).not.toContain('legacy override')
+  })
+
+  it('reports a NON-default cache threshold as the legacy override it is', async () => {
+    const h = harness()
+    h.config.routing.cacheAware!.sameFamilyThreshold = 0.95
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('legacy override')
+    expect(text).toContain('sameFamilyThreshold=0.95')
+  })
+
+  it('explains a downgradeMemory that exceeds the decision window', async () => {
+    const h = harness()
+    h.config.routing.window.size = 5
+    h.config.routing.economics.downgradeMemory = 6
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('exceeds routing.window.size')
+    expect(text).toContain('capped to 5')
+  })
+
   it('errors when there is no router state (subagents are not routed)', async () => {
     const h = harness()
     h.deps.getState = () => undefined

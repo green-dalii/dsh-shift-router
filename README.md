@@ -13,7 +13,7 @@ Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-201%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen)](#development)
 
 </div>
 
@@ -33,7 +33,7 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 
 - **Expected-cost routing** — the turn runs Smart iff `pSmart ≥ θ`, with `θ = 1/reworkPenalty`: the bar is price-independent, so the one knob is how badly a wrong downgrade hurts. Upgrades are instant; coming back down needs `downgradeMemory` **consecutive** decisive `fast` turns. A Judge outage or an unsure verdict is a **hold** — the router keeps its position instead of guessing.
 - **Cache-aware routing** — when Fast and Smart share a provider, the decision bar is divided by `sameFamilyPenalty` (default 1.5) and downgrades are held off while the prompt cache is warm, so switching to a cheaper model never costs more than staying put.
-- **Runtime failover** — 429 / 402 / 5xx / quota / usage-limit / unsupported-model failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
+- **Runtime failover** — 429 / 402 / 5xx / quota / usage-limit / unsupported-model failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h04m → 4h16m → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
 - **Task-level orchestration** — complex tasks run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, consecutive worker failures count an escalation, and once a cap is hit the `subagent` tool is denied outright and the system prompt switches to a "wrap up now" notice.
 - **Cost telemetry** — per-tier token tracking and an optional USD pricing table (`/router status` shows "what this session would have cost on the Smart model").
 - **Zero-config startup** — a no-op until you configure tiers; then routing just works. Configuration is editable live via the GUI settings panel **and** `/router config` commands (persisted, no restart).
@@ -224,7 +224,7 @@ The caps are enforced by the router, not just described: every `subagent` tool c
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (201 tests across 12 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / config registries + GUI form model / whitelist patch)
+npm test            # vitest (216 tests across 12 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / config registries + GUI form model / whitelist patch)
 npm run typecheck
 ```
 

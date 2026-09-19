@@ -14,6 +14,7 @@ import {
   renderTierChain,
   resetOrchestration,
   shouldOrchestrate,
+  workerModelSelectionWarning,
 } from '../src/orchestrate.js'
 import { createRouterState } from '../src/router.js'
 import { DEFAULT_CONFIG, type ShiftRouterConfig } from '../src/types.js'
@@ -99,6 +100,26 @@ describe('shouldOrchestrate', () => {
   })
 })
 
+describe('workerModelSelectionWarning (SPEC §7.4)', () => {
+  it('is silent only when delegation is positively confirmed usable', () => {
+    expect(workerModelSelectionWarning({ enabled: true, routes: 2 })).toBeNull()
+  })
+
+  it('warns when the harness exposes no selection service at all', () => {
+    // Absent is not "unknown" — with no service there is no model-selectable
+    // delegation, which is exactly the condition to warn about.
+    const warning = workerModelSelectionWarning(undefined)
+    expect(warning).toContain('unavailable on this harness')
+    expect(warning).toContain('subagent-model-selection')
+    expect(warning).toContain('inherit the Smart model')
+  })
+
+  it('warns when the allowlist is off or empty', () => {
+    expect(workerModelSelectionWarning({ enabled: false, routes: 3 })).toContain('disabled')
+    expect(workerModelSelectionWarning({ enabled: true, routes: 0 })).toContain('no authorised routes')
+  })
+})
+
 describe('recordWorkerOutcome (consecutive-failure escalation)', () => {
   it('counts only consecutive failures toward an escalation', () => {
     const cfg = makeConfig()
@@ -148,12 +169,12 @@ describe('orchestration lifecycle', () => {
 
     enterOrchestration(state)
     expect(state.orchestration.active).toBe(true)
-    expect(state.orchestration.startedAt).not.toBeNull()
 
-    enterOrchestration(state) // idempotent — keeps the run
-    const startedAt = state.orchestration.startedAt
+    // Idempotent: re-entering keeps the run's counters (and does not reset the
+    // caps mid-task).
+    state.orchestration.rounds = 2
     enterOrchestration(state)
-    expect(state.orchestration.startedAt).toBe(startedAt)
+    expect(state.orchestration.rounds).toBe(2)
 
     exitOrchestration(state)
     expect(state.orchestration).toEqual(createOrchestrationState())

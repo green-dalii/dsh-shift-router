@@ -16,7 +16,6 @@ import {
   isModelInCooldown,
   markModelFailed,
   modelKey,
-  remainingCooldownMs,
 } from '../src/failover.js'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
 import { DEFAULT_CONFIG, type ShiftRouterConfig } from '../src/types.js'
@@ -62,8 +61,9 @@ describe('cooldown backoff', () => {
     const c = createCooldowns()
     markModelFailed(c, 'p', 'm', 0)
     expect(isModelInCooldown(c, 'p', 'm', 1000)).toBe(true)
-    expect(isModelInCooldown(c, 'p', 'm', COOLDOWN_BASE_MS + 1)).toBe(false)
-    expect(remainingCooldownMs(c, 'p', 'm', 1000)).toBe(COOLDOWN_BASE_MS - 1000)
+    // The boundary is inclusive-expiry: at exactly `until` the model is free.
+    expect(isModelInCooldown(c, 'p', 'm', COOLDOWN_BASE_MS)).toBe(false)
+    expect(isModelInCooldown(c, 'p', 'm', COOLDOWN_BASE_MS - 1)).toBe(true)
     clearModelCooldown(c, 'p', 'm')
     expect(isModelInCooldown(c, 'p', 'm', 0)).toBe(false)
   })
@@ -125,6 +125,15 @@ describe('detectFailoverError', () => {
     expect(detectFailoverError({ message: 'unsupported_model', code: 'UNKNOWN' })?.code).toBe('429')
     expect(detectFailoverError({ message: 'model_not_found: gpt-9', code: 'UNKNOWN' })?.code).toBe('429')
     expect(detectFailoverError({ message: 'this model is not supported', code: 'UNKNOWN' })?.code).toBe('429')
+  })
+
+  it('recognizes an embedded 402 folded into the message', () => {
+    // The status field is not always populated; an adapter that only writes
+    // "HTTP 402 …" into the text must still be cooled, which is the whole point
+    // of the insufficient-balance handling.
+    expect(detectFailoverError({ message: 'HTTP 402 Payment Required', code: 'UNKNOWN' })?.code).toBe('402')
+    expect(detectFailoverError({ message: 'status: 402', code: 'UNKNOWN' })?.code).toBe('402')
+    expect(detectFailoverError({ message: 'error 402 from upstream', code: 'UNKNOWN' })?.code).toBe('402')
   })
 
   it('treats 402 as a 4xx cooldown start', () => {

@@ -14,7 +14,7 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
 
 > **Status: implemented, not yet released.** This section was authored
 > docs-first and every item has since landed, with the gates in SPEC §14 green
-> (tsc host + client, 201 tests across 12 files, tsdown build, and
+> (tsc host + client, 216 tests across 12 files, tsdown build, and
 > `npm run test:e2e` against a scratch profile). The delivery audit — including
 > what was deliberately *not* ported and the residual gaps — is in
 > [`ALIGNMENT.md`](ALIGNMENT.md). A version bump and the release itself are the
@@ -124,6 +124,49 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
 - Status output now reports the model that **actually** ran, not the router's
   intent (upstream v1.4.2 Bug B).
 - Orchestration no longer prompts for delegation that the router cannot honour.
+
+### Fixed in review
+
+An independent adversarial review (with mutation testing) audited this round
+before release. Its findings, all fixed:
+
+- **An embedded 402 in the failure text was not matched.** `failure.status`
+  and the balance keywords were handled, but `"HTTP 402 Payment Required"` fell
+  through to the status regex, which listed 429 and 5xx only — so exactly the
+  adapters that fold the status into the message kept a dead account pinned.
+- **A completed message without usage did not age the prompt cache.**
+  `lastActivityAt` was set after the `if (!usage) return` early return, so the
+  state still read "no message has completed yet" and the warm-cache downgrade
+  gate stayed open — the cost inversion cache-aware routing exists to prevent.
+- **A forced model borrowed the verdict's tier.** `/route-force <provider/model>`
+  while the Judge said `smart` reported `decisionTier: 'smart'`, enough to start
+  an orchestration turn on a user-pinned model. The tier now comes from the
+  model itself.
+- **`downgradeMemory` larger than `window.size` silently pinned the router to
+  Smart.** The streak lives in the window, so the requirement now saturates at
+  the window size and `/router status` reports the cap.
+- **The `⚠ legacy` warning fired for the inert default.** A config carrying the
+  pre-EV `sameFamilyThreshold: 0.9` was told an override was in force (and that
+  the strong cache divisor applied) when neither was true.
+- **The GUI hint for `minConfidence` stated the opposite of the code** about
+  holds and the downgrade streak.
+- **The worker-model self-check stayed silent when the harness exposes no
+  `subagent-model-selection` service** — which is precisely when delegation is
+  not selectable. It now warns, and the decision is a unit-tested pure function.
+- Removed state and exports that nothing read: `orchestration.startedAt` and
+  `remainingCooldownMs`.
+- Documentation corrections: SPEC §10 no longer lists the removed knob or the
+  wrong defaults for the two intentionally-unset legacy leaves; SPEC §2 and §4
+  agree that a hold **breaks** the streak; telemetry scope is the routed
+  top-level agent, not "every message"; the ROADMAP no longer claims rounds
+  settle on result (they settle on dispatch, deliberately); the README backoff
+  ladder is 1m → 4m → 16m → 1h04m → 4h16m → 6h, not "1h"; `SPEC.md`,
+  `ROADMAP.md` and `ALIGNMENT.md` now ship in the npm tarball instead of being
+  linked from the README but absent from the package.
+
+The review also proved two boundaries were held by the code but not by the
+suite (`pSmart >= θ` and the inclusive idle gate); both now have equality tests.
+Re-running the review's mutations against the updated suite: **11/11 caught**.
 
 ### Migration
 

@@ -227,8 +227,6 @@ export interface OrchestrationState {
    * isolated failures do not burn the cap.
    */
   workerFailStreak: number
-  /** Epoch ms when the current orchestration task started. */
-  startedAt: number | null
 }
 
 /** Default configuration */

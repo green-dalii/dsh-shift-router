@@ -36,7 +36,7 @@ import {
   TIERS,
 } from './types.js'
 import { findBestModelForTier, type ResolvedModel } from './tier.js'
-import { createCooldowns, cooldownPredicate } from './failover.js'
+import { createCooldowns, cooldownPredicate, findTierForModel } from './failover.js'
 
 /** R (rework penalty) per named preset. Higher R → lower θ → stickier on Smart. */
 export const ECONOMIC_MODE_PRESETS = { eco: 2, default: 3, sport: 5 } as const
@@ -69,7 +69,6 @@ export function createRouterState(): RouterState {
       rounds: 0,
       escalations: 0,
       workerFailStreak: 0,
-      startedAt: null,
     },
   }
 }
@@ -203,8 +202,28 @@ export function fastStreak(window: readonly WindowEntry[]): number {
 }
 
 /**
- * Downgrade gate: only from `smart`, only after `economics.downgradeMemory`
- * consecutive decisive fast decisions.
+ * The downgrade requirement actually in force.
+ *
+ * The streak lives in the decision window, so a `downgradeMemory` larger than
+ * `window.size` could never be satisfied — the router would be pinned to Smart
+ * for the rest of the session with nothing saying why. The requirement
+ * therefore saturates at the window size, and `downgradeMemoryCapped()` lets
+ * the status output say so out loud instead of leaving a silent footgun.
+ */
+export function effectiveDowngradeMemory(config: ShiftRouterConfig): number {
+  const configured = config.routing.economics.downgradeMemory
+  const size = Math.max(1, config.routing.window.size)
+  return Math.max(1, Math.min(configured, size))
+}
+
+/** True when `downgradeMemory` was capped to fit the window (worth surfacing). */
+export function downgradeMemoryCapped(config: ShiftRouterConfig): boolean {
+  return config.routing.economics.downgradeMemory > Math.max(1, config.routing.window.size)
+}
+
+/**
+ * Downgrade gate: only from `smart`, only after
+ * `effectiveDowngradeMemory()` consecutive decisive fast decisions.
  */
 export function analyzeDowngrade(
   window: readonly WindowEntry[],
@@ -212,8 +231,8 @@ export function analyzeDowngrade(
   config: ShiftRouterConfig,
 ): { shouldDowngrade: boolean; targetTier: Tier | null } {
   if (currentTier !== 'smart') return { shouldDowngrade: false, targetTier: null }
-  const need = config.routing.economics.downgradeMemory
-  if (need > 0 && fastStreak(window) >= need) {
+  const need = effectiveDowngradeMemory(config)
+  if (fastStreak(window) >= need) {
     return { shouldDowngrade: true, targetTier: 'fast' }
   }
   return { shouldDowngrade: false, targetTier: null }
@@ -276,10 +295,18 @@ export function processRoute(
   // 1. Manual override
   if (state.manualOverride.active) {
     if (state.manualOverride.modelId && state.manualOverride.provider) {
+      // The tier must be the forced model's OWN tier, never the raw verdict:
+      // `/route-force <provider/model>` while the Judge says "smart" used to
+      // report decisionTier 'smart' and could therefore start an orchestration
+      // turn on a user-pinned model. Unknown models (not in any tier) fall back
+      // to the current tier, which is the only thing the router can vouch for.
+      const tier = state.manualOverride.tier
+        ?? findTierForModel(config, state.manualOverride.provider, state.manualOverride.modelId)
+        ?? state.currentTier
       const switchTo: ResolvedModel = {
         provider: state.manualOverride.provider,
         modelId: state.manualOverride.modelId,
-        tier: state.manualOverride.tier ?? judgeResult.tier,
+        tier,
       }
       return { switchTo, action: 'manual', decisionTier: switchTo.tier, held: false }
     }

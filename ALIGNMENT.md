@@ -211,17 +211,28 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 |---|---|
 | `npx tsc --noEmit`（宿主） | ✅ |
 | `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
-| `npx vitest run` | ✅ 201 tests / 12 files |
+| `npx vitest run` | ✅ 216 tests / 12 files |
 | `npm run build`（tsc + tsc client + tsdown） | ✅ |
 | `npm run test:e2e`（临时 DSH_HOME → 装 bundle → 跑一轮 → 设置往返） | ✅ `ROUTER-E2E: turn ran on fake/fake-smart`；probe `{ok:true}` |
 | `npm pack` 内容与 `dist` 可加载性 | ✅ 57 files；`import('./dist/index.js')` 导出 `apply/Config/inject/name`，schema 解析出 EV 默认值 |
 
+### 独立评审（mutation testing）
+
+交付前由一个独立 Agent 做了对抗式评审，并在冻结副本上做 **变异测试**（改一行实现，看测试是否变红）来区分"真被钉住"与"碰巧通过"。结果：
+
+- 抓住本轮引入/遗留的 **1 个 HIGH + 5 个 MEDIUM 缺陷**与 **2 个未被测试钉住的边界**（`pSmart >= θ`、idle 门禁的 `<=` 含边界），全部已修并补测（见 CHANGELOG「Fixed in review」）。
+- 复跑该评审给出的变异：**11/11 被抓**。
+- 评审明确确认"未发现"的部分同样有价值：`processRoute` 六个出口的 `decisionTier` 一致性、推送与降级顺序、窗口裁剪、`downgradeMemory=1`、编排五道门禁、prompt section 与 `tools/pre-execute` 拒绝条件完全一致、清扫早于所有门禁、旧配置文档不被拒绝、两个注册表路径一致、e2e 可复现。
+
 ### 残余缺口（如实记录，未在轮内解决）
 
-1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、启动自检、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。
+1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、启动自检告警的接线、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。变异测试证实了这一点：把 `state.lastActivityAt = now` 整行删除，**测试全绿**——说明该修复只由代码保证。（自检告警的**判定**已提取为纯函数并单测，缺口只剩接线。）
 2. **SDK 漂移（E5）已由证据升级为 P2**：harness 通过 `LlmAdapter.prepareCall` 派发，而该 API 在 0.1.0-rc.6 不存在——本轮 e2e 的 fake adapter 就因此失败。插件自身的运行时值导入（`BlockAssembler`、`createUserMessage`、`settingsNamespace`）同样来自被钉住的旧版本，属真实的双版本风险，而非仅 fixture 问题。
 3. **C4(a) GUI 代写 `subagent-model-selection` 白名单**未实现（需跨命名空间写权限的可行性调查），作为 P2 保留；本轮交付的是 (b)：文档化 + 启动自检 + 提示词如实描述。
 4. **P2 编排深度**（验收审计、收敛协议、每 worker 成本归因）与 **P3** 项（模型目录单一事实来源、配置层权威展示、GUI pricing 编辑器/目录热刷新、覆盖率门槛、打包隔离闸）按约定未在轮内实施，已在 ROADMAP 的 Planned 表登记。
+5. **worker（子代理）用量不进遥测**：worker 没有路由器状态，其 usage 被跳过，因此编排花费对 `/router status` 不可见。SPEC §9 已如实收窄为"被路由的顶层 Agent 的消息"，并把 worker 归因留给 P2 的每 worker 成本工作——**宁可不记，也不记错**。
+6. **`manualOverride` 的泄漏没有清扫**（与编排泄漏同源，但机制不同）：`/route-force` 在**轮次之间**设置覆盖，所以不能在 `agent/pre-step` 里无脑清除。影响被限制在一轮之内（下一个正常收尾的轮次会在 `agent/turn-stopping` 清掉），因此本轮**记录而不修**；若要做，正确形态是给覆盖打上"已生效轮次"标记并在跨轮时清除。
+7. **`stats.ts` 的 confidence 高/中分界 `0.7` 仍是硬编码**：纯展示分桶，不影响任何决策；按 CONTRIBUTING「两个部署可能取值不同即须进 Config」的字面标准应当可配，但收益极低，本轮**接受现状**并记录在此。
 
 ---
 

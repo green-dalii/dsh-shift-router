@@ -12,7 +12,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-201%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen)](#development)
 
 </div>
 
@@ -32,7 +32,7 @@
 
 - **期望成本路由（EV）** —— 当且仅当 `pSmart ≥ θ` 时走 Smart，其中 `θ = 1/reworkPenalty`：这条门槛与模型价格无关，所以唯一的旋钮就是"错误降级有多痛"。升级是即时的；降回来需要 `downgradeMemory` 次**连续**的决定性 `fast` 判定。裁判不可用或判定不确信时一律**保持原位**，绝不猜测。
 - **缓存感知路由** —— 当 Fast 与 Smart 共享同一 provider 时，决策门槛会除以 `sameFamilyPenalty`（默认 1.5），并在 prompt 缓存仍热时抑制降级，避免切到便宜模型反而更贵。
-- **运行时故障转移** —— 429 / 402 / 5xx / 配额 / 用量上限 / 模型下线 等失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
+- **运行时故障转移** —— 429 / 402 / 5xx / 配额 / 用量上限 / 模型下线 等失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h04m → 4h16m，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
 - **任务级编排** —— 复杂任务会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、**连续**工作代理失败计一次升级，一旦触顶 `subagent` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
 - **成本遥测** —— 按层统计 token，可选的 USD 计价表（`/router status` 会显示"本次会话若全程使用 Smart 模型将花费多少"）。**吞吐速率不在此列**：DSH 原生已在消息页脚与 trajectory 面板显示 `tok/s`，且按解码时间计算，口径更准。
 - **零配置启动** —— 未配置分层前完全无操作；配置完成后路由立即生效。配置可通过 GUI 设置面板 **和** `/router config` 命令实时编辑（持久化，无需重启）。
@@ -216,7 +216,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 把 shift-router 加入�
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（12 个文件、201 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 配置注册表与 GUI 表单模型 / 白名单补丁逻辑）
+npm test            # vitest（12 个文件、216 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 配置注册表与 GUI 表单模型 / 白名单补丁逻辑）
 npm run typecheck
 ```
 

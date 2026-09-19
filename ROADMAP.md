@@ -66,7 +66,8 @@ live here):
 | Display syncs the **actually running** model | v1.4.2 (Bug B) | ✅ |
 | Strict model authority (tier change recorded even for a shared model id) | v1.4.0 | ✅ |
 | Explicit tier/gear requests honoured (Judge ≥0.9 + `decisionTier`) | v1.4.2 | ✅ |
-| Escalation counts **consecutive** worker failures, rounds settle on result | v1.2.0 | ✅ |
+| Escalation counts **consecutive** worker failures | v1.2.0 | ✅ |
+| Rounds counted at **dispatch** (`tools/pre-execute`), not at result | v1.2.0 | ✅ **deliberate divergence**: a dispatched delegation has already spent budget, so counting it keeps `maxRounds` a true ceiling on delegations attempted. Upstream counts at result, which lets an aborted call slip past the cap. |
 | Orchestration state leaked by an interrupted turn is swept | v1.4.2 (B1 analogue) | ✅ (sweep at turn start; in-turn retry means the upstream "retryable tail" hazard cannot occur here) |
 | ~~TPS median + 50 ms guard, turn-scoped fallback~~ | v1.4.2 | ⛔ **not ported** — DSH renders `tok/s` natively from decode time; the plugin's duplicated TPS machinery is **removed** instead |
 

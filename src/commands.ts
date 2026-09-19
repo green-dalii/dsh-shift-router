@@ -16,7 +16,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { EconomicMode, ShiftRouterConfig, RouterState, Tier } from './types.js'
-import { TIERS } from './types.js'
+import { LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT, TIERS } from './types.js'
 import {
   isValidTier,
   tierEmoji,
@@ -32,6 +32,8 @@ import {
   effectiveTheta,
   legacyThetaOverride,
   sameFamilyThetaFactor,
+  effectiveDowngradeMemory,
+  downgradeMemoryCapped,
 } from './router.js'
 import { resetOrchestration } from './orchestrate.js'
 import { formatStats } from './stats.js'
@@ -246,12 +248,22 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
   const sGear = `${gearMode ? `${gearMode} ` : ''}(R=${penalty} → θ=${theta.toFixed(2)}` +
     `${cacheFactor > 1 ? ` = base ÷ cache divisor ${cacheFactor}` : ''})` +
     `${legacyThetaOverride(config) !== undefined ? '  [θ from the legacy window.threshold override]' : ''}`
+  // Only a NON-default legacy value is an override; the pre-EV defaults are
+  // inert, so reporting them would claim an override (and, worse, a cache
+  // divisor) that is not in force.
   const legacyNotes: string[] = []
   if (legacyThetaOverride(config) !== undefined) {
     legacyNotes.push(`routing.window.threshold=${config.routing.window.threshold} overrides θ directly`)
   }
-  if (config.routing.cacheAware?.sameFamilyThreshold !== undefined) {
-    legacyNotes.push(`routing.cacheAware.sameFamilyThreshold=${config.routing.cacheAware.sameFamilyThreshold} implies the strong cache divisor`)
+  const legacyCacheThreshold = config.routing.cacheAware?.sameFamilyThreshold
+  if (legacyCacheThreshold !== undefined && legacyCacheThreshold !== LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT) {
+    legacyNotes.push(`routing.cacheAware.sameFamilyThreshold=${legacyCacheThreshold} implies the strong cache divisor`)
+  }
+  if (downgradeMemoryCapped(config)) {
+    legacyNotes.push(
+      `routing.economics.downgradeMemory=${config.routing.economics.downgradeMemory} exceeds routing.window.size=${config.routing.window.size}`
+      + ` — capped to ${effectiveDowngradeMemory(config)}, which is the most the decision window can hold`,
+    )
   }
 
   // The last decision explains WHY the current tier is what it is.

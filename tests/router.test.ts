@@ -11,6 +11,8 @@ import {
   applyModelSwitch,
   createRouterState,
   downgradeAllowedAt,
+  downgradeMemoryCapped,
+  effectiveDowngradeMemory,
   effectiveReworkPenalty,
   effectiveTheta,
   fastStreak,
@@ -172,6 +174,38 @@ describe('processRoute — EV decisions', () => {
     expect(decision.action).toBe('upgrade')
   })
 
+  it('escalates when pSmart is EXACTLY theta (the bound is inclusive)', () => {
+    // eco → θ = 0.5. A fast verdict of confidence 0.5 yields pSmart = 0.5:
+    // exactly on the bar, which SPEC §3 defines as "run smart". Mutation-tested
+    // gap: flipping `>=` to `>` used to leave the suite green.
+    const cfg = crossProviderConfig()
+    cfg.routing.economics.mode = 'eco'
+    const state = createRouterState()
+    state.currentTier = 'fast'
+    const decision = processRoute(
+      { tier: 'fast', source: 'llm', confidence: 0.5 },
+      state,
+      cfg,
+      ALL,
+    )
+    expect(decision.action).toBe('upgrade')
+    expect(decision.decisionTier).toBe('smart')
+  })
+
+  it('stays fast a hair below theta', () => {
+    const cfg = crossProviderConfig()
+    cfg.routing.economics.mode = 'eco'
+    const state = createRouterState()
+    state.currentTier = 'fast'
+    const decision = processRoute(
+      { tier: 'fast', source: 'llm', confidence: 0.501 },
+      state,
+      cfg,
+      ALL,
+    )
+    expect(decision.decisionTier).toBe('fast')
+  })
+
   it('keeps the fast tier when pSmart falls below theta', () => {
     // fast verdict c = 0.9 → pSmart = 0.1 < 0.333.
     const state = createRouterState()
@@ -285,6 +319,35 @@ describe('processRoute — downgrade memory', () => {
     expect(fastStreak(state.window)).toBe(0)
   })
 
+  it('saturates an over-large downgradeMemory at the window size', () => {
+    // size 5 with memory 6 is schema-legal but unsatisfiable in a 5-entry
+    // window; without saturation the router would be pinned to Smart forever.
+    const cfg = crossProviderConfig()
+    cfg.routing.window.size = 5
+    cfg.routing.economics.downgradeMemory = 6
+    expect(downgradeMemoryCapped(cfg)).toBe(true)
+    expect(effectiveDowngradeMemory(cfg)).toBe(5)
+
+    const state = createRouterState()
+    state.currentTier = 'smart'
+    let last = processRoute({ tier: 'fast', source: 'llm', confidence: 0.99 }, state, cfg, ALL)
+    for (let i = 0; i < 4; i++) {
+      last = processRoute({ tier: 'fast', source: 'llm', confidence: 0.99 }, state, cfg, ALL)
+    }
+    // `processRoute` returns the decision; the caller applies the switch.
+    expect(last.action).toBe('downgrade')
+    expect(last.decisionTier).toBe('fast')
+    expect(state.downgradeCount).toBe(1)
+  })
+
+  it('does not report a cap when the memory fits the window', () => {
+    const cfg = crossProviderConfig()
+    cfg.routing.window.size = 5
+    cfg.routing.economics.downgradeMemory = 2
+    expect(downgradeMemoryCapped(cfg)).toBe(false)
+    expect(effectiveDowngradeMemory(cfg)).toBe(2)
+  })
+
   it('never downgrades from the fast tier', () => {
     const cfg = crossProviderConfig()
     const state = createRouterState()
@@ -331,6 +394,20 @@ describe('cache-aware downgrade gate', () => {
     expect(downgradeAllowedAt(state, cfg, now)).toBe(true)
   })
 
+  it('suppresses the downgrade AT the idle boundary (inclusive warm window)', () => {
+    // SPEC §5: suppressed while `now - lastActivityAt <= idleBoundaryMs`.
+    // Mutation-tested gap: `>` → `>=` used to leave the suite green.
+    const cfg = crossProviderConfig()
+    cfg.tiers.smart.models = [{ provider: 'p1', model: 'smart-1', priority: 1 }]
+    const boundary = cfg.routing.cacheAware!.idleBoundaryMs
+    const now = 1_000_000
+    const state = createRouterState()
+    state.lastActivityAt = now - boundary
+    expect(downgradeAllowedAt(state, cfg, now)).toBe(false)
+    state.lastActivityAt = now - boundary - 1
+    expect(downgradeAllowedAt(state, cfg, now)).toBe(true)
+  })
+
   it('is inert when cache-aware routing is disabled', () => {
     const cfg = crossProviderConfig()
     cfg.routing.cacheAware!.enabled = false
@@ -372,6 +449,28 @@ describe('processRoute — manual override and strict model authority', () => {
     expect(decision.action).toBe('manual')
     expect(decision.decisionTier).toBe('smart')
     expect(decision.switchTo).toEqual({ provider: 'p9', modelId: 'forced-1', tier: 'smart' })
+  })
+
+  it('derives a forced model\'s tier from the model, never from the verdict', () => {
+    // `/route-force <provider/model>` while the Judge says "smart" used to
+    // report decisionTier 'smart' — enough to start an orchestration turn on a
+    // user-pinned model. The tier must come from the forced model itself.
+    const cfg = crossProviderConfig()
+    const state = createRouterState()
+    state.currentTier = 'smart'
+    state.manualOverride = { active: true, provider: 'p1', modelId: 'fast-1' }
+    const decision = processRoute({ tier: 'smart', source: 'llm', confidence: 0.9 }, state, cfg, ALL)
+    expect(decision.action).toBe('manual')
+    expect(decision.decisionTier).toBe('fast')
+  })
+
+  it('falls back to the current tier for a forced model that belongs to no tier', () => {
+    const cfg = crossProviderConfig()
+    const state = createRouterState()
+    state.currentTier = 'fast'
+    state.manualOverride = { active: true, provider: 'p9', modelId: 'unlisted' }
+    const decision = processRoute({ tier: 'smart', source: 'llm', confidence: 0.9 }, state, cfg, ALL)
+    expect(decision.decisionTier).toBe('fast')
   })
 
   it('records the tier change even when both tiers resolve to the same model', () => {

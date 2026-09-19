@@ -80,30 +80,40 @@ interface RouteDecision {
 
 Order of evaluation:
 
-1. **Manual override** — `/route-force` wins. `action = 'manual'`,
-   `decisionTier` = the override's tier (or the resolved model's tier).
+1. **Manual override** — `/route-force` wins. `action = 'manual'`, and
+   `decisionTier` is the override's tier if one was named, else the forced
+   model's **owning** tier (`findTierForModel`), else the current tier. It is
+   never taken from the raw verdict: `/route-force <provider/model>` while the
+   Judge says `smart` must not report `decisionTier: 'smart'`, or an
+   orchestration turn could start on a user-pinned model (§7.1).
 2. **Judge usability** — if `judgeResult.source === 'fallback'`, the router
    **holds**: `decisionTier = state.currentTier`, `held = true`,
    `switchTo = null`, `action = 'stay'`. The verdict is pushed to the window as
-   a **hold entry** (`hold: true`) and never counts as a fast/fast streak entry.
+   a **hold entry** (`hold: true`). A hold never counts toward the downgrade
+   streak and never lets an earlier fast streak survive — it resets it (§4).
    *Rationale: "When the Judge is unavailable, hold position — never guess."
    Treating an outage as a decisive `fast` verdict silently downgrades a smart
    session after two outages.*
-3. **EV decision** (§3) — compute `pSmart` and `θ_eff`; below
-   `window.minConfidence` the verdict is likewise a hold (step 2 semantics).
+3. **EV decision** (§3) — compute `pSmart` and `θ_eff`. A verdict whose raw
+   `confidence` is below `window.minConfidence` is the same hold as step 2.
 4. **Immediate upgrade** — decision `smart` while `currentTier === 'fast'`:
    resolve the Smart tier's best healthy model; on success the window is
    **cleared**, `upgradeCount += 1`, `action = 'upgrade'`.
 5. **Push the verdict** to the decision window and trim it to `window.size`.
+   (An upgrade returns at step 4 and therefore clears the window instead of
+   pushing into it.)
 6. **Gated downgrade** — decision `fast` while `currentTier === 'smart'`,
    requiring `economics.downgradeMemory` **consecutive** decisive fast
    decisions (§4) **and** `downgradeAllowedAt()` (§5). On success
    `downgradeCount += 1`, `action = 'downgrade'`.
 7. Otherwise `action = 'stay'`, `switchTo = null`.
 
-`decisionTier` is the **single** signal consumed by model switching,
-orchestration entry (§7) and telemetry attribution. Consumers must not
-re-derive a tier from the raw verdict.
+`decisionTier` is the **single** signal consumed by model switching and by
+orchestration entry (§7): consumers must not re-derive a tier from the raw
+verdict. Spend attribution is the one exception — it attributes by the *owning
+model* (`findTierForModel`), because a model can run outside the router's
+decision (§9). Once the switch is applied, `state.currentTier` and
+`decisionTier` are identical in every branch.
 
 ### 2.1 Strict model authority
 
@@ -171,9 +181,15 @@ Properties that make this the right rule:
   tail: any hold or smart entry resets it. Downgrade fires at
   `streak ≥ economics.downgradeMemory`.
 - An empty window never downgrades.
+- The requirement **saturates at the window size**: the streak lives in the
+  window, so `downgradeMemory > window.size` could never be satisfied and would
+  pin the router to Smart for the rest of the session. The effective requirement
+  is `min(downgradeMemory, max(1, window.size))`, and `/router status` says so
+  out loud rather than leaving it silent.
 
-`window.minConfidence` (default 0.5) is the decisive/hold boundary for
-`pSmart` inputs. A missing `confidence` is read as `1.0` (backward-compatible
+`window.minConfidence` (default 0.5) is the decisive/hold boundary for the
+Judge's **raw `confidence`** — it is evaluated before `pSmart` is computed, so a
+verdict outside the bar is a hold regardless of which tier it names. A missing `confidence` is read as `1.0` (backward-compatible
 with prompts that omit it) — the Judge's own outage is the only "no signal"
 case the router invents no value for.
 
@@ -391,12 +407,16 @@ back to the router's current model. No transcript archaeology.
 
 ## 9. Telemetry and cost
 
-- Every `assistant/message` with usage attributes tokens
+- Every `assistant/message` **of a routed (top-level) agent** with usage
+  attributes tokens
   (`input`/`output`/`cacheRead`/`cacheWrite`) to the tier that **actually owns
   the model that ran** (`findTierForModel`, else the current tier) and appends a
   bounded `CallRecord` (`telemetry.callLogCap`, default 1000, oldest dropped).
 - Cost is estimated from `pricing` (USD per 1M tokens). `.dsh` usage events carry
   no USD.
+  Worker (subagent) messages are deliberately not attributed yet: they belong to
+  the P2 per-worker cost work, so orchestration spend is currently invisible to
+  this ledger rather than mis-attributed.
 - **Savings baseline**: every logged call priced at the **Smart tier
   priority-1** model; `savings = baselineTotal − actualTotal`. When that model
   has no pricing entry the baseline is reported as unavailable rather than as
@@ -423,8 +443,12 @@ back to the router's current model. No transcript archaeology.
 
 ## 10. Configuration reference
 
-Every leaf has a default, so an empty config row is a working no-op. Invalid
-values fail plugin load (Schemastery validation), never silently coerce.
+Every leaf has a default **except three that are intentionally unset** —
+`routing.window.threshold`, `routing.cacheAware.sameFamilyThreshold` (legacy
+knobs that must stay inert until a user writes a value) and
+`routing.economics.mode` (a preset selector). An empty config row is still a
+working no-op. Invalid values fail plugin load (Schemastery validation), never
+silently coerce.
 
 | Key | Type / range | Default | Notes |
 |---|---|---|---|
@@ -442,16 +466,15 @@ values fail plugin load (Schemastery validation), never silently coerce.
 | `routing.economics.mode` | `eco` \| `default` \| `sport` (optional) | *(unset)* | preset; authoritative over `reworkPenalty` |
 | `routing.window.size` | int 1..100 | `5` | |
 | `routing.window.minConfidence` | 0..1 | `0.5` | decisive/hold boundary |
-| `routing.window.threshold` | 0..1 | `0.6` | **legacy** raw-θ override; default inert |
+| `routing.window.threshold` | 0..1 | *(unset)* | **legacy** raw-θ override; ships unset, and its old default `0.6` is inert |
 | `routing.cacheAware.enabled` | boolean | `true` | |
 | `routing.cacheAware.sameFamilyPenalty` | number ≥ 1 | `1.5` | θ divisor on same-family tiers |
 | `routing.cacheAware.idleBoundaryMs` | int ≥ 0 | `300000` | warm-cache suppression window |
-| `routing.cacheAware.sameFamilyThreshold` | 0..1 | `0.9` | **legacy**; non-default implies penalty 3.0 |
+| `routing.cacheAware.sameFamilyThreshold` | 0..1 | *(unset)* | **legacy**; ships unset, and a non-default value implies penalty 3.0 |
 | `ux.routerLogVerbose` | boolean | `false` | diagnostics via `ctx.logger` |
 | `orchestration.mode` | `auto` \| `off` | `auto` | |
 | `orchestration.maxRounds` | int 0..100 | `3` | hard cap |
 | `orchestration.escalationThreshold` | int 1..100 | `2` | consecutive worker failures → 1 escalation |
-| `orchestration.requireSmartModel` | boolean | `true` | skip orchestration if Smart unresolvable |
 | `failover.baseMs` | int ≥ 100 | `60000` | |
 | `failover.maxMs` | int ≥ 1000 | `21600000` | |
 | `failover.startAttempts4xx` | int 1..20 | `3` | 16 min start |
@@ -485,8 +508,10 @@ presets which are persisted.
 `/router status` must surface: routing state and gear (R → θ → θ_eff in plain
 language), the decision window, the last decision (verdict, confidence, action,
 reason) when available, model health/cooldowns, the actual running model,
-per-tier spend + savings baseline, and any legacy-override warning. It must not
-render a throughput figure (§9).
+per-tier spend + savings baseline, and any legacy-override **or capped-knob**
+warning (an inert legacy default is silent; only a non-default legacy value, or
+a `downgradeMemory` larger than the window, is reported). It must not render a
+throughput figure (§9).
 
 ---
 

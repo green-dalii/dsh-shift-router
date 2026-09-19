@@ -63,6 +63,8 @@ import {
 import {
   shouldOrchestrate,
   recordWorkerOutcome,
+  workerModelSelectionWarning,
+  type WorkerModelSelection,
   buildOrchestratorPrompt,
   buildCapNotice,
   capHit,
@@ -593,6 +595,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     // running model, and — deliberately — never triggers a switch.
     state.actualProvider = provider
     state.actualModel = model
+    // Every completed assistant message ages the prompt cache, whether or not
+    // it carried usage. Setting this only when usage exists left the state at
+    // "no message has completed yet", which is what lets cache-aware routing
+    // permit a downgrade while the cache is still warm.
+    state.lastActivityAt = now
 
     // A 2xx response clears the cooldown (mirrors pi's after_provider_response).
     if (isModelInCooldown(state.modelCooldowns, provider, model, now)) {
@@ -608,7 +615,6 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       cacheWrite: usage.cacheWriteTokens ?? 0,
     }
     state.totalOutputTokens += tokens.output
-    state.lastActivityAt = now
 
     // Attribute the message to the tier that actually owns this model (a
     // manual override or a same-provider switch can run a model that isn't
@@ -717,7 +723,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // `subagent-model-selection` allowlist (default off). We cannot enable that
   // setting from here, so the honest move is to tell the user what to turn on
   // instead of letting workers silently inherit the Smart model.
-  function workerModelSelection(): { enabled: boolean; routes: number } | undefined {
+  function workerModelSelection(): WorkerModelSelection | undefined {
     const holder = ctx as unknown as {
       subagentModelSelection?: { current?: () => unknown }
     }
@@ -749,17 +755,8 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       ctx.logger.warn('[shift-router] fast tier is empty — the judge has no model chain and routing will hold position')
     }
     if (getConfig().orchestration.mode === 'auto' && getConfig().tiers.fast.models.length > 0) {
-      const selection = workerModelSelection()
-      // Only warn when we can actually read the setting: a false alarm is worse
-      // than silence, and an unreadable service means "unknown", not "off".
-      if (selection !== undefined && (!selection.enabled || selection.routes === 0)) {
-        ctx.logger.warn(
-          '[shift-router] orchestration is on but model-selectable subagent delegation is unavailable '
-          + '(enable the harness "%s" setting and list the Fast-tier routes in allowedModels) — '
-          + 'workers will otherwise inherit the Smart model, so delegation loses its cost advantage',
-          'subagent-model-selection',
-        )
-      }
+      const warning = workerModelSelectionWarning(workerModelSelection())
+      if (warning !== null) ctx.logger.warn('[shift-router] %s', warning)
     }
   }
 

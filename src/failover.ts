@@ -113,18 +113,6 @@ export function clearModelCooldown(
   cooldowns.delete(modelKey(provider, model))
 }
 
-/** Milliseconds until the model's cooldown expires (0 if not cooling). */
-export function remainingCooldownMs(
-  cooldowns: CooldownMap,
-  provider: string,
-  model: string,
-  now: number,
-): number {
-  if (!isModelInCooldown(cooldowns, provider, model, now)) return 0
-  const e = cooldowns.get(modelKey(provider, model))!
-  return e.until - now
-}
-
 /** DSH canonical codes that map to a failover-worthy transient failure. */
 const CANONICAL_FAILOVER_CODES = new Set(['RATE_LIMIT', 'SERVER', 'QUOTA'])
 
@@ -178,8 +166,11 @@ export function detectFailoverError(failure: LlmFailure | undefined | null): { c
     return { code: '429' }
   }
 
+  // 402 belongs here as well as in the keyword list: an adapter that folds the
+  // status into the text ("HTTP 402 Payment Required") must still cool the
+  // model down, which is the whole point of the insufficient-balance handling.
   const statusMatch = text.match(
-    /(?:error|http|status|code)[^\n]{0,12}\b(429|50[0-9]|51[0-9]|52[0-9])\b/i,
+    /(?:error|http|status|code)[^\n]{0,12}\b(402|429|50[0-9]|51[0-9]|52[0-9])\b/i,
   )
   if (statusMatch) return { code: statusMatch[1]! }
 
