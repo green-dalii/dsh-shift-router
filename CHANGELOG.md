@@ -14,7 +14,7 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
 
 > **Status: implemented, not yet released.** This section was authored
 > docs-first and every item has since landed, with the gates in SPEC §14 green
-> (tsc host + client, 182 tests across 11 files, tsdown build, and
+> (tsc host + client, 201 tests across 12 files, tsdown build, and
 > `npm run test:e2e` against a scratch profile). The delivery audit — including
 > what was deliberately *not* ported and the residual gaps — is in
 > [`ALIGNMENT.md`](ALIGNMENT.md). A version bump and the release itself are the

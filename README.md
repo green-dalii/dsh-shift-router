@@ -13,7 +13,7 @@ Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-201%20passing-brightgreen)](#development)
 
 </div>
 
@@ -224,7 +224,7 @@ The caps are enforced by the router, not just described: every `subagent` tool c
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (182 tests across 11 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / config registries + GUI form model / whitelist patch)
+npm test            # vitest (201 tests across 12 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / config registries + GUI form model / whitelist patch)
 npm run typecheck
 ```
 

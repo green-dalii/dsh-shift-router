@@ -211,7 +211,7 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 |---|---|
 | `npx tsc --noEmit`（宿主） | ✅ |
 | `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
-| `npx vitest run` | ✅ 182 tests / 11 files |
+| `npx vitest run` | ✅ 201 tests / 12 files |
 | `npm run build`（tsc + tsc client + tsdown） | ✅ |
 | `npm run test:e2e`（临时 DSH_HOME → 装 bundle → 跑一轮 → 设置往返） | ✅ `ROUTER-E2E: turn ran on fake/fake-smart`；probe `{ok:true}` |
 | `npm pack` 内容与 `dist` 可加载性 | ✅ 57 files；`import('./dist/index.js')` 导出 `apply/Config/inject/name`，schema 解析出 EV 默认值 |
