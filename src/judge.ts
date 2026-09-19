@@ -2,9 +2,15 @@
  * dsh-shift-router — Task classifier (Judge)
  *
  * Single-stage classification via LLM (uses the fast tier's model chain).
- * On failure: hold position (return "fast"), log a warning.
  * No heuristic rules, no regex for the *decision* — the LLM is the sole
- * classifier. Regex is used only to parse the LLM's JSON reply.
+ * classifier. Regex is used only to parse the LLM's JSON reply and to detect
+ * provider failure signatures.
+ *
+ * On failure the Judge reports `source: 'fallback'`, which the router treats
+ * as a HOLD (keep the current tier). The `tier` value carried alongside a
+ * fallback is a type-compatible placeholder, never evidence — treating an
+ * outage as a decisive `fast` verdict is what silently downgraded Smart
+ * sessions upstream.
  *
  * DSH adaptation: the judge call goes through `ctx.llm.stream()` instead of
  * a hand-built fetch to pi's models-store/auth endpoints. Credentials,
@@ -37,16 +43,27 @@ intelligence level. The Judge itself is a small one-shot call.
 **Respond with ONLY this JSON object, no other text, no markdown fences:**
 
 \`\`\`json
-{"tier": "fast", "confidence": 0.95, "reason": "routine bug fix, path clear"}
+{"tier": "fast", "confidence": 0.95, "reason": "routine bug fix, path clear", "orchestrate": false}
 \`\`\`
 
 or
 
 \`\`\`json
-{"tier": "smart", "confidence": 0.85, "reason": "user asked for depth"}
+{"tier": "smart", "confidence": 0.85, "reason": "user asked for depth", "orchestrate": true}
 \`\`\`
 
-\`tier\`, \`confidence\`, \`reason\` must appear inside the JSON object with no extra prose. \`confidence\` ∈ [0, 1] — how clearly the signals point to that tier (high = clear, ~0.3 = mixed). \`reason\` is one ultra-short phrase (3–8 words) naming the deciding signal ("architecture direction", "high stakes"). \`reason\` is for humans/debugging; the router never reads it.
+All four keys must appear inside the JSON object with no extra prose.
+
+- \`tier\` — the role that drives the whole turn.
+- \`confidence\` ∈ [0, 1] — how clearly the signals point to that tier
+  (high = clear, ~0.3 = mixed).
+- \`reason\` — one ultra-short phrase (3–8 words) naming the deciding signal
+  ("architecture direction", "high stakes"). For humans/debugging; the router
+  never reads it.
+- \`orchestrate\` — boolean. \`true\` only when the task is large or
+  decomposable enough that the Smart tier should **delegate implementation to
+  subagents** instead of doing it all itself. \`false\` when one model should
+  just do the work. Emit \`false\` whenever \`tier\` is \`fast\`.
 
 ## What each tier means
 
@@ -80,10 +97,20 @@ is the model that actually does the important work.
 | Reading, explaining, summarizing existing code | fast |
 | Following an established pattern or design | fast |
 | Small refactors, "make it work" | fast |
+| Document handling — read, check, update, format, translate, or keep several docs consistent — *unless* the work sets direction (a new design doc, a review that drives rework) | fast |
+| Tedious bulk batches: mechanical renames, repetitive edits across many files, boilerplate | fast |
 
 ### 2. User's explicit intent about model quality
 
 Overrides task content — the user knows what they need.
+
+**An explicit instruction is a certainty, not a hedge.** If the user names a
+tier, a gear preset, or orchestration ("use the smart tier", "使用 Smart 档",
+"go eco", "plan this out with subagents"), obey it and report
+\`confidence\` ≥ 0.9. Do not average it against the other signals or hedge
+below 0.9 because the task also looks routine — being told what to do removes
+the uncertainty the other signals exist to resolve. Evaluate this signal
+**before** any torn-task or mixed-evidence reasoning.
 
 - Wants depth: "think carefully", "deeply", "thoroughly", "your best model",
   "use the smartest model", "最强大模型", "仔细想想", "深思熟虑", "请认真分析" → **smart**
@@ -138,7 +165,11 @@ The "Tier" column is the model that **drives the whole turn**.
 | "别想太多，给我写个能跑的版本就行" | fast | Explicit: 别想太多 → speed |
 | "ok" / "thanks" / "continue" / "继续" | fast | Acknowledgment |
 | "Deploy this to production" | smart | Irreversible + high stakes |
-| "Plan the migration from v1 to v2" | smart | Multi-step, ambiguous |`
+| "Plan the migration from v1 to v2" | smart | Multi-step, ambiguous |
+| "Update the dates in these five docs" | fast | Doc handling, no direction set |
+| "Translate this README and keep the tables aligned" | fast | Bulk + doc handling |
+| "使用 Smart 档来做这个" | smart | Explicit tier request → conf ≥ 0.9 |
+| "Take the smart model and split this into subagent tasks" | smart | Explicit tier + delegation |`
 
 /** Budget enough tokens for reasoning + JSON answer (Config-tunable default). */
 export const JUDGE_MAX_TOKENS = 4000
@@ -175,24 +206,47 @@ export function extractTier(text: string): Tier | null {
   return null
 }
 
-/** Result of parsing a Judge response: tier + optional confidence (0-1). */
+/** Result of parsing a Judge response: the four contract keys, all optional but `tier`. */
 export interface ParsedJudgeResponse {
   tier: Tier
   confidence?: number
   /** Ultra-short classification reason (one phrase); absent when not emitted. */
   reason?: string
+  /**
+   * The Judge's orchestration opinion. Absent (older prompt, or the model did
+   * not emit it) means "no opinion" — the caller falls back to the tier-based
+   * default, so an older prompt keeps working.
+   */
+  orchestrate?: boolean
 }
 
-/** Parse a Judge answer string (JSON or loose) for tier + confidence + reason. */
+/** Parse a Judge answer string (JSON or loose) for tier + confidence + reason + orchestrate. */
 export function parseJudgeAnswer(text: string): ParsedJudgeResponse | null {
   const tier = extractTier(text)
   if (!tier) return null
   const confidence = parseConfidenceFromText(text)
   const reason = parseReasonFromText(text)
+  const orchestrate = parseOrchestrateFromText(text)
   const out: ParsedJudgeResponse = { tier }
   if (confidence !== undefined) out.confidence = confidence
   if (reason !== undefined) out.reason = reason
+  if (orchestrate !== undefined) out.orchestrate = orchestrate
   return out
+}
+
+/**
+ * Extract the Judge's orchestration opinion from its answer. Accepts the
+ * documented `orchestrate` key plus a couple of tolerant aliases; returns
+ * undefined when the model said nothing about it (which must keep working as
+ * "no opinion", not as `false`).
+ */
+export function parseOrchestrateFromText(text: string): boolean | undefined {
+  const match = text.match(
+    /["']?(?:orchestrate|delegate|subagents?)["']?\s*[:=]\s*["']?(true|false|yes|no)["']?/i,
+  )
+  if (!match) return undefined
+  const value = match[1]!.toLowerCase()
+  return value === 'true' || value === 'yes'
 }
 
 /**
@@ -299,6 +353,7 @@ export async function defaultJudgeStreamCall(
     source: 'llm',
     ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
     ...(answer.reason !== undefined ? { reason: answer.reason } : {}),
+    ...(answer.orchestrate !== undefined ? { orchestrate: answer.orchestrate } : {}),
   }
   return { ok: true, result }
 }
@@ -325,7 +380,10 @@ export function failureCodeFromFailure(failure: LlmFailure): string | null {
  * `externalSignal` (the owning turn's abort signal, when any) is fused with
  * the per-attempt timeout so an aborted turn cancels the judge promptly.
  *
- * Only when ALL fast-tier models fail do we hold position (fallback).
+ * When ALL fast-tier models fail the result is `source: 'fallback'`, which the
+ * router treats as a HOLD (SPEC §2). The `tier` field in that case is a
+ * type-compatible placeholder and must never be read as a verdict — the caller
+ * checks `source`.
  */
 export async function classify(
   prompt: string,

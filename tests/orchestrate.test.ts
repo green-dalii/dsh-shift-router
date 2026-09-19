@@ -10,7 +10,9 @@ import {
   createOrchestrationState,
   enterOrchestration,
   exitOrchestration,
+  recordWorkerOutcome,
   renderTierChain,
+  resetOrchestration,
   shouldOrchestrate,
 } from '../src/orchestrate.js'
 import { createRouterState } from '../src/router.js'
@@ -59,31 +61,87 @@ describe('buildOrchestratorPrompt', () => {
     expect(prompt).not.toContain('{{maxRounds}}')
     expect(prompt).not.toContain('{{escalationThreshold}}')
     expect(prompt).toContain('at most **3 delegate→review rounds**')
-    expect(prompt).toContain('after **2** failed')
+    expect(prompt).toContain('**2** consecutive')
+    // The worker-model section must describe the host allowlist instead of
+    // promising a pin the plugin cannot perform (SPEC §7.4).
+    expect(prompt).toContain('subagent-model-selection')
+    expect(prompt).not.toContain('agentOptions')
   })
 })
 
 describe('shouldOrchestrate', () => {
-  it('requires auto mode, smart verdict, resolvable smart model, and the subagent tool', () => {
+  const smart = { decisionTier: 'smart' as const, held: false }
+  const fast = { decisionTier: 'fast' as const, held: false }
+  const held = { decisionTier: 'smart' as const, held: true }
+
+  it('requires auto mode, a smart DECISION, and the subagent tool', () => {
     const cfg = makeConfig()
-    expect(shouldOrchestrate(cfg, 'smart', true, true)).toBe(true)
-    expect(shouldOrchestrate(cfg, 'fast', true, true)).toBe(false)
-    expect(shouldOrchestrate(cfg, 'smart', false, true)).toBe(false) // requireSmartModel
-    expect(shouldOrchestrate(cfg, 'smart', true, false)).toBe(false) // no subagent tool
+    expect(shouldOrchestrate(cfg, smart, true)).toBe(true)
+    expect(shouldOrchestrate(cfg, fast, true)).toBe(false)
+    expect(shouldOrchestrate(cfg, smart, false)).toBe(false) // no subagent tool
     cfg.orchestration.mode = 'off'
-    expect(shouldOrchestrate(cfg, 'smart', true, true)).toBe(false)
+    expect(shouldOrchestrate(cfg, smart, true)).toBe(false)
     cfg.enabled = false
-    expect(shouldOrchestrate(cfg, 'smart', true, true)).toBe(false)
+    expect(shouldOrchestrate(cfg, smart, true)).toBe(false)
   })
 
-  it('relaxes the smart-model requirement when requireSmartModel is false', () => {
+  it('never orchestrates on a hold — "keep position" is not evidence of complexity', () => {
     const cfg = makeConfig()
-    cfg.orchestration.requireSmartModel = false
-    expect(shouldOrchestrate(cfg, 'smart', false, true)).toBe(true)
+    expect(shouldOrchestrate(cfg, held, true, true)).toBe(false)
+  })
+
+  it('lets the Judge veto orchestration explicitly', () => {
+    const cfg = makeConfig()
+    expect(shouldOrchestrate(cfg, smart, true, true)).toBe(true)
+    expect(shouldOrchestrate(cfg, smart, true, false)).toBe(false)
+    // Absent (older prompt) is "no opinion", not a veto.
+    expect(shouldOrchestrate(cfg, smart, true, undefined)).toBe(true)
+  })
+})
+
+describe('recordWorkerOutcome (consecutive-failure escalation)', () => {
+  it('counts only consecutive failures toward an escalation', () => {
+    const cfg = makeConfig()
+    cfg.orchestration.escalationThreshold = 2
+    const state = createRouterState()
+    enterOrchestration(state)
+
+    recordWorkerOutcome(state, cfg, false)
+    expect(state.orchestration.workerFailStreak).toBe(1)
+    expect(state.orchestration.escalations).toBe(0)
+
+    // A success resets the streak, so the earlier failure is forgotten: two
+    // isolated failures must NOT burn the cap.
+    recordWorkerOutcome(state, cfg, true)
+    expect(state.orchestration.workerFailStreak).toBe(0)
+    recordWorkerOutcome(state, cfg, false)
+    expect(state.orchestration.escalations).toBe(0)
+
+    // Two in a row is one escalation, and the streak resets.
+    recordWorkerOutcome(state, cfg, false)
+    expect(state.orchestration.escalations).toBe(1)
+    expect(state.orchestration.workerFailStreak).toBe(0)
+  })
+
+  it('is inert while orchestration is inactive', () => {
+    const cfg = makeConfig()
+    const state = createRouterState()
+    recordWorkerOutcome(state, cfg, false)
+    expect(state.orchestration.escalations).toBe(0)
+    expect(state.orchestration.workerFailStreak).toBe(0)
   })
 })
 
 describe('orchestration lifecycle', () => {
+  it('reset clears a leaked run (the sweep index.ts performs at turn start)', () => {
+    const state = createRouterState()
+    enterOrchestration(state)
+    state.orchestration.rounds = 2
+    state.orchestration.workerFailStreak = 1
+    resetOrchestration(state)
+    expect(state.orchestration).toEqual(createOrchestrationState())
+  })
+
   it('enters once, exits to fresh state', () => {
     const state = createRouterState()
     expect(state.orchestration.active).toBe(false)

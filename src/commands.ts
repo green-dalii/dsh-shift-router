@@ -15,7 +15,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
-import type { ShiftRouterConfig, RouterState, Tier } from './types.js'
+import type { EconomicMode, ShiftRouterConfig, RouterState, Tier } from './types.js'
 import { TIERS } from './types.js'
 import {
   isValidTier,
@@ -28,6 +28,10 @@ import {
   setManualOverrideModel as setOverrideModel,
   setManualOverrideTier as setOverrideTier,
   shareProviderFamily,
+  effectiveReworkPenalty,
+  effectiveTheta,
+  legacyThetaOverride,
+  sameFamilyThetaFactor,
 } from './router.js'
 import { resetOrchestration } from './orchestrate.js'
 import { formatStats } from './stats.js'
@@ -83,6 +87,19 @@ export interface ConfigField {
   enum?: readonly string[]
   /** Display hint, e.g. "ms", "[0,1]". */
   hint?: string
+  /**
+   * The field ships WITHOUT a value in `DEFAULT_CONFIG` — unset is its real
+   * default (a preset selector that is off until chosen, or a compatibility
+   * knob that must stay inert). The registry guard allows a missing value only
+   * for fields flagged here.
+   */
+  optional?: true
+  /**
+   * A pre-EV knob kept so existing configs keep working. Implies `optional`,
+   * and is annotated as legacy wherever the field is listed so nobody sets one
+   * by accident.
+   */
+  legacy?: true
 }
 
 export const CONFIG_FIELDS: ConfigField[] = [
@@ -91,20 +108,22 @@ export const CONFIG_FIELDS: ConfigField[] = [
   { path: 'routing.judgeTimeout', type: 'number', hint: 'ms' },
   { path: 'routing.judgeMaxTokens', type: 'number' },
   { path: 'routing.judgePromptCap', type: 'number' },
+  { path: 'routing.economics.reworkPenalty', type: 'number', hint: '≥1' },
+  { path: 'routing.economics.downgradeMemory', type: 'number', hint: 'turns' },
+  { path: 'routing.economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], optional: true },
   { path: 'routing.window.size', type: 'number' },
-  { path: 'routing.window.threshold', type: 'number', hint: '[0,1]' },
+  { path: 'routing.window.threshold', type: 'number', hint: '[0,1]', optional: true, legacy: true },
   { path: 'routing.window.minConfidence', type: 'number', hint: '[0,1]' },
   { path: 'routing.cacheAware.enabled', type: 'boolean' },
-  { path: 'routing.cacheAware.sameFamilyThreshold', type: 'number', hint: '[0,1]' },
+  { path: 'routing.cacheAware.sameFamilyPenalty', type: 'number', hint: '≥1' },
+  { path: 'routing.cacheAware.sameFamilyThreshold', type: 'number', hint: '[0,1]', optional: true, legacy: true },
   { path: 'routing.cacheAware.idleBoundaryMs', type: 'number', hint: 'ms' },
   { path: 'orchestration.mode', type: 'enum', enum: ['auto', 'off'] },
   { path: 'orchestration.maxRounds', type: 'number' },
   { path: 'orchestration.escalationThreshold', type: 'number' },
-  { path: 'orchestration.requireSmartModel', type: 'boolean' },
   { path: 'failover.baseMs', type: 'number', hint: 'ms' },
   { path: 'failover.maxMs', type: 'number', hint: 'ms' },
   { path: 'failover.startAttempts4xx', type: 'number' },
-  { path: 'failover.speedWindowSize', type: 'number' },
   { path: 'telemetry.callLogCap', type: 'number' },
   { path: 'ux.routerLogVerbose', type: 'boolean' },
   { path: 'tiers.fast.models', type: 'modelList' },
@@ -170,7 +189,7 @@ export function flattenLeaves(
 function formatWindow(window: RouterState['window']): string {
   if (window.length === 0) return '(empty)'
   const badge: Record<string, string> = { fast: 'f', smart: 's' }
-  return '[' + window.map((e) => badge[e.tier] ?? '?').join(', ') + ']'
+  return '[' + window.map((e) => (e.hold ? 'h' : badge[e.tier] ?? '?')).join(', ') + ']'
 }
 
 function formatTierList(config: ShiftRouterConfig): string {
@@ -185,7 +204,11 @@ function formatTierList(config: ShiftRouterConfig): string {
 
 function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: CommandDeps): string {
   const counts: Record<string, number> = { fast: 0, smart: 0 }
-  for (const e of state.window) counts[e.tier]!++
+  let holds = 0
+  for (const e of state.window) {
+    if (e.hold) holds += 1
+    else counts[e.tier]!++
+  }
 
   const now = Date.now()
   const cooldownLines: string[] = []
@@ -210,14 +233,50 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     : ' ✗'
   const sOrch = config.orchestration.mode === 'auto'
     ? (state.orchestration.active
-        ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold})`
+        ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold}, fail streak ${state.orchestration.workerFailStreak})`
         : ` 🪄 auto (idle)`)
     : ' ✗ (off)'
   const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount
 
+  // Gear: R → θ → θ_eff, in plain language rather than as bare math.
+  const penalty = effectiveReworkPenalty(config)
+  const theta = effectiveTheta(config)
+  const cacheFactor = sameFamilyThetaFactor(config)
+  const gearMode = config.routing.economics.mode
+  const sGear = `${gearMode ? `${gearMode} ` : ''}(R=${penalty} → θ=${theta.toFixed(2)}` +
+    `${cacheFactor > 1 ? ` = base ÷ cache divisor ${cacheFactor}` : ''})` +
+    `${legacyThetaOverride(config) !== undefined ? '  [θ from the legacy window.threshold override]' : ''}`
+  const legacyNotes: string[] = []
+  if (legacyThetaOverride(config) !== undefined) {
+    legacyNotes.push(`routing.window.threshold=${config.routing.window.threshold} overrides θ directly`)
+  }
+  if (config.routing.cacheAware?.sameFamilyThreshold !== undefined) {
+    legacyNotes.push(`routing.cacheAware.sameFamilyThreshold=${config.routing.cacheAware.sameFamilyThreshold} implies the strong cache divisor`)
+  }
+
+  // The last decision explains WHY the current tier is what it is.
+  const last = state.lastDecision
+  const sLast = last === null
+    ? '  (no decision yet this session)'
+    : `  ${last.held ? '🅷 hold' : last.action} → ${last.decisionTier}` +
+      ` (verdict ${last.verdictTier}` +
+      (last.confidence !== undefined ? ` conf=${last.confidence.toFixed(2)}` : '') +
+      `)` +
+      (last.reason !== undefined ? ` — "${last.reason}"` : '')
+
+  // Fact, not intent: what actually produced the last assistant message.
+  const actual = state.actualModel === null
+    ? '(none yet)'
+    : `${state.actualProvider ?? '?'}/${state.actualModel}`
+  const intended = `${state.currentProvider ?? '?'}/${state.currentModelId ?? '?'}`
+  const drift = state.actualModel !== null && state.actualModel !== state.currentModelId
+    ? '  ⚠ differs from the router intent' : ''
+
   return [
     `dsh-shift-router — Mode: ${sMode} ${sHeader}`,
     `Current: ${formatTierDisplay(state.currentTier, state.currentModelId)}${state.manualOverride.active ? ' (manual)' : ''}`,
+    `Gear: ${sGear}`,
+    ...(legacyNotes.length > 0 ? [`⚠ legacy override: ${legacyNotes.join('; ')}`] : []),
     ``,
     `Tiers:`,
     formatTierList(config),
@@ -226,8 +285,14 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     `  Turns: ${totalTurns}   Upgrades: ↑${state.upgradeCount}   Downgrades: ↓${state.downgradeCount}`,
     `  Manual override:${sManual}`,
     `  Orchestration:${sOrch}`,
+    `  Last decision:`,
+    sLast,
+    `  Running model: ${actual}${drift}`,
+    `  Intended model: ${intended}`,
     `  Subagent tool: ${deps.subagentAvailable() ? '✅' : '✗ (orchestration degraded — no subagent tool)'}`,
-    `  Cache-aware: ${shareProviderFamily(config) ? '🎯 same-family (threshold ' + (config.routing.cacheAware?.enabled ? config.routing.cacheAware.sameFamilyThreshold : config.routing.window.threshold) + ', ' + (config.routing.cacheAware?.enabled ? 'warm-cache guarded' : 'inactive — enable in config') + ')' : '— (cross-family)'}`,
+    `  Cache-aware: ${shareProviderFamily(config)
+      ? `🎯 same-family (θ ÷ ${config.routing.cacheAware?.enabled ? sameFamilyThetaFactor(config) : '— (disabled in config)'}, warm-cache guarded for ${Math.round((config.routing.cacheAware?.idleBoundaryMs ?? 0) / 1000)}s after the last message)`
+      : '— (cross-family: no cache penalty)'}`,
     ...(cooldownLines.length > 0
       ? [`  Cooldowns (${cooldownLines.length}):`, ...cooldownLines]
       : [`  Cooldowns: none`]),
@@ -237,7 +302,7 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     ``,
     `Detail:`,
     `  Window: ${formatWindow(state.window)}  (${state.window.length} entries)`,
-    `  Counts: S=${counts.smart} F=${counts.fast}`,
+    `  Counts: S=${counts.smart} F=${counts.fast} H=${holds}  (H = holds — no usable Judge signal)`,
     ``,
     `Edit: Settings → shift-router, or <profile>/cordis.patch.yml`,
   ].join('\n')
@@ -292,7 +357,8 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
       : field.hint
         ? ` (${field.hint})`
         : ''
-    lines.push(`  ${String(i + 1).padStart(2)}. ${field.path.padEnd(36)} = ${value}${annotation}`)
+    const legacy = field.legacy === true ? '  ⚠ legacy — superseded by routing.economics' : ''
+    lines.push(`  ${String(i + 1).padStart(2)}. ${field.path.padEnd(36)} = ${value}${annotation}${legacy}`)
   }
   lines.push('', 'Available providers:')
   const providers = deps.listProviders()
@@ -324,9 +390,9 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
 export function registerCommands(deps: CommandDeps): CommandDefinition[] {
   const router: CommandDefinition = {
     name: 'router',
-    description: 'dsh-shift-router: show status, enable/disable, orchestration mode (on|off|status|stats|verbose|config|orchestrate)',
-    input: { hint: 'status | stats | on | off | verbose | config | orchestrate auto|off' },
-    handler: ({ agent, rawInput }) => {
+    description: 'dsh-shift-router: show status, enable/disable, gear preset, orchestration mode (on|off|status|stats|verbose|config|orchestrate|eco|default|sport)',
+    input: { hint: 'status | stats | on | off | verbose | config | orchestrate auto|off | eco|default|sport' },
+    handler: async ({ agent, rawInput }) => {
       const config = deps.getConfig()
       const arg = rawInput.trim().toLowerCase()
 
@@ -347,6 +413,30 @@ export function registerCommands(deps: CommandDeps): CommandDefinition[] {
         if (state) resetOrchestration(state)
         deps.onConfigChanged()
         return { kind: 'success', text: '🪄 Orchestration OFF — back to plain tier routing' }
+      }
+
+      // Gear presets: θ = 1/R. Persisted, because a gear is a durable
+      // preference about how the session should feel, not a one-turn toggle.
+      if (arg === 'eco' || arg === 'default' || arg === 'sport') {
+        const mode = arg as EconomicMode
+        const previousTheta = effectiveTheta(config)
+        const failure = await deps.updateSettings({ routing: { economics: { mode } } })
+        if (failure !== null) {
+          return { kind: 'error', text: `dsh-shift-router: could not persist the gear (${failure})` }
+        }
+        const next = deps.getConfig()
+        const theta = effectiveTheta(next)
+        const blurb = mode === 'eco'
+          ? 'cheapest: only clearly-needed turns escalate'
+          : mode === 'sport'
+            ? 'eager: any real chance of needing Smart escalates'
+            : 'balanced'
+        return {
+          kind: 'success',
+          text: `🚗 Gear ${mode} — R=${effectiveReworkPenalty(next)}, θ=${theta.toFixed(2)}` +
+            `${sameFamilyThetaFactor(next) > 1 ? ` (base ÷ cache divisor ${sameFamilyThetaFactor(next)})` : ''}` +
+            `, was ${previousTheta.toFixed(2)} — ${blurb}`,
+        }
       }
 
       if (arg === 'on') {

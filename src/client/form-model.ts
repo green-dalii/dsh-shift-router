@@ -46,32 +46,46 @@ export interface CardField {
   unit?: string
   /** Display sub-group (one of the section's group keys); optional. */
   group?: string
+  /**
+   * The leaf ships WITHOUT a value in the resolved config — unset is its real
+   * default (a preset selector that is off until chosen, or a compatibility
+   * knob that must stay inert). The card renders it blank ("default").
+   */
+  optional?: true
+  /**
+   * A pre-EV knob kept only so existing configs keep working. Implies
+   * {@link optional}, and ships UNSET so it stays inert until the user writes
+   * a value.
+   */
+  legacy?: true
 }
 
 export const CARD_FIELDS: readonly CardField[] = [
   { path: 'enabled', section: 'enabled', display: 'general', key: 'enabled', type: 'boolean', labelKey: 'f.enabled', hintKey: 'h.enabled' },
-  { path: 'tiers.fast.models', section: 'tiers', display: 'models', key: 'fast.models', type: 'models', labelKey: 'f.fastModels', hintKey: 'h.fastModels' },
-  { path: 'tiers.smart.models', section: 'tiers', display: 'models', key: 'smart.models', type: 'models', labelKey: 'f.smartModels', hintKey: 'h.smartModels' },
   { path: 'routing.mode', section: 'routing', display: 'routing', key: 'mode', type: 'enum', enum: ['auto', 'manual', 'off'], labelKey: 'f.routingMode', hintKey: 'h.routingMode' },
   { path: 'routing.judgeTimeout', section: 'routing', display: 'routing', key: 'judgeTimeout', type: 'number', unit: 'ms', group: 'g.judge', labelKey: 'f.judgeTimeout', hintKey: 'h.judgeTimeout' },
   { path: 'routing.judgeMaxTokens', section: 'routing', display: 'routing', key: 'judgeMaxTokens', type: 'number', unit: 'tokens', group: 'g.judge', labelKey: 'f.judgeMaxTokens', hintKey: 'h.judgeMaxTokens' },
   { path: 'routing.judgePromptCap', section: 'routing', display: 'routing', key: 'judgePromptCap', type: 'number', unit: 'chars', group: 'g.judge', labelKey: 'f.judgePromptCap', hintKey: 'h.judgePromptCap' },
+  { path: 'routing.economics.reworkPenalty', section: 'routing', display: 'routing', key: 'economics.reworkPenalty', type: 'number', group: 'g.economics', labelKey: 'f.reworkPenalty', hintKey: 'h.reworkPenalty' },
+  { path: 'routing.economics.downgradeMemory', section: 'routing', display: 'routing', key: 'economics.downgradeMemory', type: 'number', unit: 'turns', group: 'g.economics', labelKey: 'f.downgradeMemory', hintKey: 'h.downgradeMemory' },
+  { path: 'routing.economics.mode', section: 'routing', display: 'routing', key: 'economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], group: 'g.economics', optional: true, labelKey: 'f.economicsMode', hintKey: 'h.economicsMode' },
   { path: 'routing.window.size', section: 'routing', display: 'routing', key: 'window.size', type: 'number', unit: 'turns', group: 'g.window', labelKey: 'f.windowSize', hintKey: 'h.windowSize' },
-  { path: 'routing.window.threshold', section: 'routing', display: 'routing', key: 'window.threshold', type: 'number', unit: '0–1', group: 'g.window', labelKey: 'f.windowThreshold', hintKey: 'h.windowThreshold' },
+  { path: 'routing.window.threshold', section: 'routing', display: 'routing', key: 'window.threshold', type: 'number', unit: '0–1', group: 'g.window', optional: true, legacy: true, labelKey: 'f.windowThreshold', hintKey: 'h.windowThreshold' },
   { path: 'routing.window.minConfidence', section: 'routing', display: 'routing', key: 'window.minConfidence', type: 'number', unit: '0–1', group: 'g.window', labelKey: 'f.windowMinConfidence', hintKey: 'h.windowMinConfidence' },
   { path: 'routing.cacheAware.enabled', section: 'routing', display: 'routing', key: 'cacheAware.enabled', type: 'boolean', group: 'g.cache', labelKey: 'f.cacheAwareEnabled', hintKey: 'h.cacheAwareEnabled' },
-  { path: 'routing.cacheAware.sameFamilyThreshold', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyThreshold', type: 'number', unit: '0–1', group: 'g.cache', labelKey: 'f.sameFamilyThreshold', hintKey: 'h.sameFamilyThreshold' },
+  { path: 'routing.cacheAware.sameFamilyPenalty', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyPenalty', type: 'number', group: 'g.cache', labelKey: 'f.sameFamilyPenalty', hintKey: 'h.sameFamilyPenalty' },
+  { path: 'routing.cacheAware.sameFamilyThreshold', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyThreshold', type: 'number', unit: '0–1', group: 'g.cache', optional: true, legacy: true, labelKey: 'f.sameFamilyThreshold', hintKey: 'h.sameFamilyThreshold' },
   { path: 'routing.cacheAware.idleBoundaryMs', section: 'routing', display: 'routing', key: 'cacheAware.idleBoundaryMs', type: 'number', unit: 'ms', group: 'g.cache', labelKey: 'f.idleBoundaryMs', hintKey: 'h.idleBoundaryMs' },
   { path: 'orchestration.mode', section: 'orchestration', display: 'orchestration', key: 'mode', type: 'enum', enum: ['auto', 'off'], labelKey: 'f.orchMode', hintKey: 'h.orchMode' },
   { path: 'orchestration.maxRounds', section: 'orchestration', display: 'orchestration', key: 'maxRounds', type: 'number', unit: 'rounds', labelKey: 'f.maxRounds', hintKey: 'h.maxRounds' },
   { path: 'orchestration.escalationThreshold', section: 'orchestration', display: 'orchestration', key: 'escalationThreshold', type: 'number', unit: '×', labelKey: 'f.escalationThreshold', hintKey: 'h.escalationThreshold' },
-  { path: 'orchestration.requireSmartModel', section: 'orchestration', display: 'orchestration', key: 'requireSmartModel', type: 'boolean', labelKey: 'f.requireSmartModel', hintKey: 'h.requireSmartModel' },
   { path: 'failover.baseMs', section: 'failover', display: 'failover', key: 'baseMs', type: 'number', unit: 'ms', labelKey: 'f.failoverBaseMs', hintKey: 'h.failoverBaseMs' },
   { path: 'failover.maxMs', section: 'failover', display: 'failover', key: 'maxMs', type: 'number', unit: 'ms', labelKey: 'f.failoverMaxMs', hintKey: 'h.failoverMaxMs' },
   { path: 'failover.startAttempts4xx', section: 'failover', display: 'failover', key: 'startAttempts4xx', type: 'number', unit: '×', labelKey: 'f.startAttempts4xx', hintKey: 'h.startAttempts4xx' },
-  { path: 'failover.speedWindowSize', section: 'failover', display: 'failover', key: 'speedWindowSize', type: 'number', unit: 'turns', labelKey: 'f.speedWindowSize', hintKey: 'h.speedWindowSize' },
   { path: 'telemetry.callLogCap', section: 'telemetry', display: 'telemetry', key: 'callLogCap', type: 'number', unit: 'calls', labelKey: 'f.callLogCap', hintKey: 'h.callLogCap' },
   { path: 'ux.routerLogVerbose', section: 'ux', display: 'ux', key: 'routerLogVerbose', type: 'boolean', labelKey: 'f.routerLogVerbose', hintKey: 'h.routerLogVerbose' },
+  { path: 'tiers.fast.models', section: 'tiers', display: 'models', key: 'fast.models', type: 'models', labelKey: 'f.fastModels', hintKey: 'h.fastModels' },
+  { path: 'tiers.smart.models', section: 'tiers', display: 'models', key: 'smart.models', type: 'models', labelKey: 'f.smartModels', hintKey: 'h.smartModels' },
 ]
 
 /** One display group: its id matches `CardField.display`, plus locale keys. */

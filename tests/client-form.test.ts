@@ -5,7 +5,10 @@
  * the browser bundle and this test suite. The cross-check with the host CLI's
  * `CONFIG_FIELDS` keeps the two field registries from drifting: every scalar
  * leaf the CLI editor exposes must be editable in the GUI card too, and the
- * two tier model chains must be exposed with matching paths.
+ * two tier model chains must be exposed with matching paths. Both registries
+ * carry the same `optional` (ships unset) / `legacy` (pre-EV compatibility)
+ * flags, so the card renders an unset leaf as blank/"default" instead of
+ * inventing a value.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -25,6 +28,7 @@ import {
   type StagedDraft,
 } from '../src/client/form-model.js'
 import { CONFIG_FIELDS } from '../src/commands.js'
+import { Config } from '../src/config.js'
 
 // ─── path helpers ────────────────────────────────────────────────────
 
@@ -159,10 +163,11 @@ const snapshot = (partial: Record<string, unknown>) => ({
     routing: {
       mode: 'auto',
       judgeTimeout: 5000,
-      window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
-      cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: 300000 },
+      economics: { reworkPenalty: 3, downgradeMemory: 2 },
+      window: { size: 5, minConfidence: 0.5 },
+      cacheAware: { enabled: true, sameFamilyPenalty: 1.5, idleBoundaryMs: 300000 },
     },
-    orchestration: { mode: 'auto', maxRounds: 3, escalationThreshold: 2, requireSmartModel: true },
+    orchestration: { mode: 'auto', maxRounds: 3, escalationThreshold: 2 },
   },
   base: {
     enabled: true,
@@ -173,10 +178,11 @@ const snapshot = (partial: Record<string, unknown>) => ({
     routing: {
       mode: 'auto',
       judgeTimeout: 5000,
-      window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
-      cacheAware: { enabled: true, sameFamilyThreshold: 0.9, idleBoundaryMs: 300000 },
+      economics: { reworkPenalty: 3, downgradeMemory: 2 },
+      window: { size: 5, minConfidence: 0.5 },
+      cacheAware: { enabled: true, sameFamilyPenalty: 1.5, idleBoundaryMs: 300000 },
     },
-    orchestration: { mode: 'auto', maxRounds: 3, escalationThreshold: 2, requireSmartModel: true },
+    orchestration: { mode: 'auto', maxRounds: 3, escalationThreshold: 2 },
   },
   user: {},
   ...partial,
@@ -365,8 +371,25 @@ describe('buildPlan', () => {
 
 // ─── registry parity with the CLI editor ─────────────────────────────
 
+/** The schema-resolved config an empty cordis.yml row produces. */
+function builtConfig(): Record<string, unknown> {
+  const standard = (Config as unknown as {
+    '~standard': { validate(value: unknown): { value: unknown } | { issues: { message: string }[] } }
+  })['~standard']
+  const out = standard.validate({})
+  if ('issues' in out) {
+    throw new Error(`the config schema rejected an empty config: ${out.issues.map((issue) => issue.message).join('; ')}`)
+  }
+  return out.value as Record<string, unknown>
+}
+
 describe('GUI/CLI field registry parity', () => {
-  it('exposes every scalar CONFIG_FIELDS leaf with matching path and type', () => {
+  it('mirrors the CLI registry path-for-path and in order, minus the CLI-only pricing leaf', () => {
+    const cliPaths = CONFIG_FIELDS.map((field) => field.path).filter((path) => path !== 'pricing')
+    expect(CARD_FIELDS.map((field) => field.path)).toEqual(cliPaths)
+  })
+
+  it('exposes every scalar CONFIG_FIELDS leaf with matching path, type, enum, and flags', () => {
     const gui = new Map(CARD_FIELDS.map((field) => [field.path, field]))
     const scalars = CONFIG_FIELDS.filter((field) => field.type === 'boolean' || field.type === 'number' || field.type === 'enum')
     expect(scalars.length).toBeGreaterThan(0)
@@ -375,6 +398,8 @@ describe('GUI/CLI field registry parity', () => {
       expect(card, `missing GUI card field for ${cli.path}`).toBeDefined()
       expect(card!.type, `type drift on ${cli.path}`).toBe(cli.type)
       if (cli.enum) expect(card!.enum).toEqual(cli.enum)
+      expect(card!.optional === true, `optional drift on ${cli.path}`).toBe(cli.optional === true)
+      expect(card!.legacy === true, `legacy drift on ${cli.path}`).toBe(cli.legacy === true)
     }
   })
 
@@ -397,5 +422,62 @@ describe('GUI/CLI field registry parity', () => {
     expect(new Set(paths).size).toBe(paths.length)
     const displays = new Set(CARD_FIELDS.map((field) => field.display))
     expect(displays.size).toBeGreaterThanOrEqual(5)
+  })
+})
+
+// ─── card leaves against the built config ────────────────────────────
+
+describe('CARD_FIELDS against the built config', () => {
+  it('resolves every defaulted path, leaving only the leaves that ship unset', () => {
+    const built = builtConfig()
+    for (const field of CARD_FIELDS) {
+      const segments = field.path.split('.')
+      if (segments.length > 1) {
+        expect(
+          readPath(built, segments.slice(0, -1).join('.')),
+          `${field.path}: parent object missing from the built config`,
+        ).toBeTypeOf('object')
+      }
+      if (field.optional === true) continue
+      expect(readPath(built, field.path), `${field.path} has no value in the built config`).not.toBeUndefined()
+    }
+  })
+
+  it('flags exactly the leaves the CLI registry marks optional, and every legacy field is optional', () => {
+    const cliOptional = new Set(CONFIG_FIELDS.filter((field) => field.optional === true).map((field) => field.path))
+    expect(cliOptional.size).toBeGreaterThan(0)
+    for (const field of CARD_FIELDS) {
+      expect(field.optional === true, `optional drift on ${field.path}`).toBe(cliOptional.has(field.path))
+      if (field.legacy === true) expect(field.optional, `${field.path}: legacy implies optional`).toBe(true)
+    }
+  })
+
+  it('formats a legacy leaf that ships unset as blank/default without throwing', () => {
+    const built = builtConfig()
+    const legacy = CARD_FIELDS.filter((field) => field.legacy === true)
+    expect(legacy.length).toBeGreaterThan(0)
+    for (const field of legacy) {
+      const value = readPath(built, field.path)
+      expect(value, `${field.path} must ship unset`).toBeUndefined()
+      expect(() => formatValue(value, field), `${field.path} must format without throwing`).not.toThrow()
+      expect(formatValue(value, field), `${field.path} must render as unset`).toBe('')
+    }
+  })
+
+  it('writes a legacy leaf that ships unset as a real override', () => {
+    const plan = buildPlan(
+      CARD_FIELDS,
+      staged({ 'routing.window.threshold': { text: '0.8', clear: false } }),
+      snapshot({}),
+    )
+    expect(plan.invalid).toBe(false)
+    expect(plan.patches).toEqual([
+      {
+        op: 'set',
+        section: 'routing',
+        value: { window: { threshold: 0.8 } },
+        leaves: [{ key: 'window.threshold', value: 0.8 }],
+      },
+    ])
   })
 })

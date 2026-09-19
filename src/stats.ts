@@ -60,10 +60,6 @@ export interface RouterStatsSnapshot {
   cooldownCount: number
   activeCooldowns: CooldownInfo[]
   confidence: ConfidenceBuckets
-  /** Average of the last few tokens/sec readings. 0 when no readings. */
-  avgTokensPerSec: number
-  /** Most recent tokens/sec reading. 0 when none. */
-  currentTokensPerSec: number
   cost: CostTelemetry
 }
 
@@ -104,13 +100,6 @@ export function computeStats(
     })
   }
 
-  // Speeds
-  const speeds = state.recentSpeeds
-  const currentTokensPerSec = speeds.length > 0 ? speeds[speeds.length - 1]! : 0
-  const avgTokensPerSec = speeds.length > 0
-    ? Math.round(speeds.reduce((a, b) => a + b, 0) / speeds.length)
-    : 0
-
   // Cost telemetry
   const cost = computeCostTelemetry(state, config)
 
@@ -122,8 +111,6 @@ export function computeStats(
     cooldownCount: activeCooldowns.length,
     activeCooldowns,
     confidence: buckets,
-    avgTokensPerSec,
-    currentTokensPerSec,
     cost,
   }
 }
@@ -255,7 +242,7 @@ export function formatStats(
   lines.push(`Judge: 🧭 ${judgeModelDisplay(config)}`)
   lines.push(`Window: ${s.windowSize} entries (confidence: high=${s.confidence.high} mid=${s.confidence.mid} low=${s.confidence.low} none=${s.confidence.none})`)
   lines.push(`Transitions: ↑upgrade=${s.upgradeCount} ↓downgrade=${s.downgradeCount}`)
-  lines.push(`Tokens: total ${s.totalOutputTokens.toLocaleString()} | speed current=${s.currentTokensPerSec} avg=${s.avgTokensPerSec} tok/s`)
+  lines.push(`Tokens: total ${s.totalOutputTokens.toLocaleString()} (throughput is shown by the harness, not here)`)
 
   // ── Cost telemetry block ────────────────────────────────────────────
   const c = s.cost

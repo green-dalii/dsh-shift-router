@@ -29,8 +29,14 @@ describe('Config schema', () => {
       judgeMaxTokens: 4000,
       judgePromptCap: 6000,
     })
-    expect(cfg.routing.window).toMatchObject({ size: 5, threshold: 0.6, minConfidence: 0.5 })
-    expect(cfg.failover).toMatchObject({ baseMs: 60_000, maxMs: 6 * 60 * 60_000, startAttempts4xx: 3, speedWindowSize: 5 })
+    expect(cfg.routing.economics).toMatchObject({ reworkPenalty: 3, downgradeMemory: 2 })
+    // The legacy θ override ships unset: writing the legacy default back must
+    // not look like a deliberate override (SPEC §3.1).
+    expect(cfg.routing.window).toMatchObject({ size: 5, minConfidence: 0.5 })
+    expect(cfg.routing.window.threshold).toBeUndefined()
+    expect(cfg.routing.cacheAware).toMatchObject({ enabled: true, sameFamilyPenalty: 1.5 })
+    expect(cfg.routing.cacheAware.sameFamilyThreshold).toBeUndefined()
+    expect(cfg.failover).toMatchObject({ baseMs: 60_000, maxMs: 6 * 60 * 60_000, startAttempts4xx: 3 })
     expect(cfg.telemetry).toMatchObject({ callLogCap: 1000 })
     expect(cfg.tiers.fast).toMatchObject({ label: '', models: [] })
     expect(cfg.tiers.smart).toMatchObject({ label: '', models: [] })
@@ -48,6 +54,35 @@ describe('Config schema', () => {
     expect(cfg.routing.window.size).toBe(5)
   })
 
+  it('no longer carries the removed orchestration knob', () => {
+    const out = validate({})
+    const cfg = (out as { value: Record<string, unknown> }).value
+    expect(cfg.orchestration).not.toHaveProperty('requireSmartModel')
+  })
+
+  it('loads a pre-alignment config document without failing (removals stay inert)', () => {
+    // Users upgrading from v0.5.0 have these keys persisted. Schemastery
+    // passes unknown keys through rather than rejecting them, so removing a
+    // key is a silent no-op and never a load failure (SPEC §15). The stale
+    // value may survive in the resolved object — nothing reads it, which is
+    // what "removed" means here.
+    const out = validate({
+      orchestration: { mode: 'auto', maxRounds: 5, escalationThreshold: 2, requireSmartModel: false },
+      failover: { speedWindowSize: 9 },
+      // The pre-EV legacy values must load too, and stay inert (SPEC §3.1).
+      routing: { window: { size: 5, threshold: 0.6, minConfidence: 0.5 } },
+    })
+    expect('issues' in out).toBe(false)
+    const cfg = (out as { value: Record<string, unknown> }).value
+    // Live fields still take the user's values …
+    expect((cfg.orchestration as Record<string, unknown>).maxRounds).toBe(5)
+    expect((cfg.routing as Record<string, unknown>).window).toMatchObject({ size: 5 })
+    // … and the resolved defaults never reintroduce a removed key.
+    const fresh = (validate({}) as { value: Record<string, unknown> }).value
+    expect(fresh.orchestration).not.toHaveProperty('requireSmartModel')
+    expect(fresh.failover).not.toHaveProperty('speedWindowSize')
+  })
+
   it('rejects invalid numeric values loudly', () => {
     const bad: unknown[] = [
       { routing: { judgeTimeout: 0 } },
@@ -56,6 +91,10 @@ describe('Config schema', () => {
       { routing: { window: { size: 2.5 } } },
       { routing: { window: { threshold: 1.5 } } },
       { routing: { window: { minConfidence: -0.1 } } },
+      { routing: { economics: { reworkPenalty: 0 } } },
+      { routing: { economics: { downgradeMemory: 0 } } },
+      { routing: { economics: { mode: 'turbo' } } },
+      { routing: { cacheAware: { sameFamilyPenalty: 0.5 } } },
       { routing: { cacheAware: { sameFamilyThreshold: 2 } } },
       { tiers: { fast: { models: [{ provider: 'p', model: 'm', priority: -1 }] } } },
       { orchestration: { maxRounds: -1 } },
@@ -74,6 +113,8 @@ describe('Config schema', () => {
     const good: unknown[] = [
       { routing: { judgeTimeout: 1 } },
       { routing: { window: { size: 1, threshold: 0, minConfidence: 1 } } },
+      { routing: { economics: { reworkPenalty: 1, downgradeMemory: 1, mode: 'sport' } } },
+      { routing: { cacheAware: { sameFamilyPenalty: 1 } } },
       { orchestration: { maxRounds: 0 } },
       { orchestration: { escalationThreshold: 1 } },
       { telemetry: { callLogCap: 10 } },

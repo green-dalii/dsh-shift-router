@@ -81,17 +81,3 @@ export function formatTierDisplay(
   const model = modelId?.split('/').pop() ?? '…'
   return `[${emoji} ${model}]`
 }
-
-/**
- * Like formatTierDisplay but appends a tokens-per-second indicator when positive.
- * E.g. "[🧠 kimi-k3 • 23 tok/s]".
- */
-export function formatTierDisplayWithSpeed(
-  tier: Tier | null,
-  modelId: string | null,
-  tokensPerSec: number,
-): string {
-  const base = formatTierDisplay(tier, modelId)
-  if (!base || tokensPerSec <= 0) return base
-  return `${base} • ${tokensPerSec} tok/s`
-}

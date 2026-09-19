@@ -9,7 +9,7 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import type { ShiftRouterConfig } from './types.js'
+import { DEFAULT_SAME_FAMILY_PENALTY, type ShiftRouterConfig } from './types.js'
 
 /** Model reference: provider + model id + priority (lower wins). */
 export const ModelRefSchema = z.object({
@@ -26,14 +26,27 @@ export const TierConfigSchema = z.object({
 
 const WindowSchema = z.object({
   size: z.natural().min(1).max(100).default(5),
-  threshold: z.percent().default(0.6),
+  /**
+   * LEGACY raw-θ override. Optional on purpose: an absent (or legacy-default)
+   * value means θ = 1/reworkPenalty, and writing the legacy default back must
+   * not look like a deliberate override.
+   */
+  threshold: z.percent(),
   minConfidence: z.percent().default(0.5),
+})
+
+const EconomicsSchema = z.object({
+  reworkPenalty: z.number().min(1).default(3),
+  downgradeMemory: z.natural().min(1).max(100).default(2),
+  mode: z.union(['eco', 'default', 'sport']),
 })
 
 const CacheAwareSchema = z.object({
   enabled: z.boolean().default(true),
-  sameFamilyThreshold: z.percent().default(0.9),
+  sameFamilyPenalty: z.number().min(1).default(DEFAULT_SAME_FAMILY_PENALTY),
   idleBoundaryMs: z.natural().min(0).default(5 * 60_000),
+  /** LEGACY: a non-default value implies the strong penalty (3.0). */
+  sameFamilyThreshold: z.percent(),
 })
 
 const RoutingSchema = z.object({
@@ -41,6 +54,7 @@ const RoutingSchema = z.object({
   judgeTimeout: z.natural().min(1).max(120_000).default(5000),
   judgeMaxTokens: z.natural().min(1).max(100_000).default(4000),
   judgePromptCap: z.natural().min(1).max(1_000_000).default(6000),
+  economics: EconomicsSchema,
   window: WindowSchema,
   cacheAware: CacheAwareSchema,
 })
@@ -53,14 +67,12 @@ const OrchestrationSchema = z.object({
   mode: z.union(['auto', 'off']).default('auto'),
   maxRounds: z.natural().min(0).max(100).default(3),
   escalationThreshold: z.natural().min(1).max(100).default(2),
-  requireSmartModel: z.boolean().default(true),
 })
 
 const FailoverSchema = z.object({
   baseMs: z.natural().min(100).default(60_000),
   maxMs: z.natural().min(1_000).default(6 * 60 * 60_000),
   startAttempts4xx: z.natural().min(1).max(20).default(3),
-  speedWindowSize: z.natural().min(1).max(100).default(5),
 })
 
 const TelemetrySchema = z.object({

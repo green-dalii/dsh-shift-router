@@ -30,7 +30,37 @@ describe('CONFIG_FIELDS registry', () => {
 
   it('registry paths all resolve against DEFAULT_CONFIG (no typos)', () => {
     for (const field of CONFIG_FIELDS) {
-      expect(readPath(DEFAULT_CONFIG, field.path), field.path).not.toBeUndefined()
+      const value = readPath(DEFAULT_CONFIG, field.path)
+      if (field.optional === true) {
+        // Unset is this field's real default (a preset selector, or a legacy
+        // knob that must stay inert). It must still read as undefined, never
+        // as a stale default that would look like a user override.
+        expect(value, `${field.path} is optional`).toBeUndefined()
+        continue
+      }
+      expect(value, field.path).not.toBeUndefined()
+    }
+  })
+
+  it('exposes the EV economics knobs and hides the removed ones', () => {
+    const paths = CONFIG_FIELDS.map((f) => f.path)
+    expect(paths).toContain('routing.economics.reworkPenalty')
+    expect(paths).toContain('routing.economics.downgradeMemory')
+    expect(paths).toContain('routing.economics.mode')
+    expect(paths).toContain('routing.cacheAware.sameFamilyPenalty')
+    // Removed by the alignment round: they must not linger as editable surface.
+    expect(paths).not.toContain('orchestration.requireSmartModel')
+    expect(paths).not.toContain('failover.speedWindowSize')
+  })
+
+  it('marks the pre-EV knobs as legacy so they are not set by accident', () => {
+    const legacy = CONFIG_FIELDS.filter((f) => f.legacy === true).map((f) => f.path)
+    expect(legacy.sort()).toEqual([
+      'routing.cacheAware.sameFamilyThreshold',
+      'routing.window.threshold',
+    ])
+    for (const field of CONFIG_FIELDS.filter((f) => f.legacy === true)) {
+      expect(field.optional, `${field.path} legacy implies optional`).toBe(true)
     }
   })
 })

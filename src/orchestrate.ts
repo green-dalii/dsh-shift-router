@@ -10,14 +10,16 @@
  *
  * DSH adaptation: the orchestrator prompt is rendered as a dynamic
  * system-prompt section (activated per agent while orchestration is active)
- * instead of string-splicing into pi's event.systemPrompt. The subagent tool
- * in DSH pins the worker model through its own `agentOptions` configuration
- * rather than per-call arguments, so the rendered tier chain is guidance the
- * CTO reads; the deployment should point the harness's subagent tool at a
- * Fast-tier model.
+ * instead of string-splicing into pi's event.systemPrompt.
+ *
+ * Worker model injection (upstream calls it mandatory): DSH's `subagent` tool
+ * accepts per-call `provider`/`model`, but only inside the host-owned
+ * `subagent-model-selection` allowlist (default off). The prompt therefore
+ * states that condition factually instead of asserting a guarantee the plugin
+ * cannot keep; index.ts warns at startup when the allowlist is not available.
  */
 
-import type { ShiftRouterConfig, RouterState, ModelRef } from './types.js'
+import type { ShiftRouterConfig, RouterState, ModelRef, Tier } from './types.js'
 
 // ─── Orchestrator prompt ─────────────────────────────────────────
 
@@ -59,13 +61,17 @@ Spawn engineer subagents with the \`subagent\` tool. Per-run contract:
 
 ### Worker model — read this carefully
 
-The harness pins a worker's model through the \`subagent\` tool's deployment
-configuration (\`agentOptions\`), NOT through the tool call. By default a
-worker inherits **your own model** — you are the Smart tier, they should be
-Fast. Never assume a worker runs on a specific model from the tool call
-alone. The "Tier configuration" section below lists the Fast-tier models the
-deployment should have pinned for the subagent tool; if you have any reason
-to doubt a worker used a Fast-tier model, say so in your CTO summary.
+You can pass \`provider\` and \`model\` to the \`subagent\` tool, and you should
+whenever a Fast-tier route is available — without it a worker inherits **your
+own model**, and you are the Smart tier, so the cost story collapses. But the
+harness only honours those fields for routes the deployment has authorised
+(its \`subagent-model-selection\` allowlist). If the call is rejected on those
+fields, or you are unsure whether it took effect, delegate without them and
+**say so in your CTO summary** — an honest note about the worker model is
+worth more than a silent assumption that it was Fast.
+
+The "Tier configuration" section below lists the Fast-tier routes the
+deployment should have authorised for delegation.
 
 ## Task contract (how to write a worker task)
 
@@ -95,23 +101,24 @@ coverage without bloat. Follow these principles:
   Non-blocking nits go in a "notes" line, not a re-delegation trigger.
 - When you re-delegate, give the worker concrete feedback: what failed,
   exactly where, and what "done" means now.
-- **If a worker fails ≥{{escalationThreshold}} times on the same phase, take
-  over that phase yourself** — implement it directly. Do not keep cycling.
+- **If workers fail {{escalationThreshold}} times in a row on the same phase,
+  take over that phase yourself** — implement it directly. Do not keep
+  cycling. (A success resets the streak, so isolated failures are fine.)
 
 ## Hard caps (enforced by the router, not negotiable)
 
 - You get at most **{{maxRounds}} delegate→review rounds** for this task.
   Plan accordingly — batch work, don't drip-feed.
-- Escalate (take over yourself) after **{{escalationThreshold}}** failed
-  attempts on one phase.
+- Escalate (take over yourself) after **{{escalationThreshold}}** consecutive
+  failed attempts on one phase.
 - If you hit a cap, wrap up: deliver the best current state, summarize what
   remains, and stop. Do not ask the router for more rounds.
 
 ## Tier configuration (models involved in this task)
 
 Fast tier chain (priority order, already filtered for health/cooldown) — the
-models the deployment should have pinned for the subagent tool's
-\`agentOptions\`:
+routes the deployment should have authorised for subagent delegation
+(\`provider\` / \`model\` on the call):
 
 {{fastChain}}
 
@@ -187,8 +194,8 @@ export function createOrchestrationState(): RouterState['orchestration'] {
     active: false,
     rounds: 0,
     escalations: 0,
+    workerFailStreak: 0,
     startedAt: null,
-    spend: 0,
   }
 }
 
@@ -208,7 +215,7 @@ export function enterOrchestration(state: RouterState): void {
     orch.startedAt = Date.now()
     orch.rounds = 0
     orch.escalations = 0
-    orch.spend = 0
+    orch.workerFailStreak = 0
   }
 }
 
@@ -218,30 +225,74 @@ export function exitOrchestration(state: RouterState): void {
 }
 
 /**
+ * The part of a routing decision orchestration entry depends on. Taking the
+ * decision as a named object (rather than positional booleans, which are all
+ * mutually assignable) is deliberate: a swapped argument here would silently
+ * inject the CTO prompt onto the wrong tier.
+ */
+export interface OrchestrationDecisionInput {
+  /** Tier the turn will actually run at (post-EV, post-hold, post-override). */
+  decisionTier: Tier
+  /** The Judge gave no usable signal and the router held position. */
+  held: boolean
+}
+
+/**
  * Decide whether THIS turn should run as an orchestration turn.
  *
  * All conditions must hold:
- * 1. Orchestration mode "auto".
- * 2. Router enabled.
- * 3. Judge said "smart" (complex) — simple tasks never orchestrate.
- * 4. Smart tier model is resolvable (or requireSmartModel is false).
- * 5. The subagent tool is available — otherwise degrade to today's
- *    smart-tier run.
+ * 1. Router enabled, orchestration mode "auto".
+ * 2. The decision is NOT a hold. A hold means the Judge produced no usable
+ *    signal — "keep the current tier" is not evidence that the task is
+ *    complex, and escalating into a delegation loop on zero evidence is the
+ *    same guess the hold rule exists to refuse.
+ * 3. The DECISION tier is smart — the router actually owns a resolvable Smart
+ *    model for this turn. Gating on the decision (never the raw verdict) is
+ *    what keeps the CTO prompt off a Fast-tier run.
+ * 4. The Judge did not veto it (`orchestrate !== false`).
+ * 5. The subagent tool is available — otherwise degrade to a plain Smart run.
  *
  * Pure decision — no side effects.
  */
 export function shouldOrchestrate(
   config: ShiftRouterConfig,
-  judgeTier: string,
-  smartModelResolvable: boolean,
+  decision: OrchestrationDecisionInput,
   subagentToolAvailable: boolean,
+  judgeOrchestrate?: boolean,
 ): boolean {
   if (!config.enabled) return false
   if (config.orchestration.mode !== 'auto') return false
-  if (judgeTier !== 'smart') return false
-  if (config.orchestration.requireSmartModel && !smartModelResolvable) return false
+  if (decision.held) return false
+  if (decision.decisionTier !== 'smart') return false
+  if (judgeOrchestrate === false) return false
   if (!subagentToolAvailable) return false
   return true
+}
+
+/**
+ * Record one worker outcome and advance the escalation streak.
+ *
+ * Counting CONSECUTIVE failures (rather than every failure) makes the cap mean
+ * "this phase is not converging" instead of "two workers failed today".
+ * Reaching the threshold consumes one escalation and resets the streak; a
+ * success resets it too.
+ */
+export function recordWorkerOutcome(
+  state: RouterState,
+  config: ShiftRouterConfig,
+  ok: boolean,
+): void {
+  const orch = state.orchestration
+  if (!orch.active) return
+  if (ok) {
+    orch.workerFailStreak = 0
+    return
+  }
+  orch.workerFailStreak += 1
+  if (orch.workerFailStreak >= config.orchestration.escalationThreshold) {
+    orch.escalations += 1
+    orch.workerFailStreak = 0
+  }
 }
 
 // ─── Hard-cap enforcement ────────────────────────────────────────

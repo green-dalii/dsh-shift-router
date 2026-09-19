@@ -40,7 +40,15 @@ import { Config, deepMergeConfig } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
 import { DEFAULT_CONFIG, TIERS } from './types.js'
 import { findBestModelForTier } from './tier.js'
-import { createRouterState, processRoute, applyModelSwitch, clearManualOverride, setManualOverrideTier, setManualOverrideModel } from './router.js'
+import {
+  createRouterState,
+  processRoute,
+  applyModelSwitch,
+  clearManualOverride,
+  setManualOverrideTier,
+  setManualOverrideModel,
+  recordLastDecision,
+} from './router.js'
 import { classify, defaultJudgeStreamCall, type JudgeStreamCall } from './judge.js'
 import {
   markModelFailed,
@@ -51,16 +59,16 @@ import {
   findFailoverModel,
   detectFailoverError,
   modelKey,
-  tokensPerSecond,
-  recordSpeed,
 } from './failover.js'
 import {
   shouldOrchestrate,
+  recordWorkerOutcome,
   buildOrchestratorPrompt,
   buildCapNotice,
   capHit,
   enterOrchestration,
   exitOrchestration,
+  resetOrchestration,
   renderTierChain,
 } from './orchestrate.js'
 import { getModelPricing, estimateCost } from './stats.js'
@@ -300,17 +308,26 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   ): Promise<PreStepDecision> => {
     if (!isRoutableAgent(agent) || step !== 1) return next()
     const cfg = getConfig()
+
+    const state = ensureState(agent)
+
+    // Orchestration is single-turn (SPEC §7.3). If it is still active at the
+    // start of a NEW turn, the previous turn never reached its stop boundary
+    // (abort, crash) — sweep the leak so the caps and the CTO prompt do not
+    // bleed into unrelated turns. Swept before every gate below (disabled,
+    // mode) so turning routing off mid-run cannot strand an active loop.
+    if (state.orchestration.active) {
+      resetOrchestration(state)
+      vlog('🪄 swept leaked orchestration state from an interrupted turn')
+    }
+
     if (!cfg.enabled) return next()
 
     // Mode gate: `manual` skips the judge and auto-switching (only explicit
-    // `/route-force` overrides apply — they need router state, so ensure it);
-    // `off` makes the router fully passive for model selection.
-    if (cfg.routing.mode !== 'auto') {
-      if (cfg.routing.mode === 'manual') ensureState(agent)
-      return next()
-    }
+    // `/route-force` overrides apply); `off` makes the router fully passive
+    // for model selection. Both still need router state for `/route-force`.
+    if (cfg.routing.mode !== 'auto') return next()
 
-    const state = ensureState(agent)
     const prompt = messagesToText(messages, cfg.routing.judgePromptCap)
     if (!prompt.trim()) return next()
 
@@ -338,28 +355,18 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       )
     } finally {
       if (cfg.ux.routerLogVerbose) {
-        const ratio = state.window.length === 0
-          ? '0/0'
-          : `${state.window.filter((e) => e.tier === 'fast').length}/${state.window.length}`
+        const badges = { fast: 'f', smart: 's' } as const
+        const window = state.window
+          .map((entry) => (entry.hold ? 'h' : badges[entry.tier]))
+          .join('')
         vlog(
           `judge: ${judgeResult.tier} (${judgeResult.source})` +
             (judgeResult.confidence !== undefined ? ` conf=${judgeResult.confidence.toFixed(2)}` : '') +
             (judgeResult.reason !== undefined ? ` reason=${judgeResult.reason}` : '') +
-            `, window=[${state.window.map((e) => e.tier[0]).join('')}] (${ratio} fast)`,
+            (judgeResult.orchestrate !== undefined ? ` orchestrate=${judgeResult.orchestrate}` : '') +
+            `, window=[${window}]`,
         )
       }
-    }
-
-    // Task-level orchestration: Judge said "smart" + auto mode + Smart model
-    // resolvable + subagent tool available → the CTO prompt activates (the
-    // system-prompt section below renders it while orchestration is active).
-    const smartResolvable = cfg.orchestration.requireSmartModel
-      ? await resolveBestModel('smart', state) !== null
-      : true
-    const subagentAvailable = ctx.tools.get(SUBAGENT_TOOL) !== undefined
-    if (shouldOrchestrate(cfg, judgeResult.tier, smartResolvable, subagentAvailable)) {
-      enterOrchestration(state)
-      vlog(`🪄 orchestrating: judge=${judgeResult.tier} — orchestrator prompt active`)
     }
 
     // Routing decision (upgrade is instant; downgrade waits for the window).
@@ -377,6 +384,23 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
         applyModelSwitch(m, state)
         vlog(`decision: initial → ${m.provider}/${m.modelId}`)
       }
+    }
+    recordLastDecision(state, judgeResult, result)
+    if (result.held) {
+      vlog('decision: HOLD — Judge gave no usable signal, keeping the current tier')
+    }
+
+    // Task-level orchestration gates on the DECISION tier (post-EV, post-hold),
+    // never the raw verdict: reading the verdict is what used to inject the CTO
+    // prompt while a Fast model ran the turn.
+    const subagentAvailable = ctx.tools.get(SUBAGENT_TOOL) !== undefined
+    if (shouldOrchestrate(cfg, result, subagentAvailable, judgeResult.orchestrate)) {
+      enterOrchestration(state)
+      vlog(
+        `🪄 orchestrating: decisionTier=${result.decisionTier} verdict=${judgeResult.tier}` +
+          (judgeResult.orchestrate !== undefined ? ` judgeOrchestrate=${judgeResult.orchestrate}` : '') +
+          ' — orchestrator prompt active',
+      )
     }
 
     return next()
@@ -538,9 +562,15 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const agent = exec.agent
     const state = agent ? stateFor(agent) : undefined
     if (!state?.orchestration.active) return undefined
+    const cfg = getConfig()
+    recordWorkerOutcome(state, cfg, !result.isError)
     if (result.isError) {
-      state.orchestration.escalations += 1
-      vlog(`🪄 orchestration escalation ${state.orchestration.escalations}/${getConfig().orchestration.escalationThreshold} (worker failure)`)
+      vlog(
+        `🪄 worker failed (streak ${state.orchestration.workerFailStreak}/${cfg.orchestration.escalationThreshold},` +
+          ` escalations ${state.orchestration.escalations}/${cfg.orchestration.escalationThreshold})`,
+      )
+    } else {
+      vlog('🪄 worker succeeded — failure streak reset')
     }
     return undefined
   })
@@ -557,6 +587,12 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const model = msg.source.model
     const usage = event.data.usage
     const now = Date.now()
+
+    // Sync what ACTUALLY ran (display only): `current*` is the router's
+    // intent, these are the fact. Never lets a stale intent be shown as the
+    // running model, and — deliberately — never triggers a switch.
+    state.actualProvider = provider
+    state.actualModel = model
 
     // A 2xx response clears the cooldown (mirrors pi's after_provider_response).
     if (isModelInCooldown(state.modelCooldowns, provider, model, now)) {
@@ -600,24 +636,10 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const callLogCap = cfg.telemetry.callLogCap
     if (state.callLog.length > callLogCap) state.callLog = state.callLog.slice(-callLogCap)
 
-    // Throughput from wall-clock elapsed since the first chunk.
-    const startTime = state.streamingStartTime
-    if (startTime !== null && tokens.output > 0) {
-      const elapsed = now - startTime
-      const tps = tokensPerSecond(tokens.output, elapsed)
-      if (tps > 0) recordSpeed(state.recentSpeeds, tps, cfg.failover.speedWindowSize)
-    }
-    state.streamingStartTime = null
+    // Throughput is intentionally not tracked here: DSH renders tok/s natively
+    // (chat footer + trajectory) from decode time, which is a better
+    // measurement than a wall-clock estimate would be. See SPEC §9.
     vlog(`${tokens.output} tokens (total ${state.totalOutputTokens.toLocaleString()})`)
-  })
-
-  // First streaming chunk of a message marks the throughput start.
-  ctx.on('session/event', (session: Session, event: SessionEvent) => {
-    if (event.type !== 'assistant/chunk') return
-    const agent = ctx.agents.get(session.id)
-    const state = agent ? stateFor(agent) : undefined
-    if (!state) return
-    if (state.streamingStartTime === null) state.streamingStartTime = Date.now()
   })
 
   // ── Orchestrator prompt (rendered only while orchestration is active) ──
@@ -630,6 +652,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       const state = stateFor(agent)
       if (!state?.orchestration.active) return ''
       const cfg = getConfig()
+      // The prompt must mirror the gates that enforce it: the `subagent` deny
+      // at `tools/pre-execute` only fires while routing is enabled and in auto
+      // mode, so rendering the CTO instruction outside those conditions would
+      // ask for delegation that nothing is capping.
+      if (!cfg.enabled || cfg.routing.mode !== 'auto') return ''
       // Hard cap reached → replace the orchestrator instruction with a
       // "wrap up now" notice (the subagent tool is denied at the same time).
       if (capHit(state, cfg)) return buildCapNotice(cfg)
@@ -684,6 +711,32 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     ctx.commands.register(definition)
   }
 
+  // ── Worker-model self-check (SPEC §7.4) ───────────────────────────
+  // Upstream calls per-worker tier injection mandatory. In DSH the `subagent`
+  // tool's per-call provider/model only takes effect inside the host-owned
+  // `subagent-model-selection` allowlist (default off). We cannot enable that
+  // setting from here, so the honest move is to tell the user what to turn on
+  // instead of letting workers silently inherit the Smart model.
+  function workerModelSelection(): { enabled: boolean; routes: number } | undefined {
+    const holder = ctx as unknown as {
+      subagentModelSelection?: { current?: () => unknown }
+    }
+    const service = holder.subagentModelSelection
+    if (service === undefined || typeof service.current !== 'function') return undefined
+    try {
+      const current = service.current() as
+        | { enabled?: unknown; allowedModels?: unknown }
+        | undefined
+      if (current === null || typeof current !== 'object') return undefined
+      return {
+        enabled: current.enabled === true,
+        routes: Array.isArray(current.allowedModels) ? current.allowedModels.length : 0,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
   // ── Startup diagnostics ────────────────────────────────────────────
   ctx.logger.info('[shift-router] loaded (enabled=%s, orchestration=%s)', getConfig().enabled, getConfig().orchestration.mode)
   if (getConfig().enabled) {
@@ -694,6 +747,19 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     }
     if (getConfig().tiers.fast.models.length === 0) {
       ctx.logger.warn('[shift-router] fast tier is empty — the judge has no model chain and routing will hold position')
+    }
+    if (getConfig().orchestration.mode === 'auto' && getConfig().tiers.fast.models.length > 0) {
+      const selection = workerModelSelection()
+      // Only warn when we can actually read the setting: a false alarm is worse
+      // than silence, and an unreadable service means "unknown", not "off".
+      if (selection !== undefined && (!selection.enabled || selection.routes === 0)) {
+        ctx.logger.warn(
+          '[shift-router] orchestration is on but model-selectable subagent delegation is unavailable '
+          + '(enable the harness "%s" setting and list the Fast-tier routes in allowedModels) — '
+          + 'workers will otherwise inherit the Smart model, so delegation loses its cost advantage',
+          'subagent-model-selection',
+        )
+      }
     }
   }
 

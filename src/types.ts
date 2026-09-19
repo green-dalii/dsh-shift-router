@@ -22,10 +22,12 @@ export interface JudgeResult {
   tier: Tier
   source: 'llm' | 'fallback'
   /**
-   * LLM's confidence in the tier classification, in [0, 1].
-   * Used by the confidence-weighted sliding window: entries below
-   * `window.minConfidence` are ignored; weighted ratio decides downgrade.
-   * Defaults to 1.0 when the Judge doesn't emit it (backward-compat).
+   * LLM's confidence in the tier classification, in [0, 1]. Read as `pSmart`
+   * by the EV rule (SPEC §3): a `smart` verdict contributes `c`, a `fast`
+   * verdict contributes `1 − c`. A missing value is read as 1.0 for
+   * backward-compatibility with prompts that omit it; the only "no signal"
+   * case the router invents no value for is its own outage (`source:
+   * 'fallback'`), which forces a hold.
    */
   confidence?: number
   /**
@@ -34,6 +36,14 @@ export interface JudgeResult {
    * `/router status` detail — a debugging aid, never used by routing.
    */
   reason?: string
+  /**
+   * Judge's explicit orchestration signal. `true` = the task is large or
+   * decomposable enough that the Smart tier should delegate to Fast workers
+   * instead of running the turn alone. `false` = Smart runs the turn directly.
+   * Absent (older prompt, or the model did not emit it) = no opinion — the
+   * caller falls back to the tier-based default.
+   */
+  orchestrate?: boolean
 }
 
 /** A reference to a specific model in a specific provider */
@@ -70,8 +80,6 @@ export interface FailoverConfig {
   maxMs: number
   /** Starting attempt count for 4xx failures (baseMs * 4^(n-1) with n = this). */
   startAttempts4xx: number
-  /** Max recent tokens/sec readings kept for the `/router stats` average. */
-  speedWindowSize: number
 }
 
 /** Telemetry retention / aggregation policy. */
@@ -80,14 +88,34 @@ export interface TelemetryConfig {
   callLogCap: number
 }
 
+/**
+ * Named economics presets for `/router eco|default|sport` (SPEC §3).
+ * R (reworkPenalty) is the only knob a preset touches: θ = 1/R, and the turn
+ * runs smart iff `pSmart ≥ θ`. Higher R → lower θ → more eager escalation.
+ */
+export type EconomicMode = 'eco' | 'default' | 'sport'
+
+/**
+ * Pre-1.4.0 defaults for the two LEGACY knobs. A config carrying exactly these
+ * values is a wizard snapshot of the old defaults, not a deliberate
+ * customization — it migrates silently to the new rule. Only a *different*
+ * value is honoured as an override (and surfaced as `⚠ legacy`).
+ */
+export const LEGACY_THRESHOLD_DEFAULT = 0.6
+export const LEGACY_SAME_FAMILY_THRESHOLD_DEFAULT = 0.9
+
+/** Default θ divisor when both tiers share a provider family. */
+export const DEFAULT_SAME_FAMILY_PENALTY = 1.5
+/** Divisor implied by a non-default legacy `sameFamilyThreshold`. */
+export const LEGACY_SAME_FAMILY_PENALTY = 3.0
+
 /** Routing behaviour config */
 export interface RoutingConfig {
   /**
-   * `auto` (default): judge + sliding-window routing + failover +
-   * orchestration. `manual`: no judge, no auto-switching — only explicit
-   * `/route-force` overrides take effect (one-shot). `off`: the router is
-   * fully passive for model selection (like `enabled: false`); commands and
-   * telemetry still work.
+   * `auto` (default): judge + EV routing + failover + orchestration.
+   * `manual`: no judge, no auto-switching — only explicit `/route-force`
+   * overrides take effect. `off`: the router is fully passive for model
+   * selection (like `enabled: false`); commands and telemetry still work.
    */
   mode: 'auto' | 'manual' | 'off'
   /** LLM Judge timeout in ms */
@@ -97,24 +125,36 @@ export interface RoutingConfig {
   /** Max prompt characters sent to the Judge (bounds Judge cost). */
   judgePromptCap: number
   /**
-   * Sliding window for downgrade gating. Entries whose confidence is
-   * below `minConfidence` are ignored. Downgrade fires when
-   * `Σ confidence_for_fast / window_size` ≥ `threshold`.
+   * Expected-cost economics (SPEC §3). `reworkPenalty` encodes how many
+   * price-deltas a wrong downgrade costs; θ = 1/reworkPenalty.
+   * `downgradeMemory` = consecutive decisive fast decisions required before
+   * smart → fast. `mode` is a named preset and, when present, is
+   * authoritative over `reworkPenalty`.
    */
-  window: { size: number; threshold: number; minConfidence?: number }
+  economics: { reworkPenalty: number; downgradeMemory: number; mode?: EconomicMode }
+  /**
+   * Decision memory. Entries below `minConfidence` are holds (never switch,
+   * never extend a fast streak). `threshold` is the LEGACY raw-θ override —
+   * honoured only when it differs from `LEGACY_THRESHOLD_DEFAULT`.
+   */
+  window: { size: number; threshold?: number; minConfidence?: number }
   /**
    * Cache-aware routing. When fast and smart resolve to the same provider
    * family, a mid-session model switch forfeits the prompt cache. When
    * enabled:
-   *   - the downgrade threshold is raised to `sameFamilyThreshold`, and
+   *   - the decision bar becomes `θ / sameFamilyPenalty` (a smaller bar →
+   *     fewer downgrades, so the warm cache survives longer), and
    *   - downgrades are suppressed within `idleBoundaryMs` of the last
-   *     message (the cache is warm); they only fire after an idle gap.
-   * Auto-detection turns it on when both tiers use the same provider.
+   *     message (the cache is warm) — they only fire after an idle gap long
+   *     enough that the cache has already expired.
+   * `sameFamilyThreshold` is the LEGACY knob; a non-default value implies the
+   * strong penalty `LEGACY_SAME_FAMILY_PENALTY` (3.0).
    */
   cacheAware?: {
     enabled: boolean
-    sameFamilyThreshold: number
+    sameFamilyPenalty: number
     idleBoundaryMs: number
+    sameFamilyThreshold?: number
   }
 }
 
@@ -127,16 +167,18 @@ export interface RoutingConfig {
 export interface OrchestrationConfig {
   /**
    * Mode. "auto" (default): Judge-driven — simple tasks (fast verdict) keep
-   * the plain router; complex tasks (smart verdict) escalate to
-   * Smart-orchestrated execution. "off": never orchestrate.
+   * the plain router; complex tasks escalate to Smart-orchestrated execution.
+   * "off": never orchestrate.
    */
   mode: 'auto' | 'off'
   /** Max review/delegate rounds before Smart takes over (hard cap). */
   maxRounds: number
-  /** A worker failing ≥N times → Smart takes over the phase itself. */
+  /**
+   * Consecutive worker failures on one phase that count as one escalation
+   * (hard cap: `escalationThreshold` escalations). A successful worker result
+   * resets the streak.
+   */
   escalationThreshold: number
-  /** Skip orchestration when the Smart tier model can't be resolved. */
-  requireSmartModel: boolean
 }
 
 /** Per-model USD pricing (per 1M tokens) for cost telemetry. */
@@ -177,12 +219,16 @@ export interface OrchestrationState {
   active: boolean
   /** Rounds consumed this task (hard cap: maxRounds). */
   rounds: number
-  /** Workers escalated this task (hard cap: escalationThreshold). */
+  /** Escalations reached this task (hard cap: escalationThreshold). */
   escalations: number
+  /**
+   * Consecutive worker failures. A success resets it to 0; reaching
+   * `escalationThreshold` increments `escalations` and resets the streak, so
+   * isolated failures do not burn the cap.
+   */
+  workerFailStreak: number
   /** Epoch ms when the current orchestration task started. */
   startedAt: number | null
-  /** Estimated spend so far (USD) — hard budget guard (informational). */
-  spend: number
 }
 
 /** Default configuration */
@@ -205,10 +251,11 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     judgeTimeout: 5000,
     judgeMaxTokens: 4000,
     judgePromptCap: 6000,
-    window: { size: 5, threshold: 0.6, minConfidence: 0.5 },
+    economics: { reworkPenalty: 3, downgradeMemory: 2 },
+    window: { size: 5, minConfidence: 0.5 },
     cacheAware: {
       enabled: true,
-      sameFamilyThreshold: 0.9,
+      sameFamilyPenalty: DEFAULT_SAME_FAMILY_PENALTY,
       idleBoundaryMs: 5 * 60_000,
     },
   },
@@ -219,13 +266,11 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     mode: 'auto',
     maxRounds: 3,
     escalationThreshold: 2,
-    requireSmartModel: true,
   },
   failover: {
     baseMs: 60_000,
     maxMs: 6 * 60 * 60_000,
     startAttempts4xx: 3,
-    speedWindowSize: 5,
   },
   telemetry: {
     callLogCap: 1000,
@@ -239,10 +284,30 @@ export interface WindowEntry {
   timestamp: number
   /**
    * Confidence of this classification (defaults to 1.0 when missing).
-   * Used by the confidence-weighted sliding window.
+   * Below `window.minConfidence` the entry is a hold.
    */
   confidence?: number
+  /**
+   * This entry is a hold: the Judge was unusable (outage) or the verdict was
+   * not decisive. Holds never extend a downgrade streak and never trigger a
+   * switch — they keep the current tier.
+   */
+  hold?: boolean
 }
+
+/** The last routing decision, kept for display (`/router status`, GUI card). */
+export interface LastDecision {
+  verdictTier: Tier
+  confidence?: number
+  reason?: string
+  action: RouteAction
+  decisionTier: Tier
+  held: boolean
+  at: number
+}
+
+/** What the router did with one turn's verdict. */
+export type RouteAction = 'upgrade' | 'downgrade' | 'stay' | 'manual'
 
 /** Router internal state — one per routed (top-level) agent. */
 export interface RouterState {
@@ -260,10 +325,6 @@ export interface RouterState {
   modelCooldowns: CooldownMap
   /** Cumulative output tokens across the session (from assistant/message usage). */
   totalOutputTokens: number
-  /** Sliding window of recent tokens-per-second readings (for `/router stats`). */
-  recentSpeeds: number[]
-  /** Epoch ms when the current in-flight assistant message started streaming; null when none. */
-  streamingStartTime: number | null
   /**
    * Provider/model the router last put on the wire for this agent. Set in
    * `agent/request`; consumed by `agent/request-error` to attribute a failure
@@ -282,6 +343,16 @@ export interface RouterState {
    * 0 when no message has completed yet.
    */
   lastActivityAt: number
+  /**
+   * Provider/model that ACTUALLY produced the last assistant message, synced
+   * from `session/event` (display only — never drives a switch). `current*`
+   * is the router's *intent*; these are the *fact*, so a stale intent can
+   * never masquerade as the running model in status output.
+   */
+  actualProvider: string | null
+  actualModel: string | null
+  /** The most recent routing decision (display only). */
+  lastDecision: LastDecision | null
   /**
    * Cumulative per-tier spend. Populated from assistant/message usage
    * (token counts) plus estimated USD when the caller supplies pricing.

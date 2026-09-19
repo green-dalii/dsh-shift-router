@@ -147,6 +147,8 @@ export function detectFailoverError(failure: LlmFailure | undefined | null): { c
   const status = failure.status
   if (status !== undefined) {
     if (status === 429) return { code: '429' }
+    // v1.4.1 (upstream): an unfunded account must be cooled, not pinned.
+    if (status === 402) return { code: '402' }
     if (status >= 500 && status < 600) return { code: String(status) }
   }
 
@@ -161,6 +163,17 @@ export function detectFailoverError(failure: LlmFailure | undefined | null): { c
     || /用量上限/i.test(text)
     || /rate_limit_error/i.test(text)
     || /exceeded[_ -]?(?:your|the)?[_ -]?(?:current)?[_ -]?quota/i.test(text)
+    // v1.4.3 — usage-limit exhaustion with no HTTP status (Codex-style).
+    || /usage[_ -]?limit[_ -]?(?:has[_ -]?been[_ -]?)?reached/i.test(text)
+    // v1.4.1 — unfunded account.
+    || /insufficient[_ -]?balance/i.test(text)
+    || /余额不足/.test(text)
+    // v1.2.0 — model decommissioned / unavailable. Kept narrow (a model
+    // reference must be adjacent) so an unrelated "… not supported" does not
+    // cool down a healthy model.
+    || /unsupported[_ -]?model/i.test(text)
+    || /model[_ -]?not[_ -]?found/i.test(text)
+    || /model[^\n]{0,24}not\s+supported/i.test(text)
   ) {
     return { code: '429' }
   }
@@ -231,24 +244,6 @@ export function formatRemaining(ms: number): string {
   const m = Math.floor(totalSec / 60)
   const s = totalSec % 60
   return m > 0 ? `${m}m${s}s` : `${s}s`
-}
-
-/** Max number of recent speed samples kept for averaging. */
-export const SPEED_WINDOW_SIZE = 5
-
-/**
- * Compute tokens-per-second from elapsed ms and output tokens.
- * Returns 0 when elapsed ≤ 0 or output_tokens ≤ 0.
- */
-export function tokensPerSecond(outputTokens: number, elapsedMs: number): number {
-  if (elapsedMs <= 0 || outputTokens <= 0) return 0
-  return Math.round((outputTokens / elapsedMs) * 1000)
-}
-
-/** Push a new speed reading into the sliding window (evict oldest beyond limit). */
-export function recordSpeed(speeds: number[], tps: number, windowSize: number = SPEED_WINDOW_SIZE): void {
-  speeds.push(tps)
-  while (speeds.length > windowSize) speeds.shift()
 }
 
 /**

@@ -16,9 +16,7 @@ import {
   isModelInCooldown,
   markModelFailed,
   modelKey,
-  recordSpeed,
   remainingCooldownMs,
-  tokensPerSecond,
 } from '../src/failover.js'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
 import { DEFAULT_CONFIG, type ShiftRouterConfig } from '../src/types.js'
@@ -104,6 +102,37 @@ describe('detectFailoverError', () => {
     expect(detectFailoverError({ message: 'HTTP 502 from upstream', code: 'UNKNOWN' })?.code).toBe('502')
   })
 
+  it('recognizes usage-limit exhaustion without an HTTP status (Codex-style)', () => {
+    // Upstream v1.4.3 / v1.2.0: a plain-text usage-limit tail is a 429-class
+    // signature even when the provider reports no HTTP status at all.
+    expect(detectFailoverError({ message: 'The usage limit has been reached', code: 'UNKNOWN' })?.code).toBe('429')
+    expect(detectFailoverError({ message: 'usage_limit_reached', code: 'UNKNOWN' })?.code).toBe('429')
+  })
+
+  it('recognizes 402 / insufficient balance as failover-worthy', () => {
+    // Upstream v1.4.1: a dead (unfunded) account must be cooled, otherwise
+    // every turn re-tries the dead account while the router keeps picking it.
+    expect(detectFailoverError({ message: 'x', code: 'X', status: 402 })?.code).toBe('402')
+    expect(detectFailoverError({
+      message: 'Error: 402: {"message":"Insufficient Balance"}',
+      code: 'UNKNOWN',
+    })?.code).toBe('429')
+    expect(detectFailoverError({ message: '余额不足', code: 'UNKNOWN' })?.code).toBe('429')
+  })
+
+  it('recognizes unsupported / missing models as failover-worthy', () => {
+    // Upstream v1.2.0: a decommissioned model must fail over, not pin the tier.
+    expect(detectFailoverError({ message: 'unsupported_model', code: 'UNKNOWN' })?.code).toBe('429')
+    expect(detectFailoverError({ message: 'model_not_found: gpt-9', code: 'UNKNOWN' })?.code).toBe('429')
+    expect(detectFailoverError({ message: 'this model is not supported', code: 'UNKNOWN' })?.code).toBe('429')
+  })
+
+  it('treats 402 as a 4xx cooldown start', () => {
+    const c = createCooldowns()
+    markModelFailed(c, 'p', 'm', 0, '402')
+    expect(c.get('p/m')!.until).toBe(COOLDOWN_BASE_MS * 16)
+  })
+
   it('returns null for auth/network/context failures', () => {
     const cases: Array<LlmFailure | null | undefined> = [
       { message: 'invalid api key', code: 'INVALID_CREDENTIAL', status: 401 },
@@ -163,19 +192,6 @@ describe('helpers', () => {
     expect(formatRemaining(60_000)).toBe('1m0s')
     expect(formatRemaining(3_000)).toBe('3s')
   })
-
-  it('computes tokens per second', () => {
-    expect(tokensPerSecond(100, 1000)).toBe(100)
-    expect(tokensPerSecond(100, 0)).toBe(0)
-    expect(tokensPerSecond(0, 1000)).toBe(0)
-  })
-
-  it('keeps a sliding speed window', () => {
-    const speeds: number[] = []
-    for (let i = 0; i < 8; i++) recordSpeed(speeds, i)
-    expect(speeds).toHaveLength(5)
-    expect(speeds[0]).toBe(3)
-  })
 })
 
 describe('tunable failover policy', () => {
@@ -199,10 +215,4 @@ describe('tunable failover policy', () => {
     expect(c.get('p/m')!.until).toBe(1000)
   })
 
-  it('recordSpeed honors a custom window size', () => {
-    const speeds: number[] = []
-    for (let i = 0; i < 10; i++) recordSpeed(speeds, i, 3)
-    expect(speeds).toHaveLength(3)
-    expect(speeds[0]).toBe(7)
-  })
 })
