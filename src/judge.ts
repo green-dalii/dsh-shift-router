@@ -28,10 +28,6 @@ import { detectFailoverError } from './failover.js'
 
 // ─── Judge system prompt ──────────────────────────────────────────
 
-const FALLBACK_PROMPT =
-  'You are a task classifier. Respond with ONLY a JSON object: ' +
-  '{"tier": "fast"} or {"tier": "smart"}.'
-
 export const JUDGE_PROMPT = `# Judge System Prompt
 
 You are a task classifier for an AI coding assistant. Given a user's message,
@@ -175,14 +171,6 @@ The "Tier" column is the model that **drives the whole turn**.
 export const JUDGE_MAX_TOKENS = 4000
 
 // ─── Judge reply parsing (pure, unit-tested) ──────────────────────
-
-/**
- * Safe JSON.stringify that returns the literal string "undefined" when
- * given `undefined`.
- */
-function jsonStr(v: unknown): string {
-  return v === undefined ? 'undefined' : JSON.stringify(v)
-}
 
 export function extractTier(text: string): Tier | null {
   if (!text) return null
@@ -421,11 +409,3 @@ export async function classify(
 
   return { tier: 'fast', source: 'fallback' }
 }
-
-/** Keep the fallback prompt referenced (tree-shake guard). */
-export function judgeFallbackPrompt(): string {
-  return FALLBACK_PROMPT
-}
-
-/** Re-export jsonStr for tests. */
-export { jsonStr }

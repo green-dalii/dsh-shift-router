@@ -106,6 +106,11 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   is strictly better than this plugin's wall-clock estimate. Duplicating it
   meant two competing figures for one thing, one of them worse.
   *Deliberately not ported from upstream v1.4.2.*
+- **Dead code and an unused dependency** found by a reference scan:
+  `jsonStr` and the never-wired `FALLBACK_PROMPT` / `judgeFallbackPrompt` in
+  `judge.ts`, `formatDuration` in `stats.ts` (a duplicate of
+  `failover.formatRemaining` with no caller), and the `@deepseek-ai/dsh-timeout`
+  direct dependency (no source file imports it; it remains a transitive one).
 - **`orchestration.requireSmartModel`** — `decisionTier` now reports truthfully
   whether the Smart tier will run, so orchestration already cannot fire without
   a resolvable Smart model. The knob's only reachable effect was injecting the

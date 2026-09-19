@@ -211,15 +211,6 @@ function cloneTierUsage(u: TierUsage): TierSpendView {
   }
 }
 
-/** Format ms as human-readable duration (e.g. "3m12s"). */
-export function formatDuration(ms: number): string {
-  if (ms <= 0) return '0s'
-  const totalSec = Math.ceil(ms / 1000)
-  const m = Math.floor(totalSec / 60)
-  const s = totalSec % 60
-  return m > 0 ? `${m}m${s}s` : `${s}s`
-}
-
 /** Format a USD spend value with adaptive precision (e.g. $0.0012 / $3.45). */
 export function formatUsd(value: number): string {
   if (!Number.isFinite(value)) return '$0'
