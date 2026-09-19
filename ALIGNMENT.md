@@ -174,7 +174,55 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 
 ---
 
-## 3. 明确不对齐（附理由）
+## 交付核对（本轮 P0 + P1）
+
+范围经维护者确认：**P0 + P1**；EV **替换**旧算法；C4 按「文档化 + 启动自检」执行。
+核对方式：逐条回到代码与测试取证，而不是凭 commit message。
+
+### P0 — 正确性
+
+| 项 | 实现 | 测试证据 |
+|---|---|---|
+| A1 Judge 不可用 ⇒ HOLD | `router.ts` `isDecisive()` + `processRoute` hold 分支（推入 `hold:true` 条目） | `router.test.ts` "holds position when the Judge is unavailable"、"never lets two consecutive outages downgrade a smart session"、"holds on a verdict below minConfidence" |
+| A2 failover 签名补全 | `failover.ts` `detectFailoverError()`：402/余额不足/用量上限/模型下线；402 走 4xx 起跳 | `failover.test.ts` "recognizes 402 / insufficient balance"、"recognizes usage-limit exhaustion without an HTTP status"、"recognizes unsupported / missing models"、"treats 402 as a 4xx cooldown start" |
+| A5 展示同步实际模型 | `index.ts` session/event 写 `actualProvider/actualModel`；`commands.ts` status 显示 Running vs Intended + 漂移告警 | `commands-handler.test.ts` "shows the gear, the last decision and the running model"（接线本身仍无单测，见残余缺口） |
+| A6 严格模型权威 | `processRoute` 先按 decisionTier 解析并 `applyModelSwitch` 记录档位 | `router.test.ts` "records the tier change even when both tiers resolve to the same model" |
+| A7 显式档位请求 | `judge.ts` 提示词「certainty, not a hedge」+ ≥0.9；判定改读 `decisionTier` | `judge.test.ts` "makes an explicit instruction a certainty rather than a hedge"；`orchestrate.test.ts` "never orchestrates on a hold" |
+| A8 编排泄漏清扫 | `index.ts` `agent/pre-step` 在**所有门禁之前**清扫 active 残留 | `orchestrate.test.ts` "reset clears a leaked run" |
+| ~~A3 / A4 TPS~~ | **R2 修正：不移植**，并删除本项目重复的 TPS 机制 | 负向断言：`stats.test.ts` "reports no throughput field"；`commands-handler.test.ts` status 不含 `tok/s` |
+| C7 连续失败升级 | `orchestrate.ts` `recordWorkerOutcome()` + `index.ts` tools/result | `orchestrate.test.ts` "counts only consecutive failures toward an escalation"、"is inert while orchestration is inactive" |
+
+### P1 — 决策核心
+
+| 项 | 实现 | 测试证据 |
+|---|---|---|
+| B1 EV 经济学 | `router.ts` `effectiveReworkPenalty` / `effectiveTheta` / `pSmartOf` / `fastStreak` / `analyzeDowngrade` | `router.test.ts` 全套（θ 推导、preset 权威、pSmart 映射、legacy 惰性、连击降级、窗口裁剪） |
+| B3 cache-aware 除数 | `sameFamilyThetaFactor()` + `sameFamilyPenalty`；legacy 阈值 ⇒ 3.0 | `router.test.ts` "divides theta by the same-family penalty"、"maps a non-default legacy sameFamilyThreshold"、"makes the same verdict stickier on a shared provider" |
+| B4 judge prompt 四键 | `judge.ts` `JUDGE_PROMPT` + `parseOrchestrateFromText` | `judge.test.ts` "documents all four output keys"、"carries the doc-aware and bulk-batch fast rules"、"contains no keyword/regex decision gate" |
+| B5 `decisionTier` | `RouteDecision` 新字段，唯一消费信号 | `router.test.ts` 各 action 分支的 `decisionTier` 断言 + `recordLastDecision` |
+| B6 `orchestrate` 信号 | `shouldOrchestrate` 第 4 参 + 提示词键 | `orchestrate.test.ts` "lets the Judge veto orchestration explicitly"；`judge.test.ts` "carries the orchestrate signal through a successful call" |
+| B2 gear presets | `commands.ts` `/router eco\|default\|sport`，**持久化** | `commands-handler.test.ts` "persists the chosen gear instead of only mutating memory"、"reports R and theta"、"surfaces a persistence failure" |
+| C4(b) worker 模型注入 | 启动自检告警 + 提示词如实描述 + SPEC §7.4 | `orchestrate.test.ts` 提示词断言（含 `subagent-model-selection`、不含 `agentOptions`）；自检接线本身无单测 |
+| 移除 `requireSmartModel` | `types.ts` / `config.ts` 删除；老文档静默加载 | `config.test.ts` "no longer carries the removed orchestration knob"、"loads a pre-alignment config document without failing" |
+
+### Gate 结果
+
+| Gate | 结果 |
+|---|---|
+| `npx tsc --noEmit`（宿主） | ✅ |
+| `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
+| `npx vitest run` | ✅ 182 tests / 11 files |
+| `npm run build`（tsc + tsc client + tsdown） | ✅ |
+| `npm run test:e2e`（临时 DSH_HOME → 装 bundle → 跑一轮 → 设置往返） | ✅ `ROUTER-E2E: turn ran on fake/fake-smart`；probe `{ok:true}` |
+| `npm pack` 内容与 `dist` 可加载性 | ✅ 57 files；`import('./dist/index.js')` 导出 `apply/Config/inject/name`，schema 解析出 EV 默认值 |
+
+### 残余缺口（如实记录，未在轮内解决）
+
+1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、启动自检、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。
+2. **SDK 漂移（E5）已由证据升级为 P2**：harness 通过 `LlmAdapter.prepareCall` 派发，而该 API 在 0.1.0-rc.6 不存在——本轮 e2e 的 fake adapter 就因此失败。插件自身的运行时值导入（`BlockAssembler`、`createUserMessage`、`settingsNamespace`）同样来自被钉住的旧版本，属真实的双版本风险，而非仅 fixture 问题。
+3. **C4(a) GUI 代写 `subagent-model-selection` 白名单**未实现（需跨命名空间写权限的可行性调查），作为 P2 保留；本轮交付的是 (b)：文档化 + 启动自检 + 提示词如实描述。
+4. **P2 编排深度**（验收审计、收敛协议、每 worker 成本归因）与 **P3** 项（模型目录单一事实来源、配置层权威展示、GUI pricing 编辑器/目录热刷新、覆盖率门槛、打包隔离闸）按约定未在轮内实施，已在 ROADMAP 的 Planned 表登记。
+
 
 | 上游特性 | 不对齐的理由 |
 |---|---|
