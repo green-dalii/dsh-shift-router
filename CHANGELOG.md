@@ -5,6 +5,145 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Upstream alignment round: P0 (correctness) + P1 (decision core)** against
+`pi-shift-router` v1.6.0, from this project's v1.0.0-era port baseline. The
+normative contract is now [`SPEC.md`](SPEC.md); the audit — including what was
+deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
+
+> **Status: written docs-first.** This section is authored ahead of the
+> implementation. Each item lands in the commits that follow it, and nothing
+> here is release-ready until the gates in SPEC §14 pass. Kept in one place so
+> the release note is written from the spec rather than reconstructed from the
+> diff.
+
+> ⚠ **Routing behaviour changes immediately, with no config edit.** The
+> decision rule is replaced (vote counting → expected cost) and two legacy
+> knobs change meaning. See "Changed — routing semantics" and "Migration".
+
+### Added
+
+- **EV (expected-cost) routing.** The turn runs on the Smart tier iff
+  `pSmart ≥ θ`, where `θ = 1 / economics.reworkPenalty` and `pSmart` is the
+  Judge's confidence read as evidence for Smart (`c` for a `smart` verdict,
+  `1 − c` for a `fast` verdict). θ is price-independent: the price delta cancels
+  out, so the single knob is how badly a wrong downgrade hurts. Replaces the
+  confidence-weighted window ratio, which counted votes instead of weighing cost.
+- **`routing.economics`** config block: `reworkPenalty` (R, default 3),
+  `downgradeMemory` (consecutive decisive fast turns required before
+  smart → fast, default 2), and `mode`.
+- **Gear presets** as top-level commands — `/router eco` (R=2, θ=0.5),
+  `/router default` (R=3, θ≈0.33), `/router sport` (R=5, θ=0.2) — persisted to
+  the settings namespace and tab-completable.
+- **`decisionTier`** on every routing decision: the tier this turn will
+  actually run at, after EV, hold and manual override. Orchestration entry and
+  telemetry read this single signal instead of re-deriving a tier from the raw
+  verdict.
+- **`routing.cacheAware.sameFamilyPenalty`** (default 1.5): when both tiers
+  share a provider, θ is divided by this factor. A smaller bar means fewer
+  downgrades, so the warm prompt cache survives longer.
+- **Judge `orchestrate` signal**: the Judge may now explicitly say whether the
+  Smart tier should delegate to Fast workers. `false` vetoes orchestration;
+  absent falls back to the tier-based default.
+- **Judge prompt rules** from upstream v1.3.0–v1.4.2: an explicit tier / gear /
+  orchestration request is a certainty and must be reported with
+  `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
+  tedious bulk batches classify as `fast` unless they set direction.
+- **`lastDecision`** state (verdict, confidence, reason, action,
+  `decisionTier`, held) for the "why did it route this way" section of
+  `/router status`.
+- **`actualProvider` / `actualModel`** state: the model that actually produced
+  the last assistant message, kept separate from the router's *intended* model
+  so a stale intent can never be displayed as fact.
+- **Worker-model startup self-check**: when orchestration is on and the Fast
+  chain is non-empty, the plugin warns if model-selectable delegation is not
+  available, naming the harness setting to enable and stating the consequence
+  (workers would otherwise inherit the Smart model).
+
+### Changed — routing semantics
+
+- **A Judge outage is now a HOLD, not a `fast` verdict.** Previously every
+  Judge endpoint failing produced `{tier:'fast', source:'fallback'}`, which the
+  router treated as decisive evidence and pushed into the window — two
+  consecutive outages silently downgraded a Smart session. Now `source ===
+  'fallback'` keeps the current tier, records a hold entry, and never extends
+  (or counts as) a downgrade streak.
+- **A verdict below `window.minConfidence` is likewise a hold** rather than an
+  ignored sample: ignoring it let the remaining entries decide alone.
+- **Downgrade now requires `downgradeMemory` consecutive decisive fast
+  decisions.** Any hold or smart entry breaks the streak (upstream v1.4.0).
+- **Strict model authority**: a tier change is recorded even when both tiers
+  resolve to the same model id, so tier identity — not the model string —
+  carries the decision.
+- **Failover signatures extended** (upstream v1.2.0/v1.4.1/v1.4.3):
+  - HTTP **402** and `insufficient balance` / `余额不足` — an unfunded account
+    used to stay pinned, so every turn re-tried it while the router kept
+    choosing it.
+  - usage-limit exhaustion with no HTTP status (`The usage limit has been
+    reached`, `usage_limit_reached`).
+  - `unsupported_model` / `model_not_found` / a model reference adjacent to
+    "not supported" — a decommissioned model now fails over instead of pinning
+    the tier.
+- **Explicit tier / orchestration requests are honoured**: orchestration gates
+  on `decisionTier`, so the raw verdict can no longer inject the CTO prompt
+  while the fast model runs the turn.
+- **Escalation counts consecutive worker failures**; a successful worker
+  result resets the streak, so isolated failures no longer burn the cap.
+- **Orchestration state leaked by an interrupted turn is swept** at the next
+  turn start (previously a turn that never reached its stop boundary left
+  orchestration active, caps enforcing, and the orchestrator prompt rendered
+  into every following turn).
+
+### Removed
+
+- **The plugin's duplicate throughput (TPS) machinery** —
+  `tokensPerSecond`, `recordSpeed`, the speed window, `SPEED_WINDOW_SIZE`,
+  `failover.speedWindowSize`, the `assistant/chunk` listener, the related state
+  fields and the `tok/s` line in `/router status`. DeepSeek Harness already
+  renders `tok/s` natively in the chat message footer and the trajectory panel,
+  and derives it from **decode time** (`outputTokens / (decodeMs / 1000)`), which
+  is strictly better than this plugin's wall-clock estimate. Duplicating it
+  meant two competing figures for one thing, one of them worse.
+  *Deliberately not ported from upstream v1.4.2.*
+- **`orchestration.requireSmartModel`** — `decisionTier` now reports truthfully
+  whether the Smart tier will run, so orchestration already cannot fire without
+  a resolvable Smart model. The knob's only reachable effect was injecting the
+  CTO prompt onto a Fast-tier run (the upstream "CTO loop on the fast model"
+  bug class).
+
+### Fixed
+
+- Status output now reports the model that **actually** ran, not the router's
+  intent (upstream v1.4.2 Bug B).
+- Orchestration no longer prompts for delegation that the router cannot honour.
+
+### Migration
+
+Schemastery passes unknown keys through, so removals are inert leftovers rather
+than load failures. Meaning changes are the ones to watch:
+
+| Key | Before | Now |
+|---|---|---|
+| `routing.window.threshold` | the downgrade bar | **legacy** raw-θ override; the old default `0.6` is inert, only a different value is honoured (and flagged `⚠ legacy` in `/router status`) |
+| `routing.cacheAware.sameFamilyThreshold` | the raised downgrade bar | **legacy** sentinel: a non-default value implies `sameFamilyPenalty = 3.0`; the old default `0.9` is inert |
+| `orchestration.requireSmartModel` | could force orchestration without a resolvable Smart model | removed (ignored) |
+| `failover.speedWindowSize` | TPS window size | removed (ignored) |
+
+To migrate deliberately: set `routing.economics.mode` (or `reworkPenalty`) and
+leave `routing.window.threshold` unset.
+
+### Documentation
+
+- Added [`SPEC.md`](SPEC.md) — the normative contract (decision pipeline, EV
+  rule, decision memory, cache-aware routing, Judge contract, failover
+  signatures, orchestration, config reference, commands, gates).
+- Added [`ALIGNMENT.md`](ALIGNMENT.md) — the upstream alignment audit and
+  prioritised work list.
+- `ROADMAP.md`: retired the "v0.x maps one-to-one" note, recorded the port
+  baseline (upstream v1.0.0) and the alignment target (v1.6.0), and added an
+  upstream-version alignment table.
+
 ## [0.5.0] - 2026-08-15
 
 ### Changed
