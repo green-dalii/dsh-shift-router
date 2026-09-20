@@ -47,9 +47,19 @@ class FakeAdapter extends LlmAdapter {
 
   stream(options) {
     const isJudge = (options.system ?? '').includes('Judge System Prompt')
+    // SPEC §13.1: the route notice is a message the plugin ADMITS to the step, so
+    // it must be present in the request the next model call is built from. The
+    // fake model is therefore the witness: it reports what the harness actually
+    // handed it, which is stronger evidence than reading a transcript the
+    // headless one-shot profile does not persist.
+    const noticed = (options.messages ?? []).some((message) =>
+      (message.content ?? []).some(
+        (block) => block.type === 'text' && block.text.includes('[shift-router]'),
+      ),
+    )
     const text = isJudge
       ? JUDGE_ANSWER
-      : `ROUTER-E2E: turn ran on ${options.provider}/${options.model}`
+      : `ROUTER-E2E: turn ran on ${options.provider}/${options.model} notice=${noticed ? 'yes' : 'no'}`
     return (async function* () {
       yield { type: 'text-delta', index: 0, text }
       yield { type: 'block-end', index: 0, block: { type: 'text', text } }

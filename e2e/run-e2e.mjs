@@ -9,7 +9,9 @@
  *   2. install THIS checkout as a bundle (`dsh plugin add`)
  *   3. run one turn under `--patch e2e/overlay.yml` (fake LLM adapter)
  *   4. assert the turn ran on the Smart tier model — i.e. the Judge ran, the EV
- *      rule escalated, and the wire model was actually switched
+ *      rule escalated, and the wire model was actually switched — and that the
+ *      `[shift-router]` route notice was admitted to the step, which the fake
+ *      model witnesses by reporting what the harness handed it
  *   5. run a second turn under `e2e/legacy-config-overlay.yml`, a profile
  *      patched with the PRE-alignment config (legacy knobs at their old
  *      defaults plus the removed `requireSmartModel` key), and assert the same
@@ -178,6 +180,10 @@ try {
   console.log(`  output: ${line || '(nothing)'}`)
   assert(line.includes('ROUTER-E2E: turn ran on fake/fake-smart'),
     'the Judge ran, the EV rule escalated, and the turn ran on the Smart tier model')
+  // The fake model reports what the harness handed it, so this asserts the route
+  // notice was really admitted to the step — not merely formatted (SPEC §13.1).
+  assert(line.includes('notice=yes'),
+    'the [shift-router] route notice reached the model request of the routed turn')
 
   step('running one turn with a PRE-alignment config (the upgrade path)')
   const legacy = await run(

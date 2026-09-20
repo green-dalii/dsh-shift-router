@@ -28,6 +28,9 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
 import * as plugin from '../src/index.js'
 
@@ -54,9 +57,13 @@ interface PromptCapture {
  * A root context with the services the plugin REQUIRES (`export const inject`),
  * and nothing else. Anything the plugin reads beyond this list must go through
  * an optional probe (`ctx.get`) or it will throw — which is the point.
+ *
+ * @param extra - additional services to provide beyond the required set.
+ * @param llm - overrides merged over the stub `llm` (e.g. a Judge stream).
  */
 function harnessContext(
   extra: Record<string, unknown> = {},
+  llm: Record<string, unknown> = {},
 ): { ctx: Context; prompt: PromptCapture } {
   const ctx = new Context()
   const prompt: PromptCapture = { sections: [], variables: [] }
@@ -65,6 +72,7 @@ function harnessContext(
     listProviders: () => [],
     listModels: async () => [],
     stream: async function* stream() {},
+    ...llm,
   })
   ctx.provide('tools', { get: () => undefined })
   ctx.provide('commands', { register: () => () => undefined })
@@ -212,3 +220,115 @@ describe('load safety across configurations', () => {
 function ctxPlugin(ctx: Context, config: unknown) {
   return ctx.plugin(plugin, config as never)
 }
+
+/**
+ * SPEC §13.1 — a routing switch is written INTO the session.
+ *
+ * `tests/route-notice.test.ts` pins the formatting; this pins the wiring that
+ * makes it visible at all, by driving the real `agent/pre-step` waterfall
+ * through a real Cordis context: a formatter nobody appends is a formatter
+ * nobody reads — the same failure mode as the `ctx.logger` lines no stock
+ * profile exports (SPEC §13).
+ */
+describe('route notices enter the session (SPEC §13.1)', () => {
+  const JUDGE_FAST = '{"tier":"fast","confidence":0.95,"reason":"small change"}'
+  const JUDGE_SMART = '{"tier":"smart","confidence":0.9,"reason":"wide refactor"}'
+
+  /** A fake agent: only `session.header` is read on this path. */
+  function fakeAgent(): Agent {
+    return { session: { header: { origin: 'user' } } } as unknown as Agent
+  }
+
+  /**
+   * A context whose `llm.stream` answers the Judge, one verdict per call.
+   * @param answers - the Judge answers, in call order (the last one repeats).
+   * @param verbose - whether to configure per-turn verbose notices.
+   */
+  function noticeContext(answers: string[], verbose = false) {
+    let call = 0
+    const { ctx } = harnessContext({}, {
+      stream: async function* stream() {
+        const answer = answers[Math.min(call, answers.length - 1)]
+        call += 1
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: answer }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    })
+    const config = verbose
+      ? { ...autoConfig(), ux: { routerLogVerbose: true } }
+      : autoConfig()
+    return { ctx, config }
+  }
+
+  /** Drive one turn start through the real waterfall. */
+  async function driveTurn(ctx: Context, agent: Agent): Promise<PreStepDecision> {
+    return ctx.waterfall(
+      'agent/pre-step',
+      {
+        agent,
+        messages: [createUserMessage({
+          content: [{ type: 'text', text: 'refactor the router' }],
+          source: { kind: 'user' },
+        })],
+        turn: 1,
+        step: 1,
+        signal: new AbortController().signal,
+      },
+      async () => ({ kind: 'enter', messages: [] }),
+    )
+  }
+
+  /** The notices this plugin wrote into the decision. */
+  function notices(decision: PreStepDecision): UserMessage[] {
+    if (decision.kind !== 'enter') return []
+    return decision.messages.filter(
+      (message) => message.source.kind === 'plugin' && message.source.plugin === 'shift-router',
+    )
+  }
+
+  it('writes a named notice when a turn establishes the route', async () => {
+    const { ctx, config } = noticeContext([JUDGE_FAST])
+    await ctxPlugin(ctx, config)
+    const written = notices(await driveTurn(ctx, fakeAgent()))
+    expect(written).toHaveLength(1)
+    const [notice] = written
+    expect(notice.source).toMatchObject({ form: 'notice' })
+    expect(notice.content[0]).toMatchObject({ type: 'text' })
+    expect((notice.content[0] as { text: string }).text).toContain('[shift-router]')
+    expect((notice.content[0] as { text: string }).text).toContain('fake-fast')
+    expect((notice.source as { summary: string }).summary).toContain('shift-router')
+  })
+
+  it('reports the move when a later turn switches tier, with both ends named', async () => {
+    const { ctx, config } = noticeContext([JUDGE_FAST, JUDGE_SMART])
+    await ctxPlugin(ctx, config)
+    const agent = fakeAgent()
+    await driveTurn(ctx, agent)
+    const written = notices(await driveTurn(ctx, agent))
+    expect(written).toHaveLength(1)
+    const text = (written[0].content[0] as { text: string }).text
+    expect(text).toContain('Fast → Smart')
+    expect(text).toContain('fake-fast → fake-smart')
+    expect(text).toContain('upgrade')
+  })
+
+  it('stays silent when nothing moved and verbose is off', async () => {
+    const { ctx, config } = noticeContext([JUDGE_FAST, JUDGE_FAST])
+    await ctxPlugin(ctx, config)
+    const agent = fakeAgent()
+    await driveTurn(ctx, agent)
+    expect(notices(await driveTurn(ctx, agent))).toHaveLength(0)
+  })
+
+  it('reports every judged turn once verbose is on — the promise the log ring could not keep', async () => {
+    const { ctx, config } = noticeContext([JUDGE_FAST, JUDGE_FAST], true)
+    await ctxPlugin(ctx, config)
+    const agent = fakeAgent()
+    await driveTurn(ctx, agent)
+    const written = notices(await driveTurn(ctx, agent))
+    expect(written).toHaveLength(1)
+    expect((written[0].content[0] as { text: string }).text).toContain('stay on')
+  })
+})
