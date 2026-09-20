@@ -11,8 +11,9 @@
 [ROADMAP.md](ROADMAP.md#upstream-alignment)，契约见 [SPEC.md](SPEC.md)。
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen)](#development)
+[![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
+[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
+[![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
 
@@ -40,44 +41,55 @@
 
 ## 安装
 
-### 以 bundle 方式（推荐）
+本包是一个 DSH **bundle**：`cordis.patch.yml` 会把插件行插入任何声明了它的 profile。下面每条通道最后都是同一条 `dsh plugin --profile <name> add …`——它在 profile 目录里转发给 pnpm。
+
+### 从 npm 安装（推荐）
 
 ```sh
-git clone https://github.com/green-dalii/dsh-shift-router.git
-cd dsh-shift-router
-npm install && npm run build
-dsh plugin --profile web add /path/to/dsh-shift-router
+dsh plugin --profile web add dsh-shift-router
 ```
 
-bundle 的 `cordis.patch.yml` 会把插件插入任何声明了它的 profile。插件无需任何配置即可加载（所有默认值都安全）；分层模型来自设置面板或 patch 行。
+安装的是**预构建产物**：不会在你的机器上运行任何构建脚本，因此无需任何授权。
 
-从 git 安装（`dsh plugin --profile <name> add github:green-dalii/dsh-shift-router`）会通过包的 `prepare` 脚本自动构建 `dist/`。pnpm ≥ 10 默认拒绝 git 依赖的 `prepare` 脚本——若构建被跳过，需在 profile 的 `pnpm-workspace.yaml` 加以下配置后重新 `add`：
+### 从 tarball 安装
+
+```sh
+npm pack      # 或下载 release 里的 tarball
+dsh plugin --profile web add ./dsh-shift-router-0.6.0.tgz
+```
+
+同样是预构建产物；无法访问 registry 时用这条。
+
+### 从 git 安装
+
+```sh
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.6.0
+```
+
+git 安装拉到的是**源码而非构建产物**，因此由包的 `prepare` 脚本构建 `dist/`。pnpm ≥ 10 默认拒绝 git 依赖的 `prepare`——若第一次 `add` 失败，把 pnpm 打印的确切包键复制进 profile 的 `pnpm-workspace.yaml` 后重新执行：
 
 ```yaml
 allowBuilds:
   dsh-shift-router: true
 ```
 
-> 这等于允许该包在安装时执行构建脚本。如需完全锁定的安装，改用源码检出后 `npm run build`（见下）。
+> 这等于允许该包的代码在安装时于你的机器上执行，且不在 agent 沙箱内。请锁定 tag 或 commit（`…#v0.6.0`、`…#<sha>`），避免后续 push 悄悄改变你实际运行的内容。
 
-### 从源码（本地开发）
+### 从本地检出安装（开发用）
 
-把 profile 的 patch 层指向构建产物入口：
-
-```yaml
-# ~/.dsh/profiles/<name>/cordis.patch.yml
-- insert:
-    - id: shift-router
-      name: '/absolute/path/to/dsh-shift-router/dist/index.js'
-      config:
-        tiers:
-          fast:
-            models:
-              - { provider: opencode-go, model: deepseek-v4-flash, priority: 1 }
-          smart:
-            models:
-              - { provider: opencode-go, model: deepseek-v4-pro, priority: 1 }
+```sh
+git clone https://github.com/green-dalii/dsh-shift-router.git
+cd dsh-shift-router && npm install && npm run build
+dsh plugin --profile web add /path/to/dsh-shift-router
 ```
+
+### 确认这一层已生效
+
+```sh
+dsh --profile web --dump-config | grep -A3 'id: shift-router'
+```
+
+插件无需任何配置即可加载（所有默认值都安全）；分层模型来自设置卡片（SPEC §12）或 profile 的 patch 行。后应用的层胜出，且 patch 会替换目标行的**整个** `config` 值——覆盖本行的 patch 必须重述它需要的每一个键（SPEC §10）。
 
 ## 热重载
 

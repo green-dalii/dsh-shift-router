@@ -748,6 +748,66 @@ patch 上游、升级即丢；而且 `plugin` 字段（`model-selection`）**在
 - `source.plugin` 目前在 UI 里不可见；若上游将来渲染它，我们的 `[shift-router]` 前缀会略显冗余——
   宁可冗余，不可无名。
 
+## R10：打包与分发——对齐生态约定
+
+维护者要求调研「DSH 生态主流插件的发布/安装方式与官方推荐途径」，并据此检查文档与项目配置。
+
+### R10.1 官方与生态的实况
+
+- `dsh plugin --profile <name> <args…>` 在 profile 目录内**转发给 pnpm**（官方
+  `docs/user/develop/basic/publish.zh.md`）。安装通道四条：npm 包、tarball、
+  `github:owner/repo`、本地目录。
+- 官方明确建议分发**构建产物**（npm / tarball），免得用户为 git 依赖授权构建；git 通道
+  必须提供自包含的 `prepare`，用户须把包键加进 profile 的 `pnpm-workspace.yaml`
+  `allowBuilds`（pnpm ≥ 10 默认拒绝），并锁定 commit。
+- 官方给出的唯一「被发现」途径：插件仓库加 GitHub topic **`dsh-plugin`**
+  （DeepSeek README「社区与支持」）。本仓库已有该 topic，另有
+  `deepseek-harness-plugin`、`dsh-plugins`。
+- 生态实况（npm registry 实测）：第三方插件主流是发布 npm 包
+  （`dsh-plugin-model-proxy`、`dsh-plugin-guide`、`dsh-plugin-appshot`…）；社区目录
+  dsh-plugin.org 与 dsh-plugin-shop 均以「GitHub topic + npm」为数据源，安装走
+  npm / GitHub / DSH CLI 三通道；社区工具链 `dsh-plugin-dev check/verify` 定义了静态约定。
+
+### R10.2 据此改了什么
+
+| 项 | 之前 | 现在 | 理由 |
+|---|---|---|---|
+| harness 包声明 | `dependencies` 精确 `0.1.5-rc.2`（其中 6 个只用于类型） | `peerDependencies`（`cordis`、`dsh-llm`、`schemastery`），其余进 `devDependencies` | 编译产物只 require 这三个；宿主必须是唯一实例——私有副本会让插件与宿主各自持有同一 SDK 的不同模块实例 |
+| `engines.node` | `>=22.0.0` | `^22.19.0 \|\| >=24.0.0` | 生态的支持运行线（社区检查器亦按 22/24 判定） |
+| `prepare` | 含两次类型检查 | `tsc --noCheck`（产物与完整构建**逐字节相同**，已比对） | git 通道的构建在陌生人的机器上执行，类型错误会变成**用户的安装失败** |
+| `prepublishOnly` | 无 | `typecheck && test` | 注册表之前的最后一道门 |
+| 安装文档 | 只有本地 / git 两条 | 四条通道 + `--dump-config` 验证 + patch 覆盖语义 | 与官方文档一致 |
+| README | 无生态标记 | `dsh-plugin` 徽章 | 官方推荐的发现途径 |
+
+`main` 由 `./dist/index.js` 改为 `dist/index.js`，仅因社区检查器不做前导 `./` 归一化，
+Node 的解析语义不变。
+
+### R10.3 明确不照抄的一条
+
+社区检查器的 `manifest-peers` 要求「src 中出现的每个 `@deepseek-ai/*` 都声明为 peer」，
+并为每类写死 range（`dsh-*` 一律 `>=0.1.2-rc.1 <0.2.0 || …`）。我们**不**照抄：
+
+1. **它在子路径导入上不可满足。** 其正则把 `@deepseek-ai/dsh-api-remotes/client` 整体当作
+   包名，于是要求声明一个名为 `@deepseek-ai/dsh-api-remotes/client` 的 peer——那不是合法
+   包名。照抄等于把一个假包名写进 `package.json`。
+2. **它的 range 比事实更宽。** `>=0.1.2-rc.1` 会放行比本构建所用 API 更旧的 harness，
+   而 `form: 'notice'` 这类形状是 0.1.5-rc.2 才有的。
+
+采用的规则因此是：**只把编译产物运行时真正 require 的包声明为 peer**（SPEC §1.5）。
+这条差异是刻意保留的，记录于此以免后人「顺手修好」。
+
+### R10.4 残余不确定性
+
+- pnpm 的 `auto-install-peers` 默认开启，理论上会在 profile 树中解析不到 peer 时去 npm 取一份，
+  从而装出与 harness 不同版本的重复实例——正是 peer 声明要避免的。**实测否定了这个担忧**：
+  `npm run test:e2e` 的打包安装（干净 scratch profile，装的是 0.6.0 的 tarball）之后，
+  profile 的 `node_modules` 里只有 `dsh-shift-router` 一个条目，`@deepseek-ai/*` **零副本**，
+  且该 profile 启动、路由、卡片与设置回写全部通过。内置组合包名从 dsh 安装目录解析这条官方
+  说明（§R10.1）在安装层得到证实。
+- 社区 CLI `dsh-plugin-dev check` 未在本机执行（它是要在本机运行第三方代码的工具）。本文引用
+  的规则读自其源码，未运行其判定；因此本轮的「对齐」是按**读到的规则**对齐，而非按检查器的
+  通过/失败结论对齐。
+
 ---
 
 ## 明确不对齐（附理由）

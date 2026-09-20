@@ -12,8 +12,9 @@ Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
 [SPEC.md](SPEC.md) for the contract.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-216%20passing-brightgreen)](#development)
+[![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
+[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
+[![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
 
@@ -41,44 +42,67 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 
 ## Install
 
-### As a bundle (recommended)
+This package is a DSH **bundle**: its `cordis.patch.yml` inserts the plugin row
+into any profile that lists it. Every channel below ends in the same
+`dsh plugin --profile <name> add …`, which forwards to pnpm inside the profile
+directory.
+
+### From npm (recommended)
 
 ```sh
-git clone https://github.com/green-dalii/dsh-shift-router.git
-cd dsh-shift-router
-npm install && npm run build
-dsh plugin --profile web add /path/to/dsh-shift-router
+dsh plugin --profile web add dsh-shift-router
 ```
 
-The bundle's `cordis.patch.yml` inserts the plugin into any profile that lists it. The plugin loads without any configuration (all defaults are safe); tier models come from the settings panel or the patch row.
+Installs the prebuilt artifact — no build script runs on your machine, so there
+is nothing to authorize.
 
-Installing from git (`dsh plugin --profile <name> add github:green-dalii/dsh-shift-router`) builds `dist/` automatically via the package's `prepare` script. pnpm ≥ 10 refuses git dependencies' `prepare` scripts by default — add this to the profile's `pnpm-workspace.yaml` and re-`add` if the build is skipped:
+### From a tarball
+
+```sh
+npm pack      # or download the release tarball
+dsh plugin --profile web add ./dsh-shift-router-0.6.0.tgz
+```
+
+Prebuilt as well, and the option to reach for when a registry is not available.
+
+### From git
+
+```sh
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.6.0
+```
+
+A git install fetches **source, not artifacts**, so the package's `prepare`
+script builds `dist/`. pnpm ≥ 10 refuses a git dependency's `prepare` until you
+allow it — if the first `add` fails, copy the exact key pnpm prints into the
+profile's `pnpm-workspace.yaml` and re-run:
 
 ```yaml
 allowBuilds:
   dsh-shift-router: true
 ```
 
-> This grants the package permission to run its build script at install time. For a fully lock-down install, use `npm run build` on a source checkout (below) instead.
+> This authorizes the package's code to execute on your machine at install time,
+> outside the agent sandbox. Pin a tag or commit (`…#v0.6.0`, `…#<sha>`) so a
+> later push cannot change what you actually run.
 
-### From source (local development)
+### From a local checkout (development)
 
-Point the profile's patch layer at the built entry:
-
-```yaml
-# ~/.dsh/profiles/<name>/cordis.patch.yml
-- insert:
-    - id: shift-router
-      name: '/absolute/path/to/dsh-shift-router/dist/index.js'
-      config:
-        tiers:
-          fast:
-            models:
-              - { provider: opencode-go, model: deepseek-v4-flash, priority: 1 }
-          smart:
-            models:
-              - { provider: opencode-go, model: deepseek-v4-pro, priority: 1 }
+```sh
+git clone https://github.com/green-dalii/dsh-shift-router.git
+cd dsh-shift-router && npm install && npm run build
+dsh plugin --profile web add /path/to/dsh-shift-router
 ```
+
+### Verify the layer landed
+
+```sh
+dsh --profile web --dump-config | grep -A3 'id: shift-router'
+```
+
+The plugin loads with no configuration at all (every default is safe); tier
+models come from the settings card (SPEC §12) or from the profile's patch row.
+Later layers win, and a patch replaces the target row's **whole** `config` value
+— a row that overrides this one must restate every key it needs (SPEC §10).
 
 ## Hot reload
 

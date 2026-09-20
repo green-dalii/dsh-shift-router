@@ -106,6 +106,23 @@ the harness's**. Any gap between the two is a defect that no amount of green
 local gates can see, so a baseline bump is part of the release process whenever
 the target harness moves. Two consequences worth stating:
 
+- **How a harness package is declared** (SPEC-level rule; rationale in
+  ALIGNMENT §R10). A package the harness provides is a **`peerDependency`**,
+  never a runtime `dependency`: the consumer must end up with exactly one
+  instance. Shipping a private copy means the plugin and the host can hold two
+  different module instances of the same SDK — the `createUserMessage` /
+  `BlockAssembler` values this plugin imports would then come from the copy
+  rather than from the host that consumes them.
+
+  | Declared as | What goes there | Why |
+  |---|---|---|
+  | `peerDependencies` | every harness package the **compiled output requires at runtime**: `@deepseek-ai/cordis` (`^4.0.2`), `@deepseek-ai/dsh-llm` (`>=0.1.5-rc.2 <0.2.0`), `@deepseek-ai/schemastery` (`^3.18.2`) | the consumer supplies it, exactly once |
+  | `devDependencies` | every other `@deepseek-ai/*` import — the type-only host contracts, the client roster, the test-only packages | compile-time contracts; not required at runtime |
+  | `dsh.client.inject` | the browser packages the module loader must answer | the client bundle `require()`s platform seed words (§12.2) |
+
+  The peer range is deliberately **tighter** than the community checker's
+  constant (`>=0.1.2-rc.1 <0.2.0 || …`), which would admit harnesses older than
+  the API this build uses; the divergence is recorded in ALIGNMENT §R10.
 - Runtime **value** imports from these packages are load-bearing
   (`settingsNamespace` used to be one); a rename upstream breaks the plugin at
   boot, not at compile time.
@@ -856,13 +873,14 @@ model per request, §1.1), so nothing in the stock UI would otherwise announce i
   not starting, so these are loaded for real rather than reasoned about.
 - **Install isolation is a gate.** `tests/packaged-install.test.ts` reads the
   BUILT artifacts and asserts the install-time contract: every external
-  specifier the host half imports is a declared `dependencies` entry (never
-  dev-only); every specifier the browser half `require()`s is a platform seed
-  word or declared in `dsh.client`; and `files` ships what the artifacts and
-  READMEs need. `npm run test:e2e` additionally packs the tarball, installs it
-  into a second scratch profile and **boots it** — where devDependencies are
-  absent, so a runtime import that is not a declared dependency fails there
-  instead of in a user's install.
+  specifier the host half imports is declared for the consumer — in
+  `dependencies` or `peerDependencies` (§1.5), never dev-only; every specifier
+  the browser half `require()`s is a platform seed word or declared in
+  `dsh.client`; and `files` ships what the artifacts and READMEs need.
+  `npm run test:e2e` additionally packs the tarball, installs it into a second
+  scratch profile and **boots it** — where devDependencies are absent, so a
+  runtime import that is not declared for the consumer fails there instead of in
+  a user's install.
 - **The card's slot wiring is tested against the real registry.**
   `tests/client-card-slot.test.ts` declares `settings.plugin.item` as `keyed`
   through the harness's own `SlotCore` and runs the card's real `apply()`, in

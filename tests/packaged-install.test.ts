@@ -35,6 +35,7 @@ import { describe, expect, it } from 'vitest'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as {
   dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
   devDependencies?: Record<string, string>
   files?: string[]
   dsh?: { client?: { platform?: string; inject?: string[]; external?: string[] } }
@@ -57,8 +58,14 @@ function distFiles(): string[] {
 }
 
 describe('host artifact runtime imports', () => {
-  it('needs only declared dependencies', () => {
-    const declared = new Set(Object.keys(manifest.dependencies ?? {}))
+  it('needs only packages declared for the consumer', () => {
+    // SPEC §1.5: a harness package the compiled output requires is declared as a
+    // `peerDependency` (the consumer supplies exactly one instance); the gate is
+    // that it is declared for the consumer AT ALL — never dev-only.
+    const declared = new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ])
     const devOnly = new Set(Object.keys(manifest.devDependencies ?? {}))
     const needed = new Set<string>()
 
@@ -74,8 +81,11 @@ describe('host artifact runtime imports', () => {
 
     expect(needed.size).toBeGreaterThan(0)
     for (const spec of needed) {
-      expect(declared.has(spec), `${spec} is imported at runtime but is not in "dependencies"`).toBe(true)
-      // A devDependency that is ALSO a dependency is fine; dev-only is not.
+      expect(
+        declared.has(spec),
+        `${spec} is imported at runtime but is declared neither in "dependencies" nor in "peerDependencies"`,
+      ).toBe(true)
+      // A devDependency that is ALSO declared for the consumer is fine; dev-only is not.
       if (!declared.has(spec)) expect(devOnly.has(spec)).toBe(false)
     }
   })

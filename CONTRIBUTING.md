@@ -165,11 +165,45 @@ adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
    start with `[shift-router]`: the `source.plugin` field is durable but the Chat client never
    renders it, so an unlabelled one-liner reads as harness output (SPEC §13.1, ALIGNMENT §R9).
 
+## Distribution
+
+The package is a DSH **bundle** (`dsh.bundle.patch` → `cordis.patch.yml`), so
+every install channel is the same call with a different spec — `dsh plugin
+--profile <name> add …` forwards to pnpm inside the profile directory:
+
+| Channel | Spec | Build script on the user's machine? |
+|---|---|---|
+| npm (recommended) | `dsh-shift-router` | no — the registry holds the built artifact |
+| tarball | `./dsh-shift-router-0.6.0.tgz` | no |
+| git | `github:green-dalii/dsh-shift-router#v0.6.0` | **yes** — `prepare` runs, and pnpm ≥ 10 needs the user to allow it via the profile's `pnpm-workspace.yaml` `allowBuilds` |
+| local checkout | `/path/to/checkout` | no (the contributor builds it) |
+
+Two rules follow from that table:
+
+- **`prepare` must stay self-contained and cheap.** It is the git path's build
+  step, it runs in a stranger's tree, and a failure there is *their* install
+  failing. `build` keeps the full type-checked pipeline for CI; `prepare` only
+  emits artifacts. `prepublishOnly` runs the gates again before anything reaches
+  a registry.
+- **Harness packages are `peerDependencies`, never `dependencies`** (SPEC §1.5):
+  the harness must be the only instance. Add a package to the peer list only
+  when the compiled output requires it at runtime; a type-only import belongs in
+  `devDependencies`.
+
+Discovery follows the official ecosystem convention: the repository carries the
+[`dsh-plugin`](https://github.com/topics/dsh-plugin) GitHub topic and the README
+shows the matching badge. Community directories (dsh-plugin.org, dsh-plugin-shop)
+crawl that topic and npm; nothing needs submitting to a private registry.
+
 ## Releasing
 
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry (Keep a Changelog).
-2. Update the READMEs if user-facing behavior changed.
-3. Local review workflow: keep review-round changes as one local commit (amend while
+2. Update the READMEs if user-facing behavior changed — including the test-count and
+   Node badges at the top.
+3. Run the gates (SPEC §14): `npm run typecheck && npm test && npm run build && npm run test:e2e`.
+4. `npm pack --dry-run` and confirm `files` still ships the artifacts, the patch and the docs.
+5. Publish: `npm publish` (runs `prepare`, then `prepublishOnly`), or hand out the tarball.
+6. Local review workflow: keep review-round changes as one local commit (amend while
    unpushed) and let the maintainer approve before pushing — see `ROADMAP.md`.
 
 ## License

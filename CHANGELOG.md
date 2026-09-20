@@ -215,6 +215,30 @@ ported and why, is [`ALIGNMENT.md`](ALIGNMENT.md).
   `manual`, `off`, orchestration off, an empty Fast chain and the full
   costs/audit surface each load for real.
 
+### Changed — packaging and distribution (ecosystem alignment)
+
+- **Harness packages are now `peerDependencies`, not `dependencies`.** The
+  compiled output requires `@deepseek-ai/dsh-llm` and `@deepseek-ai/schemastery`
+  at runtime (and `@deepseek-ai/cordis` is the plugin framework), so those three
+  are peers; the remaining `@deepseek-ai/*` imports — the type-only host
+  contracts and the client roster — moved to `devDependencies`, where they
+  belong. A private copy of a harness package can leave the plugin holding a
+  different module instance than the host that consumes it (SPEC §1.5).
+- **`engines.node` is `^22.19.0 || >=24.0.0`** (was `>=22.0.0`), the ecosystem's
+  supported runtime line.
+- **`prepare` no longer type-checks.** It is the git install path's build step
+  and runs in a stranger's tree, where a type error is *their* install failing;
+  `build` keeps the full type-checked pipeline for CI and `prepublishOnly`
+  re-runs the gates before anything reaches a registry.
+- **The install docs cover all four channels** — npm, tarball, git (with the
+  `allowBuilds` authorization and commit pinning it needs) and a local checkout —
+  plus the `--dump-config` step that confirms the layer landed. The READMEs carry
+  the `dsh-plugin` badge the official README asks plugin repositories to use for
+  discoverability; the repository already carries that GitHub topic.
+- The audit behind these changes — the official publish doc, what published npm
+  plugins actually declare, and the community checker's rules including the one
+  we deliberately do not copy — is in [`ALIGNMENT.md`](ALIGNMENT.md) §R10.
+
 ### Added — runtime visibility (route notices)
 
 - **A routing switch is now written into the session, not just into a log ring.**
