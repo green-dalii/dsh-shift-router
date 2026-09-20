@@ -5,29 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-20
 
 **Upstream alignment round: P0 (correctness) + P1 (decision core)** against
-`pi-shift-router` v1.6.0, from this project's v1.0.0-era port baseline. The
-normative contract is now [`SPEC.md`](SPEC.md); the audit — including what was
-deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
+`pi-shift-router` v1.6.0, from this project's v1.0.0-era port baseline;
+**GUI settings card review rounds (R6–R8)** — registration fix,
+model-catalog remote, layout overlap and information architecture; and
+**runtime visibility (R9)** — route notices. The normative contract is
+[`SPEC.md`](SPEC.md); the audit, including what was deliberately **not**
+ported and why, is [`ALIGNMENT.md`](ALIGNMENT.md).
 
-> **Status: implemented, not yet released.** This section was authored
-> docs-first and every item has since landed, with the gates in SPEC §14 green
-> (tsc host + client, 228 tests across 13 files, tsdown build, and
-> `npm run test:e2e` against a scratch profile). The delivery audit — including
-> what was deliberately *not* ported and the residual gaps — is in
-> [`ALIGNMENT.md`](ALIGNMENT.md). A version bump and the release itself are the
-> maintainer's call.
->
-> **A boot-aborting defect shipped in this section and was fixed before any
-> release** (see "Fixed — installation verification round" below and
-> [`ALIGNMENT.md`](ALIGNMENT.md) §R3). The install had been verified only at the
-> composition layer, which never instantiates a plugin.
+> A boot-aborting defect shipped in the alignment round and was fixed before
+> this release ([`ALIGNMENT.md`](ALIGNMENT.md) §R3): the install had been
+> verified only at the composition layer, which never instantiates a plugin.
 
-> ⚠ **Routing behaviour changes immediately, with no config edit.** The
+> ⚠ **Routing behaviour changes immediately with no config edit.** The
 > decision rule is replaced (vote counting → expected cost) and two legacy
-> knobs change meaning. See "Changed — routing semantics" and "Migration".
+> knobs change meaning. See "Changed — routing semantics" and `SPEC.md` §15.
+
+> **Route notices (R9) are written into the session.** A tier or model switch
+> is appended as one `[shift-router] …` message on the `agent/pre-step`
+> waterfall; `ux.routerLogVerbose` additionally reports every judged turn.
+> The text names the plugin because the Chat client never renders
+> `source.plugin`. See `SPEC.md` §13.1 and `ALIGNMENT.md` §R9.
 
 ### Added
 

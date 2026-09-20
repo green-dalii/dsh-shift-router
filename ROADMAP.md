@@ -14,9 +14,9 @@ v1.6.0 while this project's own releases continued in parallel.
   project's first commit, matching upstream's task-level-orchestration release.
 - **Alignment target**: upstream **v1.6.0** (`69ffb34`, 2026-09-18).
 - **Aligned through**: upstream **v1.6.0**, for the P0 (correctness) + P1
-  (decision core) scope — implemented with all gates green, awaiting a version
-  bump and release. P2/P3 remain open (see Planned). The delivery audit is in
-  [`ALIGNMENT.md`](ALIGNMENT.md).
+  (decision core) scope — **shipped in v0.6.0**; the audit halves, the
+  convergence protocol, and per-worker cost attribution remain P2 (see Planned).
+  The delivery audit is in [`ALIGNMENT.md`](ALIGNMENT.md).
 - The full audit, including what was deliberately **not** ported and why, lives
   in [`ALIGNMENT.md`](ALIGNMENT.md); the normative contract is
   [`SPEC.md`](SPEC.md).
@@ -27,17 +27,17 @@ v1.6.0 while this project's own releases continued in parallel.
 | v1.0.0 | task-level orchestration (Smart CTO delegates to Fast workers), hard caps | ✅ already present (baseline) |
 | v1.0.1 | custom providers via `models.json`; wizard stale-list fix | ⛔ not portable (DSH owns providers); catalog refresh tracked below |
 | v1.1.0 | orchestration actually triggers; full status-bar telemetry | ✅ adapted (`systemPrompt` section); status-bar half not portable |
-| v1.1.1 | logging hygiene; status syncs the actually-running model | 🟡 in progress (this release) |
-| v1.2.0 | convergence protocol, ghost-model cleanup, `unsupported_model` failover | 🟡 failover half in this release; convergence protocol is P2 |
+| v1.1.1 | logging hygiene; status syncs the actually-running model | ✅ shipped in v0.6.0 (route notices — R9 — replace the log ring as the user-visible surface) |
+| v1.2.0 | convergence protocol, ghost-model cleanup, `unsupported_model` failover | ✅ `unsupported_model` failover shipped in v0.6.0; convergence protocol ⏳ P2 |
 | v1.3.0 | acceptance audit (`audit.ts` + auditor prompt) | ⏳ P2 (next round) |
 | v1.3.1 | pi-tui runtime dependency + release gates | ⛔ packaging is host-specific; the *gate* intent is tracked below |
-| v1.4.0 | **EV economics routing**, gear presets, strict model authority, doc-aware Judge, audit domain | 🟡 EV + gears + strict authority in this release; audit domain is P2 |
-| v1.4.1 | failover on 402 / Insufficient Balance / 余额不足 | 🟡 in progress (this release) |
-| v1.4.2 | Judge-outage **hold**, retry-aware exit, cooldown-aware audit, TPS median, actual-model sync, status dashboard, `decisionTier`, explicit-tier honoured | 🟡 hold / `decisionTier` / explicit-tier / actual-model sync in this release; audit halves are P2; **TPS deliberately not ported** (DSH renders `tok/s` natively) |
-| v1.4.3 | Codex usage-limit failover | 🟡 in progress (this release) |
+| v1.4.0 | **EV economics routing**, gear presets, strict model authority, doc-aware Judge, audit domain | ✅ EV + gears + strict authority + doc-aware Judge shipped in v0.6.0; audit domain ⏳ P2 |
+| v1.4.1 | failover on 402 / Insufficient Balance / 余额不足 | ✅ shipped in v0.6.0 |
+| v1.4.2 | Judge-outage **hold**, retry-aware exit, cooldown-aware audit, TPS median, actual-model sync, status dashboard, `decisionTier`, explicit-tier honoured | ✅ hold / `decisionTier` / explicit-tier / actual-model sync shipped in v0.6.0; audit halves ⏳ P2; **TPS deliberately not ported** (DSH renders `tok/s` natively) |
+| v1.4.3 | Codex usage-limit failover | ✅ shipped in v0.6.0 |
 | v1.5.0 | per-worker cost attribution | ⏳ P2 (next round) |
-| v1.5.1 | verbose logs to a file | ⛔ not needed (DSH does not hand the terminal to plugins); diagnostics use `ctx.logger` |
-| v1.6.0 | model catalog from the host registry (single source of truth) | 🟡 principle adopted; the DSH-side single-source work is tracked below |
+| v1.5.1 | verbose logs to a file | ⛔ not needed (DSH does not hand the terminal to plugins); diagnostics use `ctx.logger` (now supplemented by route notices — see R9) |
+| v1.6.0 | model catalog from the host registry (single source of truth) | ✅ principle shipped in v0.6.0 (GUI card dropdowns — R7); the DSH-side pricing replacement is ⏳ P3 |
 
 ## Released
 
@@ -48,6 +48,7 @@ v1.6.0 while this project's own releases continued in parallel.
 | v0.3.0 | Interactive `/router config` editor (numbered registry + `get`/`set`/`unset`/`diff` over the settings namespace) | ✅ |
 | v0.4.0 | **GUI settings card** (client bundle, `settings.plugin.item` slot) + upstream `WEB_SETTINGS_NAMESPACES` whitelist workaround (`scripts/expose-gui-settings.mjs`) | ✅ |
 | v0.5.0 | GUI card redesign per review: Shift-Router title + DSW chevron, grouped row layout, **Fast/Smart model chains in the card with DSH-catalog dropdowns**, dark-theme-safe switches, line-height normalization | ✅ |
+| v0.6.0 | **Upstream P0+P1 alignment** (EV routing, gear presets, strict model authority, doc-aware Judge, Judge-outage hold, failover on 402 / usage-limit / `unsupported_model`) + **GUI card review rounds** (R6 registration, R7 model-catalog remote + copy, R8 layout overlap + information architecture) + **runtime visibility** (R9 route notices written into the session). 336 tests / 18 files; `tsc` host + client, `tsdown` build, and `npm run test:e2e` green | ✅ |
 
 ## Next release — upstream P0+P1 alignment (in progress)
 

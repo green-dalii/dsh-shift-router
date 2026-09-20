@@ -143,8 +143,8 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 > **Upgrading from v0.5.0:** routing decisions change immediately with no config
 > edit — the decision rule went from counting window votes to weighing expected
 > cost, and two legacy knobs changed meaning. See
-> [SPEC.md §15](SPEC.md#15-migration-and-removals-v050--the-alignment-release)
-> and the `Unreleased` section of [CHANGELOG.md](CHANGELOG.md).
+> [SPEC.md §15](SPEC.md#15-migration-and-removals-v050--v060)
+> and the `[0.6.0]` section of [CHANGELOG.md](CHANGELOG.md).
 
 ### GUI configuration card
 

@@ -879,7 +879,7 @@ model per request, §1.1), so nothing in the stock UI would otherwise announce i
 
 ---
 
-## 15. Migration and removals (v0.5.0 → the alignment release)
+## 15. Migration and removals (v0.5.0 → v0.6.0)
 
 Config is a persisted settings document, so upgrades must be explicit about
 what changes meaning and what disappears. Schemastery passes unknown keys

@@ -139,7 +139,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 > 所有数字字段都经 schema 范围校验（如 `window.minConfidence` 必须在 [0,1]、`window.size` 必须是正整数）；非法值在加载 / `set` 时被拒绝，绝不静默接受。
 
-> **从 v0.5.0 升级：** 路由决策会立即发生变化（无需改配置）——决策规则从"数窗口票数"改为"权衡期望成本"，另有两个遗留旋钮的含义变更。详见 [SPEC.md §15](SPEC.md#15-migration-and-removals-v050--the-alignment-release) 与 [CHANGELOG.md](CHANGELOG.md) 的 `Unreleased` 段。
+> **从 v0.5.0 升级：** 路由决策会立即发生变化（无需改配置）——决策规则从"数窗口票数"改为"权衡期望成本"，另有两个遗留旋钮的含义变更。详见 [SPEC.md §15](SPEC.md#15-migration-and-removals-v050--v060) 与 [CHANGELOG.md](CHANGELOG.md) 的 `[0.6.0]` 段。
 
 ### GUI 配置卡片
 
