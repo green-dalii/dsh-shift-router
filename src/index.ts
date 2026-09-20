@@ -64,6 +64,7 @@ import {
   shouldOrchestrate,
   recordWorkerOutcome,
   workerModelSelectionWarning,
+  readWorkerModelSelection,
   type WorkerModelSelection,
   buildOrchestratorPrompt,
   buildCapNotice,
@@ -398,6 +399,10 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const subagentAvailable = ctx.tools.get(SUBAGENT_TOOL) !== undefined
     if (shouldOrchestrate(cfg, result, subagentAvailable, judgeResult.orchestrate)) {
       enterOrchestration(state)
+      // Race-free self-check: this is the first moment the router really is
+      // about to delegate, so an absent selection service is now a fact about
+      // the deployment rather than a mount-ordering artefact (SPEC §7.4).
+      checkWorkerModelSelection(readWorkerModelSelection(ctx))
       vlog(
         `🪄 orchestrating: decisionTier=${result.decisionTier} verdict=${judgeResult.tier}` +
           (judgeResult.orchestrate !== undefined ? ` judgeOrchestrate=${judgeResult.orchestrate}` : '') +
@@ -720,28 +725,37 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // ── Worker-model self-check (SPEC §7.4) ───────────────────────────
   // Upstream calls per-worker tier injection mandatory. In DSH the `subagent`
   // tool's per-call provider/model only takes effect inside the host-owned
-  // `subagent-model-selection` allowlist (default off). We cannot enable that
-  // setting from here, so the honest move is to tell the user what to turn on
-  // instead of letting workers silently inherit the Smart model.
-  function workerModelSelection(): WorkerModelSelection | undefined {
-    const holder = ctx as unknown as {
-      subagentModelSelection?: { current?: () => unknown }
-    }
-    const service = holder.subagentModelSelection
-    if (service === undefined || typeof service.current !== 'function') return undefined
-    try {
-      const current = service.current() as
-        | { enabled?: unknown; allowedModels?: unknown }
-        | undefined
-      if (current === null || typeof current !== 'object') return undefined
-      return {
-        enabled: current.enabled === true,
-        routes: Array.isArray(current.allowedModels) ? current.allowedModels.length : 0,
-      }
-    } catch {
-      return undefined
-    }
+  // `subagent-model-selection` allowlist (default off, and mounted by the
+  // `web` composition only). We cannot enable that setting from here, so the
+  // honest move is to tell the user what to turn on instead of letting workers
+  // silently inherit the Smart model.
+  //
+  // This is an OPTIONAL dependency and must be probed, never read as
+  // `ctx.subagentModelSelection`: an undeclared property read throws
+  // `cannot get property "…" without inject` while the service is absent — and
+  // "absent" includes the window in which a sibling row of the same include
+  // group is still mounting. That throw happens inside apply and aborts the
+  // whole DSH boot (regression: tests/plugin-load.test.ts).
+  //
+  // `ctx.inject` is the reactive half: it fires when the service attaches
+  // (whenever that is), re-fires if the preference is replaced, and disposes
+  // with the plugin. The `enterOrchestration` call site below is the race-free
+  // half: by the time a turn actually delegates, the tree has long settled, so
+  // an absent service there really does mean "this deployment has no such
+  // surface" rather than "not yet".
+  let workerModelWarned = false
+  const checkWorkerModelSelection = (selection: WorkerModelSelection | undefined): void => {
+    if (workerModelWarned) return
+    if (!getConfig().enabled || getConfig().orchestration.mode !== 'auto') return
+    if (getConfig().tiers.fast.models.length === 0) return
+    const warning = workerModelSelectionWarning(selection)
+    if (warning === null) return
+    workerModelWarned = true
+    ctx.logger.warn('[shift-router] %s', warning)
   }
+  ctx.inject(['subagentModelSelection'], (sctx) => {
+    checkWorkerModelSelection(readWorkerModelSelection(sctx))
+  })
 
   // ── Startup diagnostics ────────────────────────────────────────────
   ctx.logger.info('[shift-router] loaded (enabled=%s, orchestration=%s)', getConfig().enabled, getConfig().orchestration.mode)
@@ -753,10 +767,6 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     }
     if (getConfig().tiers.fast.models.length === 0) {
       ctx.logger.warn('[shift-router] fast tier is empty — the judge has no model chain and routing will hold position')
-    }
-    if (getConfig().orchestration.mode === 'auto' && getConfig().tiers.fast.models.length > 0) {
-      const warning = workerModelSelectionWarning(workerModelSelection())
-      if (warning !== null) ctx.logger.warn('[shift-router] %s', warning)
     }
   }
 

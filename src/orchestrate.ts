@@ -16,9 +16,10 @@
  * accepts per-call `provider`/`model`, but only inside the host-owned
  * `subagent-model-selection` allowlist (default off). The prompt therefore
  * states that condition factually instead of asserting a guarantee the plugin
- * cannot keep; index.ts warns at startup when the allowlist is not available.
+ * cannot keep; index.ts warns when the allowlist is not available.
  */
 
+import type { Context } from '@deepseek-ai/cordis'
 import type { ShiftRouterConfig, RouterState, ModelRef, Tier } from './types.js'
 
 // ─── Orchestrator prompt ─────────────────────────────────────────
@@ -273,14 +274,57 @@ export interface WorkerModelSelection {
   routes: number
 }
 
+/** Structural view of the optional host service behind that preference. */
+interface SubagentModelSelectionService {
+  current?: () => unknown
+}
+
+/**
+ * Probe the OPTIONAL `subagentModelSelection` service (skill §6, "可选依赖").
+ *
+ * `ctx.get` is the sanctioned way to ask "is this optional service there?" — it
+ * returns `undefined` when no provider fiber is ACTIVE instead of throwing.
+ * Reading `ctx.subagentModelSelection` directly is a boot-aborting bug: the
+ * Cordis context is a proxy whose `get` trap throws
+ * `cannot get property "…" without inject` for any service the plugin did not
+ * declare, and a structural cast (`ctx as unknown as {…}`) silences TypeScript
+ * but not that trap. The throw happens inside `apply`, so it fails the plugin
+ * fiber and takes the whole DSH plugin tree down with it. The service is also
+ * mounted by the `web` composition only, so it is genuinely optional — see
+ * tests/plugin-load.test.ts, which ships the regression for this.
+ *
+ * @param ctx — any context in the plugin's scope.
+ * @returns the observed preference, or `undefined` when the service is absent
+ *          or reports nothing usable.
+ */
+export function readWorkerModelSelection(ctx: Context): WorkerModelSelection | undefined {
+  const service = ctx.get('subagentModelSelection') as SubagentModelSelectionService | undefined
+  if (service === undefined || typeof service.current !== 'function') return undefined
+  try {
+    const current = service.current() as { enabled?: unknown; allowedModels?: unknown } | undefined
+    if (current === null || typeof current !== 'object') return undefined
+    return {
+      enabled: current.enabled === true,
+      routes: Array.isArray(current.allowedModels) ? current.allowedModels.length : 0,
+    }
+  } catch {
+    // A preference that cannot be read is not a reason to fail a turn.
+    return undefined
+  }
+}
+
 /**
  * The warning to log for the worker-model self-check (SPEC §7.4), or null when
  * nothing should be said.
  *
- * `undefined` means the harness exposes no `subagent-model-selection` service,
- * which is NOT "unknown": without that service there is no model-selectable
- * delegation, so it is precisely the case worth warning about. Only a
- * positively-confirmed enabled allowlist with at least one route is silent.
+ * `undefined` means the harness exposes no `subagent-model-selection` service.
+ * That is NOT "unknown": without that service there is no model-selectable
+ * delegation at all (the settings surface is mounted by the `web` composition,
+ * not by `headless`), so it is precisely a case worth warning about — but only
+ * once orchestration is really about to delegate, because on a composition
+ * without the surface there is nothing to switch on, only a caveat to record.
+ * Only a positively-confirmed enabled allowlist with at least one route is
+ * silent.
  */
 export function workerModelSelectionWarning(
   selection: WorkerModelSelection | undefined,
@@ -292,7 +336,7 @@ export function workerModelSelectionWarning(
       ? 'enabled but with no authorised routes'
       : 'disabled'
   return `orchestration is on but model-selectable subagent delegation is ${state} `
-    + `(enable the harness "subagent-model-selection" setting and list the Fast-tier routes in allowedModels) — `
+    + `(mount or enable the harness "subagent-model-selection" setting and list the Fast-tier routes in allowedModels) — `
     + `workers will otherwise inherit the Smart model, so delegation loses its cost advantage`
 }
 
