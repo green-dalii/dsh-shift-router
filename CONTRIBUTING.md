@@ -41,13 +41,13 @@ The package is **dual-face**:
   (`dist/client.js`) by tsdown (`tsdown.config.ts`, `deps.neverBundle` keeps the host
   runtime/react requires external).
 
-Pure logic (router/failover/judge/orchestrate/stats, the form model, the catalog loader)
-lives in dependency-free modules with unit tests; only DSH-facing glue goes into `index.ts`.
+Pure logic (router / failover / judge / orchestrate / audit / notices / stats, the form model,
+the card-UX derivations, the catalog loader) lives in dependency-free modules with unit tests;
+only DSH-facing glue goes into `index.ts`.
 
 ## The DSH dev loop
 
-This is the part the template CONTRIBUTING used to get wrong. Three different change kinds
-have three different apply times:
+Two different change kinds have two different apply times:
 
 ### 1. Config changes — live, no restart
 
@@ -69,18 +69,6 @@ have three different apply times:
   project directory is picked up by the next restart — no reinstall needed. A source-checkout
   patch row (`name: '/path/dist/index.js'`) works for the host half but does **not** serve the
   client card (the client-modules scan resolves package names only).
-
-### 3. The settings whitelist — one-time patch + restart
-
-Upstream `dsh-host-apiproxy` (0.1.0-rc.6) only serves settings namespaces on its hardcoded
-`WEB_SETTINGS_NAMESPACES` list to the browser; `shift-router` must be added:
-
-```sh
-node scripts/expose-gui-settings.mjs --profile web   # idempotent
-# then restart the profile (apiproxy is cached in-process)
-```
-
-Re-run the script after upgrading/reinstalling `dsh-host-apiproxy`.
 
 ## Browser check (the card)
 
@@ -114,24 +102,29 @@ e2e. Run it with `npm run test:e2e` (`e2e/run-e2e.mjs`): it creates a scratch `D
 installs this checkout as a bundle, and runs three turns — the current config, the
 pre-alignment shape (`e2e/legacy-config-overlay.yml`, i.e. the upgrade path), and the
 **default** orchestration mode with the web-only `subagent-model-selection-settings` row
-mounted (`e2e/orchestration-overlay.yml`) — asserting the model switch, that no row failed to
-apply, and the settings round-trip. Treat a red e2e as a release blocker — it is the only check that proves
-the *packaged* plugin loads and routes on a real harness.
+mounted (`e2e/orchestration-overlay.yml`). It asserts the model switch, that no row failed
+to apply, that the routed turn carried the `[shift-router]` notice into the model request
+(`notice=yes`), the settings round-trip, and that the Host model catalog advertises the
+configured routes. Treat a red e2e as a release blocker — it is the only check that proves
+the plugin loads and routes on a real harness.
 
 `npm run test:e2e` also packs the package and boots the PACKED artifact in a
-second scratch profile. That step is the install-time contract: the tarball
-carries only `dependencies`, so a runtime import that is a devDependency — or a
-shipped path missing from `files` — fails there rather than in a user's install.
-`tests/packaged-install.test.ts` is the fast half of the same gate.
+second scratch profile. That step is the install-time contract: the tarball ships no
+harness package of its own (they are `peerDependencies` the deployment provides), so a
+runtime import that is dev-only — or a shipped path missing from `files` — fails there
+rather than in a user's install. `tests/packaged-install.test.ts` is the fast half of the
+same gate.
 
 Never pin `orchestration.mode: off` in a fixture to make an assertion simpler: the default is
 `auto`, and a suite that only ever runs `off` cannot see the default path. That is exactly how
 a boot-aborting defect shipped once. `--dump-config` is not a substitute either — it composes
-configuration without instantiating a single plugin. For the GUI card, the model dropdowns only show providers that currently advertise
-models (`llm.models`), so a scratch profile with no registered adapter falls back to
-free-text rows — that is expected, not a bug. To exercise the dropdowns, mount a small
-adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
-`listModels`/`resolveModel` implemented (see the fixture shape in `e2e/fake-adapter.mjs`).
+configuration without instantiating a single plugin.
+
+For the GUI card, the model dropdowns only show providers that currently advertise models
+(`llm.models`), so a scratch profile with no registered adapter falls back to free-text
+rows — that is expected, not a bug. To exercise the dropdowns, mount a small adapter that
+calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with `listModels`/`resolveModel`
+implemented (see the fixture shape in `e2e/fake-adapter.mjs`).
 
 ## Guidelines
 
@@ -203,7 +196,9 @@ crawl that topic and npm; nothing needs submitting to a private registry.
 3. Run the gates (SPEC §14): `npm run typecheck && npm test && npm run build && npm run test:e2e`.
 4. `npm pack --dry-run` and confirm `files` still ships the artifacts, the patch and the docs.
 5. Publish: `npm publish` (runs `prepare`, then `prepublishOnly`), or hand out the tarball.
-6. Local review workflow: keep review-round changes as one local commit (amend while
+6. Tag the release (`git tag vX.Y.Z`) and push main + the tag — both READMEs pin the git
+   install channel to `#vX.Y.Z`, so an untagged release leaves that channel broken.
+7. Local review workflow: keep review-round changes as one local commit (amend while
    unpushed) and let the maintainer approve before pushing — see `ROADMAP.md`.
 
 ## License

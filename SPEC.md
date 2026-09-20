@@ -98,8 +98,13 @@ contract, not a convenience:
 | `@deepseek-ai/dsh-{agent,commands,llm,session,settings,system-prompt,tools}` | `0.1.5-rc.2` | 0.1.5-rc.2 |
 | `@deepseek-ai/schemastery` | `^3.18.2` | 3.18.2 |
 | `@deepseek-ai/dsh-client-{locale,store,ui-settings,ui-slots,ui-renderer}` | `^0.1.5-rc.2` | browser roster |
+| `@deepseek-ai/dsh-api-{remotes,session-controller}`, `dsh-client-connection` | `^0.1.5-rc.2` | type-only in the client half; the browser gets them from the platform seed |
 | `@deepseek-ai/dsh-client-ui-settings-plugins` | `^0.1.5-rc.2` | type-only (declares the card's slot contract) |
 | `@deepseek-ai/dsh-tool-subagent` | `^0.1.5-rc.2` | type-only |
+
+The five packages the browser module loader must answer are listed once, in
+`package.json`'s `dsh.client.inject`: `dsh-client-connection`, `dsh-client-locale`,
+`dsh-client-ui-renderer`, `dsh-client-ui-settings`, `dsh-api-remotes`.
 
 A plugin is type-checked against its own dependency tree but **executes against
 the harness's**. Any gap between the two is a defect that no amount of green
@@ -283,8 +288,8 @@ When `cacheAware.enabled` **and** the tiers share a provider:
   cache is still warm. `lastActivityAt === 0` (no completed message yet) allows
   the downgrade.
 
-Cross-family deployments are unaffected: the factor is 1 and only the idle gate
-applies is skipped.
+Cross-family deployments are unaffected: the factor is 1 and the idle gate is
+skipped.
 
 ---
 
@@ -605,58 +610,30 @@ back to the router's current model. No transcript archaeology.
 
 ## 10. Configuration reference
 
-Every leaf has a default **except three that are intentionally unset** —
-`routing.window.threshold`, `routing.cacheAware.sameFamilyThreshold` (legacy
-knobs that must stay inert until a user writes a value) and
-`routing.economics.mode` (a preset selector). An empty config row is still a
-working no-op. Invalid values fail plugin load (Schemastery validation), never
-silently coerce.
+**The exhaustive list of leaves, types and defaults is the schema itself**
+([`src/config.ts`](src/config.ts)); [`README.md`](README.md#configuration) tables
+it for users and the GUI card (§12) renders it with per-field hints. Keeping a
+third copy here would only add a surface that drifts, so this section states the
+*shape* of the contract instead:
 
-| Key | Type / range | Default | Notes |
-|---|---|---|---|
-| `enabled` | boolean | `true` | master switch for routing behaviour |
-| `tiers.fast.label` | string | `'Fast'` | display only |
-| `tiers.fast.models` | `{provider, model, priority}[]` | `[]` | priority ascending = fallback order |
-| `tiers.fast.description` | string | see `DEFAULT_CONFIG` | display only |
-| `tiers.smart.*` | as fast | `[]` | |
-| `routing.mode` | `auto` \| `manual` \| `off` | `auto` | `manual`: overrides only; `off`: passive |
-| `routing.judgeTimeout` | int 1..120000 ms | `5000` | per Judge attempt |
-| `routing.judgeMaxTokens` | int 1..100000 | `4000` | |
-| `routing.judgePromptCap` | int 1..1000000 chars | `6000` | bounds Judge cost |
-| `routing.economics.reworkPenalty` | number ≥ 1 | `3` | R; θ = 1/R |
-| `routing.economics.downgradeMemory` | int 1..100 | `2` | consecutive decisive fast turns |
-| `routing.economics.mode` | `eco` \| `default` \| `sport` (optional) | *(unset)* | preset; authoritative over `reworkPenalty` |
-| `routing.window.size` | int 1..100 | `5` | |
-| `routing.window.minConfidence` | 0..1 | `0.5` | decisive/hold boundary |
-| `routing.window.threshold` | 0..1 | *(unset)* | **legacy** raw-θ override; ships unset, and its old default `0.6` is inert |
-| `routing.cacheAware.enabled` | boolean | `true` | |
-| `routing.cacheAware.sameFamilyPenalty` | number ≥ 1 | `1.5` | θ divisor on same-family tiers |
-| `routing.cacheAware.idleBoundaryMs` | int ≥ 0 | `300000` | warm-cache suppression window |
-| `routing.cacheAware.sameFamilyThreshold` | 0..1 | *(unset)* | **legacy**; ships unset, and a non-default value implies penalty 3.0 |
-| `ux.routerLogVerbose` | boolean | `false` | diagnostics via `ctx.logger`; visible only where a log exporter is mounted (§13) |
-| `ux.promptSectionOrder` | number (finite) | `150` | sort position of the orchestrator prompt section (§7.2) |
-| `orchestration.mode` | `auto` \| `off` | `auto` | |
-| `orchestration.maxRounds` | int 0..100 | `3` | hard cap |
-| `orchestration.escalationThreshold` | int 1..100 | `2` | consecutive worker failures → 1 escalation |
-| `orchestration.maxSpendUsd` | number ≥ 0 | `0` | hard budget per task; `0` = no guard (needs `pricing` to be meaningful) |
-| `orchestration.workerLedgerCap` | int 1..1000 | `20` | per-worker cost rows kept for display (oldest dropped); never the budget total |
-| `orchestration.audit.enabled` | boolean | `true` | run the acceptance audit after a delegating run (§7.4.1) |
-| `orchestration.audit.timeoutMs` | int 1..120000 ms | `5000` | auditor call budget; deterministic checks always run |
-| `orchestration.audit.promptCap` | int 200..1000000 chars | `6000` | auditor prompt cap (cost bound, and the evidence bound) |
-| `failover.baseMs` | int ≥ 100 | `60000` | |
-| `failover.maxMs` | int ≥ 1000 | `21600000` | |
-| `failover.startAttempts4xx` | int 1..20 | `3` | 16 min start |
-| `telemetry.callLogCap` | int 10..1000000 | `1000` | |
-| `pricing` | `{provider, model, input, output, cacheRead?, cacheWrite?}[]` | `[]` | USD / 1M tokens |
-
-Configuration layering (later wins, whole-row `config` replacement semantics):
-bundles' patches → profile `cordis.patch.yml` → the `shift-router` settings
-document (GUI / `/router config`).
-
-Runtime toggles issued from commands (`/router on|off`, `/router verbose`,
-`/router orchestrate …`) are **session-scoped** and do not rewrite the settings
-document; durable changes go through `/router config` or `routing.economics.mode`
-presets which are persisted.
+- Every leaf has a default **except three that are intentionally unset** —
+  `routing.window.threshold` and `routing.cacheAware.sameFamilyThreshold` (legacy
+  knobs that must stay inert until a user writes a value, §15) and
+  `routing.economics.mode` (a preset selector). An empty config row is still a
+  working no-op.
+- `tiers.<tier>.label` and `.description` are display-only strings; the tier
+  chains themselves are `{provider, model, priority}[]`, priority ascending =
+  fallback order.
+- Invalid values fail plugin load (Schemastery validation), never silently coerce.
+- Layering — later wins, and a patch replaces the target row's **whole** `config`
+  value: bundles' patches → profile `cordis.patch.yml` → the `shift-router`
+  settings document (GUI / `/router config`).
+- Command runtime toggles (`/router on|off`, `/router verbose`,
+  `/router orchestrate …`) are **session-scoped** and do not rewrite the settings
+  document; durable changes go through `/router config` or the persisted
+  `routing.economics.mode` presets.
+- `pricing` is the one list-of-record that is patch / `/router config` only — the
+  card does not render lists (§12.3).
 
 ---
 
@@ -667,7 +644,7 @@ presets which are persisted.
 | `/router` | compact status line (tier, model, mode, manual flag) |
 | `/router status` \| `/router stats` | full status report |
 | `/router on` \| `/router off` | enable/disable routing for this session |
-| `/router verbose` \| `/router log` | toggle `ux.routerLogVerbose` |
+| `/router verbose` \| `/router log` | toggle `ux.routerLogVerbose`: log-ring detail **and** a route notice on every judged turn (§13.1) |
 | `/router orchestrate [auto\|on\|off]` | orchestration mode |
 | `/router allow-workers [on\|off]` | write/revoke the Fast chain in the host `subagent-model-selection` allowlist (C4(a)) |
 | `/router eco` \| `/router default` \| `/router sport` | gear presets → `routing.economics.mode`, **persisted** |
@@ -850,8 +827,9 @@ model per request, §1.1), so nothing in the stock UI would otherwise announce i
 ## 14. Testing and release gates
 
 - Pure logic (`router.ts`, `failover.ts`, `judge.ts` parsing, `orchestrate.ts`,
-  `config.ts`, `tier.ts`, `stats.ts`) is unit-tested; behaviour changes are
-  TDD'd.
+  `audit.ts`, `notice.ts`, `config.ts`, `tier.ts`, `stats.ts`, and the client's
+  `form-model.ts` / `card-ux.ts` / `model-catalog.ts`) is unit-tested; behaviour
+  changes are TDD'd.
 - Contract changes may update existing assertions only as a documented part of
   the same change.
 - **Wiring is tested against a real Cordis context.** `tests/plugin-load.test.ts`
@@ -859,13 +837,16 @@ model per request, §1.1), so nothing in the stock UI would otherwise announce i
   undeclared service read or a non-finite prompt-section order fails in
   milliseconds instead of aborting a user's boot. Hand-written context stubs
   cannot catch that class of bug: they have no proxy trap to violate.
-- **The E2E must cover the default configuration.** `npm run test:e2e` boots a
-  scratch profile and covers a fresh install, a pre-alignment config, and the
-  plugin's DEFAULT orchestration mode with the web-only
-  `subagent-model-selection-settings` row mounted. A suite that only ever runs
-  `orchestration.mode: off` cannot see the default path — which is how the boot
-  regression shipped, and `--dump-config` cannot substitute because it composes
-  configuration without instantiating a single plugin.
+- **The E2E must cover the default configuration and the packaged artifact.**
+  `npm run test:e2e` boots scratch profiles for a fresh install, a pre-alignment
+  config, and the plugin's DEFAULT orchestration mode with the web-only
+  `subagent-model-selection-settings` row mounted; it also packs the tarball,
+  installs it into a second profile, boots it there (where devDependencies are
+  absent) and drives a real routed turn, whose request must carry the route notice
+  (§13.1). A suite that only ever runs `orchestration.mode: off` cannot see the
+  default path — which is how the boot regression shipped, and `--dump-config`
+  cannot substitute because it composes configuration without instantiating a
+  single plugin.
 - **Load safety is tested per configuration.** `tests/plugin-load.test.ts` loads
   the plugin for every configuration that changes a LOAD-TIME branch — empty row,
   routing disabled, `manual`, `off`, orchestration off, empty Fast chain, and the
@@ -949,4 +930,6 @@ failures** — the plugin simply stops reading them.
 | `models-store.json` / `auth.json` / three JSON config layers | host-private file layout |
 | pi-subagents `runs.all`, `worktree: true`, fork-context thinking workaround | different delegation primitives in DSH |
 | `pack:check` / `pi.extensions` / `minPiVersion` | pi packaging contract |
+| `AGENTS.md`'s pi-specific hard-stop rules | upstream *development-process* constraints, not product behaviour |
+| Counting a delegation round at the worker's **result** | counting at **dispatch** keeps `maxRounds` a true ceiling: a dispatched call has already spent budget, while a result-time count lets an aborted call slip past the cap (§7.3) |
 | Upstream's known doc drift (SPEC §9.1/§9.2/§7.5) | this SPEC aligns to upstream *code behaviour*, not its stale prose |

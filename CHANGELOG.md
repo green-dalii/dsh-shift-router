@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Upstream alignment round: P0 (correctness) + P1 (decision core)** against
 `pi-shift-router` v1.6.0, from this project's v1.0.0-era port baseline;
 **GUI settings card review rounds (R6–R8)** — registration fix,
-model-catalog remote, layout overlap and information architecture; and
-**runtime visibility (R9)** — route notices. The normative contract is
-[`SPEC.md`](SPEC.md); the audit, including what was deliberately **not**
-ported and why, is [`ALIGNMENT.md`](ALIGNMENT.md).
+model-catalog remote, layout overlap and information architecture;
+**runtime visibility (R9)** — route notices; and **packaging/distribution
+alignment (R10)** — harness packages become peers, engines raised to the
+supported line, and all four install channels documented. The normative contract
+is [`SPEC.md`](SPEC.md); the audit, including what was deliberately **not** ported
+and why, is [`ALIGNMENT.md`](ALIGNMENT.md).
 
 > A boot-aborting defect shipped in the alignment round and was fixed before
 > this release ([`ALIGNMENT.md`](ALIGNMENT.md) §R3): the install had been

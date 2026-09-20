@@ -179,20 +179,16 @@ The package ships a browser-side (client) module that registers a **"Shift-Route
 - **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the tier model chains are editable in the card.
 - **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
 
-#### Upstream limitation: the Web settings whitelist (0.1.0-rc.6)
+#### Legacy harnesses only: the Web settings whitelist (≤ 0.1.0-rc.x)
 
-The current Harness Web API proxy (`@deepseek-ai/dsh-host-apiproxy`) **whitelists** which settings namespaces the browser may read and write (`WEB_SETTINGS_NAMESPACES`). The official cards (`shell`, `agent-loop`, `web-search-deepseek`) are on the list; a third-party namespace is filtered out of the browser's `settings.describe` response even though the plugin registered it server-side. The upstream comment explicitly calls moving that decision to `settings.register()` (letting a plugin self-expose) "deferred work", and the list is not configurable.
-
-So the card needs `shift-router` added to the whitelist (one-time, idempotent):
-
-```sh
-npm run build
-dsh plugin --profile web add /path/to/dsh-shift-router
-node scripts/expose-gui-settings.mjs --profile web   # legacy harnesses only — see below
-# restart the profile (client package metadata and the apiproxy are cached in-process)
-```
-
-`scripts/expose-gui-settings.mjs` patches the profile's installed `dsh-host-apiproxy/lib/index.js` (idempotent; re-run after upgrading/reinstalling the dependency).
+Harness builds up to **0.1.0-rc.x** filtered a third-party settings namespace out of
+the browser's `settings.describe` response unless it appeared in
+`WEB_SETTINGS_NAMESPACES` — which is why `scripts/expose-gui-settings.mjs` exists: it
+patches the profile's installed `dsh-host-apiproxy` (idempotent; re-run after a
+dependency upgrade). From **0.1.5-rc.2**, this project's baseline, that package and its
+whitelist are **gone** and the namespace is exposed natively, so the script reports
+"not needed" and exits 0. It is not part of the published package (`files`), so it is
+only reachable from a source checkout.
 
 ## Commands
 
@@ -259,7 +255,7 @@ The caps stop a run from flying away; they cannot stop a CTO from *claiming* acc
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (216 tests across 12 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / config registries + GUI form model / whitelist patch)
+npm test            # vitest (336 tests across 18 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / route notices / config registries + GUI form model + card UX + model catalog / packaged-install contract)
 npm run typecheck
 ```
 
@@ -274,8 +270,9 @@ npm run test:e2e
 That builds a throwaway `DSH_HOME`, installs **this checkout** as a bundle into a derived
 `headless` profile, runs one turn through the fake adapter, and asserts:
 
-- `ROUTER-E2E: turn ran on fake/fake-smart` — the Judge ran, the EV rule escalated, and the
-  wire model was actually switched to the Smart tier;
+- `ROUTER-E2E: turn ran on fake/fake-smart notice=yes` — the Judge ran, the EV rule escalated,
+  the wire model was actually switched to the Smart tier, and the `[shift-router]` route notice
+  reached the model request (SPEC §13.1);
 - the same outcome under `e2e/legacy-config-overlay.yml`, a profile patched with the
   **pre-alignment** config (the legacy knobs at their old defaults plus the removed
   `requireSmartModel` key) — i.e. the upgrade path, not just a fresh install;
@@ -283,7 +280,13 @@ That builds a throwaway `DSH_HOME`, installs **this checkout** as a bundle into 
   **default** orchestration mode (`auto`) and mounts the web-only
   `subagent-model-selection-settings` row beside it — the composition that once aborted
   the boot;
-- the `shift-router` settings namespace round-trips a write (`e2e/settings-probe.mjs`).
+- the `shift-router` settings namespace round-trips a write, and the Host model catalog
+  advertises the deployment's configured routes (`e2e/settings-probe.mjs`);
+- a **packed** install (`npm pack` → tarball → second scratch profile) boots with the
+  plugin loaded, its browser half offered to the client module loader, and no
+  `@deepseek-ai/*` copy installed into the profile — devDependencies are absent there, so a
+  runtime import that is not declared for the consumer fails in the e2e instead of in a
+  user's install.
 
 It never touches your real `DSH_HOME` and cleans up after itself (`--keep` to inspect). To run
 the same thing by hand, install the bundle into a scratch profile and apply the overlay:
@@ -297,25 +300,29 @@ DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migrat
 
 ```
 src/
-├── index.ts        # plugin entry: event wiring, per-agent state, judge, orchestration section
+├── index.ts        # plugin entry: event wiring, per-agent state, judge, route notices
 ├── config.ts       # Schemastery schema + deep-merge normalization
 ├── types.ts        # shared types + defaults
 ├── router.ts       # pure routing engine (upgrade/downgrade/window/cache-aware)
 ├── judge.ts        # LLM Judge via ctx.llm.stream() + reply parsing
 ├── failover.ts     # exponential-backoff cooldown state machine
 ├── tier.ts         # tier model resolution + display
+├── notice.ts       # pure: route-notice text + summary (SPEC §13.1)
 ├── orchestrate.ts  # orchestrator prompt + lifecycle + caps
+├── audit.ts        # non-blocking acceptance audit of delegated runs
 ├── stats.ts        # telemetry snapshot (tokens / cost estimate / savings baseline)
 ├── commands.ts     # /router and /route-force
 └── client/         # browser half (GUI settings card)
     ├── index.tsx       # client entry: registers into the settings.plugin.item slot
     ├── controller.ts   # staged form → settings-scope writes (one per section)
     ├── form-model.ts   # pure logic: field registry / draft parsing / save plan
+    ├── card-ux.ts      # pure logic: thresholds, chain problems, header summary
+    ├── model-catalog.ts# Host model catalog → provider/model options
     ├── ShiftRouterCard.tsx  # card component (DSW design tokens)
     └── locales.ts      # zh/en dictionaries
 ```
 
-Pure logic (router / failover / judge parsing / orchestration) is unit-tested in isolation. Wiring is tested in two layers: `tests/plugin-load.test.ts` loads the plugin through a **real Cordis context** (so an undeclared service read or an invalid prompt-section order fails fast), and the headless e2e boots a scratch profile — including the plugin's default orchestration mode.
+Pure logic (router / failover / judge parsing / orchestration / audit / route notices / the form model, card UX and catalog loader) is unit-tested in isolation. Wiring is tested in two layers: `tests/plugin-load.test.ts` loads the plugin through a **real Cordis context** and drives the real `agent/pre-step` waterfall (so an undeclared service read, an invalid prompt-section order, or a missing route notice fails fast), and the e2e boots scratch profiles — including the packed artifact and the plugin's default orchestration mode.
 
 ## License
 

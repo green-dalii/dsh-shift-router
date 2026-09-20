@@ -1,25 +1,24 @@
-# dsh-shift-router × pi-shift-router 上游对齐工作清单（待审核）
+# dsh-shift-router × pi-shift-router 上游对齐审计
 
-> 审核用工件。目标：从第一性原理出发，判定上游 `pi-shift-router`（本地 `../pi-shift-router`，HEAD `69ffb34` / v1.6.0）
-> 自本项目派生点以来新增/修正的内容里，**哪些必须对齐、哪些必须换成 DSH 等价物、哪些明确不对齐**。
->
-> 生成时间：本轮会话。证据来源：上游 `CHANGELOG.md` / `SPEC.md` / `AGENTS.md` / `src/**`，本项目 `src/**` / `tests/**` / 文档 / git 记录。
+> **本文件是审计与理由记录**：上游 `pi-shift-router`（HEAD `69ffb34` / v1.6.0）自本项目派生点以来
+> 新增或修正的内容里，哪些必须对齐、哪些必须换成 DSH 等价物、哪些明确不对齐，以及每一轮的证据与
+> 残余不确定性。**规范契约在 [`SPEC.md`](SPEC.md)，状态与历史在 [`ROADMAP.md`](ROADMAP.md)** ——
+> 同一件事不在这里再写一遍。
 
 ## 修订记录
 
-**R3（安装验证轮：一次真实的 P0 热修，已交付）** — 维护者按推荐路径把本插件装进真实
-`web` profile 后，**DSH 无法启动**：
+**R3（安装验证轮：一次真实的 P0 热修，已交付）** — 维护者按推荐路径把本插件装进真实 `web`
+profile 后 **DSH 无法启动**：
 
 ```
 Error: dsh: plugin tree failed to load: failed to apply loader entry shift-router
   (dsh-shift-router): cannot get property "subagentModelSelection" without inject
 ```
 
-上一轮声明「已安装并验证」是**不成立的**：那条结论只验证到组合层（`dsh plugin add`
-+ `--dump-config`），而 `--dump-config` **只组合配置、从不实例化插件**；真正的启动
-从未被验证，而 E2E 恰好把 `orchestration.mode` 钉成 `off`，绕过出事的那条分支。
-R3 记录根因、修复、新增闸门与合规审计结果，并**修正上一轮关于 C4(b) 与日志可见性的
-错误结论**。详见「R3：安装验证轮（P0 热修）」一节。
+上一轮声明「已安装并验证」是**不成立的**：那条结论只验证到组合层（`dsh plugin add` +
+`--dump-config`），而 `--dump-config` **只组合配置、从不实例化插件**；真正的启动从未被验证，而
+E2E 恰好把 `orchestration.mode` 钉成 `off`，绕过了出事的那条分支。根因、修复、新增闸门与合规
+审计见「R3：安装验证轮（P0 热修）」一节。
 
 **R2（维护者校正，已采纳）** — 「上游 TPS 指示器不要照搬：DSH 有原生 TPS 指示器」。
 核实结论：DSH 的 `dsh-client-ui-chat` / `dsh-client-ui-trajectory` 原生渲染
@@ -48,36 +47,21 @@ R3 记录根因、修复、新增闸门与合规审计结果，并**修正上一
 
 ## 0. 前置结论
 
-### 0.1 skill 版本核查（已执行）
+### 0.1 本项目的上游基线判定
 
-| 位置 | 版本 | 结论 |
-|---|---|---|
-| 本会话加载的已安装副本 `~/.dsh/skills/dsh-plugin-dev-skill` | **0.3.0**（SKILL.md 与本地 git HEAD 逐字节相同） | = 远端**已发布**最新 |
-| 本地开发检出 `~/project/dsh-plugin-dev-skill` | **0.4.0**（未提交：新增 `VERSION` + frontmatter `metadata`） | 领先远端 |
-| 远端 `origin/main` 与 tags | main = 0.3.0；tags 最高 `v0.3.0`（`VERSION` 未推，`raw.githubusercontent` 404） | 落后于本地 |
+按证据还原：本项目首个提交 `58b0cb6` 日期 **2026-08-14**；上游 `v1.0.0` tag 日期同为
+**2026-08-14**（task-level orchestration 落地），`v0.10.0`（cache-aware）为 08-12；本项目代码里
+已同时存在 cache-aware、置信度加权滑窗、cost telemetry、orchestration + 硬帽，对应上游
+v0.9.0–v1.0.0。
 
-0.3.0 → 0.4.0 的**全部**内容差异只有：`metadata.version` frontmatter、§0.1「载入后先检查 skill 是否最新」强制流程、一行本技能自身仓库链接。
-**没有任何 API/术语/包名变化**——也就是说本轮所用的 SDK 指南内容就是当前最新内容。
-本次已手工执行了 §0.1 的检查流程（本地读版本 → 取远端 → 语义化比较）。
-> 待你决定：是否把 0.4.0 同步进已安装目录并推到远端（见 §4 问题 6）。
+**结论：本项目基线 ≈ 上游 v1.0.0（2026-08-14），未对齐区间 = 上游 v1.0.1 → v1.6.0。**
+版本号策略与对齐目标以 [`ROADMAP.md`](ROADMAP.md#upstream-alignment) 为准（本项目走自己的发布线，
+不追求与上游数字一致）。
 
-### 0.2 本项目的上游基线判定
+### 0.2 DSH 开发技能（`dsh-plugin-dev-skill`）
 
-README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto our v0.x line one-to-one」，**从未钉住具体上游版本**。按证据还原：
-
-- 本项目首个提交 `58b0cb6` 日期 **2026-08-14**；
-- 上游 `v1.0.0` tag 日期同为 **2026-08-14**（task-level orchestration 落地），`v0.10.0`（cache-aware）为 08-12；
-- 本项目代码里已经同时存在 cache-aware、置信度加权滑窗、cost telemetry、orchestration + 硬帽——这些对应上游 v0.9.0–v1.0.0。
-
-**结论：本项目基线 ≈ 上游 v1.0.0（2026-08-14）。未对齐区间 = 上游 v1.0.1 → v1.6.0（共 13 个版本）。**
-
-### 0.3 版本号策略（需你定）
-
-本项目 `0.5.0` 是自己的发布线，上游 `1.6.0` 是另一条线。建议**不要**让数字彼此对齐，而是显式记录「对齐到的上游版本」：
-
-- `package.json` / README 增加字段：`upstreamAligned: "pi-shift-router v1.6.0"`；
-- ROADMAP 把「v0.x 一一对应」这句**删掉**（它已经失真），改为「本项目的发布线；上游对齐版本见下表」；
-- 是否把本项目跳到 `1.0.0` 由你定（见 §4 问题 2）。
+本仓库的开发约定与该项目对齐，且每次载入该技能都执行其 §0.1 的版本检查流程（读本地 `VERSION`
+→ 取远端 → 语义化比较）。技能自身的版本与更新属于该技能仓库的事务，不在本审计范围内。
 
 ---
 
@@ -225,7 +209,7 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 |---|---|
 | `npx tsc --noEmit`（宿主） | ✅ |
 | `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
-| `npx vitest run` | ✅ 216 tests / 12 files |
+| `npx vitest run` | ✅（R3 当时 216 项 / 12 文件；v0.6.0 为 336 / 18） |
 | `npm run build`（tsc + tsc client + tsdown） | ✅ |
 | `npm run test:e2e`（临时 DSH_HOME → 装 bundle → 跑一轮 → 设置往返） | ✅ `ROUTER-E2E: turn ran on fake/fake-smart`；probe `{ok:true}` |
 | `npm pack` 内容与 `dist` 可加载性 | ✅ 57 files；`import('./dist/index.js')` 导出 `apply/Config/inject/name`，schema 解析出 EV 默认值 |
@@ -374,32 +358,15 @@ C4(b) 的交付形态：**"启动自检告警"若无人可见，等于没交付*
 因此正确形态是**配置项**：`ux.promptSectionOrder`（默认 150，仍是"persona 前缀之后、
 plan 策略之前"），并写进 SPEC §1.4 第 3 条作为规范。
 
-### R3.9 关于「是否需要连 P2 一起做」
+### R3.9 与 P2 的关系，以及 R3 的闸门结果
 
-**不需要，也不应该。** 本次不是一个"未完成的迁移"，而是**上一轮新引入的 P0 缺陷**：
+R3 修的是上一轮**新引入的 P0 缺陷**（服务访问方式，1 处代码），不是"未完成的 SDK 迁移"——把
+`@deepseek-ai/*` 从 `0.1.0-rc.6` 升到 `0.1.5-rc.2` 并不会修掉它，`inject` 语义两版一致。因此
+SDK 基线补齐保持为**独立**的下一轮工作，并因 R3 的证据升级为 P2（已在 R4.1 完成：当时运行时是
+cordis 4.0.2 + `@deepseek-ai/*` 0.1.5-rc.2，而项目 pin 仍是 4.0.1 + 0.1.0-rc.6）。
 
-- 根因是服务访问方式（1 处代码），不是 SDK 版本差异。把 `@deepseek-ai/*` 从
-  `0.1.0-rc.6` 升到 `0.1.5-rc.2` **不会**修掉它——`inject` 语义两版一致；
-- P2 的"SDK 基线补齐"因此仍是**独立**的下一轮工作，且 R3 为它增加了新证据（见下）。
-
-**同时必须承认 P2 里确实有一项与本轮相邻**：SDK 基线漂移。R3 复核的证据：
-
-| 证据 | 含义 |
-|---|---|
-| 运行时 cordis **4.0.2** vs 项目 pin **4.0.1** | 已实际运行在 4.0.2；本轮 `ctx.get`/`ctx.inject` 用法两版都支持，但类型基线落后 |
-| `subagentModelSelection` 服务由 `@deepseek-ai/dsh-tool-subagent/model-selection-settings` 提供，且**只被 `dsh-web-app` 组合挂载** | 本插件不依赖该包（故只能结构化探测），这也是当初想"绕过类型"的诱因；P2 若把该包纳入类型依赖，可以有正式类型 |
-| `SECTION_ORDERS` / `getSectionOrder` / `Context` 混入方法等均来自运行时版本 | 升级后需按 skill 提示复查 API |
-
-### R3.10 R3 后的 Gate 结果
-
-| Gate | 结果 |
-|---|---|
-| `npx tsc --noEmit`（宿主） | ✅ |
-| `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
-| `npx vitest run` | ✅ **228 tests / 13 files**（R3 新增 `plugin-load.test.ts` 8 项与状态行等 4 项） |
-| `npm run build` | ✅ |
-| `npm run test:e2e` | ✅ 三个场景（新装 / pre-alignment / **默认 auto + web 服务行**）+ 设置往返 |
-| 闸门自检（变异回原缺陷） | ✅ 单测 3 红、e2e 2 场景红；还原后全绿 |
+R3 收尾的闸门全绿：宿主与客户端 `tsc`、`vitest`（当时 228 项 / 13 文件）、`build`、e2e 三场景
++ 设置往返；变异自检同时让 3 个单测与 2 个 e2e 场景变红（还原后全绿）。
 
 ---
 
@@ -469,7 +436,7 @@ R4 的新增接口（`OrchestrationState` 的 `spawned/done/spend/workerSpends/g
 |---|---|---|
 | `apply()` 抛错 → fiber FAILED → plugin tree 加载失败 | 枚举 `apply` 内所有可能抛的调用：`ctx.systemPrompt.section`（非有限 order 会抛）、`ctx.commands.register`、两个 `ctx.inject`、以及**未声明服务读取** | 前两者分别由 `ux.promptSectionOrder`（默认 150，配置化）与类型检查保证；未声明读取由 `plugin-load.test.ts` 在真实 Cordis 上下文里钉住（变异 3 红） |
 | **导入期**抛错（模块加载失败，比 fiber FAILED 更早） | `grep` 全部 `src/**` 的导入期副作用（顶层 `throw` / `readFileSync` / `process.*` / 定时器） | 无（audit.ts 的提示词是纯字符串常量；orchestrate.ts 的提示词同理） |
-| 运行时 **值导入** 在目标 profile 解析不到 | 从**构建产物**反查：`dist/*.js` 的外部 specifier 只有 `@deepseek-ai/dsh-llm`、`@deepseek-ai/schemastery` —— 二者都在 `dependencies` | 新增 `packaged-install.test.ts` 把这条钉死（把 `dsh-llm` 移出 dependencies → 测试红） |
+| 运行时 **值导入** 在目标 profile 解析不到 | 从**构建产物**反查：`dist/*.js` 的外部 specifier 只有 `@deepseek-ai/dsh-llm`、`@deepseek-ai/schemastery` —— 二者现在都是 `peerDependencies`（R10 起；宿主负责唯一实例） | 新增 `packaged-install.test.ts` 把这条钉死（把 `dsh-llm` 移出向消费者声明的字段 → 测试红） |
 | 浏览器半边解析不到模块 | 从 `dist/client.js` 反查 `require()`：`@deepseek-ai/dsh-client-store`、`react`、`react/jsx-runtime`；对照前端 boot 的 `staticModules`（seed 表：react / react-dom / cordis / **dsh-client-store** / dsh-client-ui-slots / -primitives / -dockkit） | 三者都是 **平台 seed word**，由 shell 恒定提供；另加 gate 断言「requires ⊆ seed ∪ dsh.client 声明」 |
 | 客户端 roster（`dsh.client.inject`）指向不存在的包 | 读 `dsh-client-modules` 的装载实现：未知 id **静默跳过**（`if (dependency !== void 0)`），不会抛 | **不是启动杀手**，但确实是错的：该字段仍写着基线已删除的 `@deepseek-ai/dsh-client-runtime`；已改为 `@deepseek-ai/dsh-client-ui-renderer`（`ctx.slots` 的声明方，卡片真正依赖它），并删掉无 `dsh.client` 声明的 `dsh-client-ui-slots`；gate 会拦「重新写回被删包名」 |
 | 配置差异导致只在该配置下抛错（R3 的教训） | `plugin-load.test.ts` 新增 5 组真实加载：空 config 行、`enabled:false`、`routing.mode: manual`、`off`、`orchestration.mode: off`、空 Fast 链、完整 costs/audit 配置 | 全部加载成功 |
@@ -479,7 +446,7 @@ R4 的新增接口（`OrchestrationState` 的 `spawned/done/spend/workerSpends/g
 
 | Gate | 内容 | 变异自检 |
 |---|---|---|
-| `tests/packaged-install.test.ts`（6 项） | 宿主产物外部导入 ⊆ `dependencies`；浏览器 `require` ⊆ seed ∪ `dsh.client`；roster 不得再写回已删除包；`files` 完整性；双面 exports + bundle patch | 把 `dsh-llm` 移出 dependencies → **红**；roster 写回 `dsh-client-runtime` → **红**；给 `dist/client.js` 注入未声明 `require` → **红** |
+| `tests/packaged-install.test.ts` | 宿主产物外部导入 ⊆ `dependencies` ∪ `peerDependencies`；浏览器 `require` ⊆ seed ∪ `dsh.client`；roster 不得再写回已删除包；`files` 完整性；双面 exports + bundle patch | 把 `dsh-llm` 移出向消费者声明的字段 → **红**；roster 写回 `dsh-client-runtime` → **红**；给 `dist/client.js` 注入未声明 `require` → **红** |
 | `tests/plugin-load.test.ts`（13 项，+5） | 上述 5 组配置的真实加载 | 把未声明服务读取放回 `apply` → **红**；把 section order 改成非有限值 → **红** |
 | `e2e` 第 7 步 | packed 安装 + 真实启动 | 见上（同一机制） |
 
@@ -548,7 +515,7 @@ ctx.slots.register({ name: 'settings.plugin.item', id: NS, order: 30, … })   /
 ### R6.5 残余不确定性
 
 - 本轮修的是「注册从未发生」。卡片在浏览器里的**最终渲染**仍只有类型检查、单测与人工浏览器步骤
-  （CONTRIBUTING「Manual browser E2E」）覆盖：渲染期崩溃是下一层，需要真机打开面板才能确认。
+  （CONTRIBUTING「Browser check (the card)」）覆盖：渲染期崩溃是下一层，需要真机打开面板才能确认。
 - `key` 与宿主 namespace 的**一致性**由两处字面量共同钉住（客户端 `NS` 与 `ROUTER_SETTINGS_NAMESPACE`，
   由 `tests/client-card-slot.test.ts` 断言相等），但这仍是断言而非类型——浏览器半边无法从宿主半边导入字面量，
   要做成机械约束需要一条插件并不具备的浏览器↔宿主通道（与 §R4 的卡片运行期展示同一约束）。
@@ -602,7 +569,7 @@ ctx.slots.register({ name: 'settings.plugin.item', id: NS, order: 30, … })   /
 ### R7.4 残余不确定性
 
 - 目录内容仍在**浏览器**里渲染：本轮可验证的边界是「纯映射 + 契约形状 + e2e 的 Host 侧目录」，
-  下拉框本身的观感只有人工浏览器步骤（CONTRIBUTING「Manual browser E2E」）能看到。
+  下拉框本身的观感只有那次浏览器检查（CONTRIBUTING「Browser check (the card)」）能看到。
 - `min`/`max`/`step` 是**镜像**而非共享：客户端 bundle 不能引入 `@deepseek-ai/schemastery`
   （它不是平台 seed word），所以边界靠 parity 测试在两处定义之间对齐，而不是靠同一个常量。
 
@@ -736,9 +703,9 @@ patch 上游、升级即丢；而且 `plugin` 字段（`model-selection`）**在
 
 | Gate | 内容 | 变异自检 |
 |---|---|---|
-| `tests/route-notice.test.ts` | 纯函数：档位或模型变化 → 必发；provider 相同用短名、不同用 `provider/model`；`[shift-router]` 前缀；`summary` 受 120 字符约束；judge 无 `reason`/`confidence` 时不出现空字段；held、initial 的措辞 | 去掉前缀 → 红；去掉 provider 比较 → 红 |
+| `tests/route-notice.test.ts` | 纯函数：档位或模型变化且解析到了模型 → 必发；provider 相同用短名、不同用 `provider/model`；`[shift-router]` 前缀；`summary` 受 120 字符约束；judge 无 `reason`/`confidence` 时不出现空字段；held、initial 的措辞 | 去掉前缀 → 红；去掉 provider 比较 → 红 |
 | `tests/plugin-load.test.ts` | `agent/pre-step` 监听器返回的决定带上了 notice 消息（真上下文加载，消息形状按 harness 的 `UserMessage` 校验） | 不追加消息 → 红 |
-| `npm run test:e2e` | 真实 harness 跑一轮路由，断言会话事件流里出现 `source.plugin === 'shift-router'` 的 notice | 不写消息 → 红 |
+| `npm run test:e2e` | 真实 harness 跑一轮路由，fake adapter 见证模型请求里带上了 `[shift-router]` 消息（`notice=yes`） | 不写消息 → 红 |
 
 ### R9.5 残余不确定性
 
@@ -812,47 +779,25 @@ Node 的解析语义不变。
 
 ## 明确不对齐（附理由）
 
-| 上游特性 | 不对齐的理由 |
-|---|---|
-| pi-tui `StatusPanel` 主题面板、footer 状态栏、`ui.setStatus`、`ui.custom` | 表现层实现，绑死 pi 的终端渲染。语义（档位/成本/链健康）已按 D4 搬到 DSH 卡片 |
-| `models.json` 自定义 provider + `expandEnv`（`$VAR`/`$$`/`$!`/`!cmd`） | DSH 的 provider/凭据由 `dsh-*` 适配器与 credentials seam 负责；在插件里再造一套环境变量展开是重复实现 |
-| `pi.modelRegistry` 具体 API（`getProviderAuthStatus`/`getApiKeyForProvider`/`refresh`） | 只搬**原则**（D3：单一事实来源），用 DSH 的 `ctx.llm` 表面实现 |
-| `models-store.json` / `auth.json` / `settings.json` / 三层 JSON 配置文件 | DSH 用 settings namespace + patch overlay；文件层布局是宿主私有契约 |
-| pi-subagents 的 `runs.all`、`worktree: true`、`context:"fresh"` 的 thinking-off 规避 | DSH 的子代理/工作流原语不同（`subagent`/`subagent_fork`/`workflow`），且 C4 的授权模型也不同 |
-| `pack:check` 的 pi 包规则（`pi.extensions`、`minPiVersion`、host 包白名单） | pi 专属打包契约；只借其**意图**造 DSH 等价物（E4） |
-| `AGENTS.md` 的 pi 专属硬停规则 | 上游开发流程约束，不是产品行为 |
-| 上游文档自身的漂移（SPEC §9.1/§9.2/§7.5 过期等 10 处） | 不把上游文档的已知错误搬进来；本项目只对齐**代码行为终态** |
+规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再
+维护第二份表格——两份必然漂移。需要新增理由时写回 SPEC §16，这里只保留历史决策编号（D3/D4 等）
+的上下文，见上方各轮小节。
 
 ---
 
-## 本轮决策记录
+## 决策记录（R1–R2，仍然生效的部分）
 
 | 问题 | 决定 | 落地 |
 |---|---|---|
-| 本轮范围 | **P0 + P1**（正确性 + 决策核心），P2 编排深度另开一轮 | 见 ROADMAP「Next release」表与 Planned 表 |
-| EV 是替换还是并存 | **替换**。两套语义并存会长期污染文档与测试 | `router.ts` 只保留 EV 路径；旧规则的相关代码被删除而非保留 |
-| worker 模型注入（C4） | 按建议 (a)+(b)；(a) 需先调查跨命名空间写权限，故本轮交付 **(b)** | 启动自检 + 提示词如实描述 + SPEC §7.4；ROADMAP 登记 (a) |
-| 版本号策略 | 本项目保持**自己的发布线**，额外记录「对齐到的上游版本」 | README 顶部基线行 + ROADMAP「Upstream alignment」表 |
-| `/router on\|off` 持久性 | 保持**会话级**（DSH 语义自洽）+ 文档写明 | SPEC §10 末段、README 命令表 |
-| SDK 升级（E5） | 上一轮不做；**由 e2e 证据升级为 P2**，P2 轮已完成 | 见 R4.1 |
-| skill 0.4.0 回灌远端 | 未执行（推远端属发布动作，需显式批准） | 已安装副本 0.3.0 与远端一致，API 内容无差异；0.4.0 仅为自更新流程 |
+| EV 是替换还是并存 | **替换**。两套语义并存会长期污染文档与测试 | `router.ts` 只保留 EV 路径；旧规则的代码被删除而非保留 |
+| worker 模型注入（C4） | 按建议 (a)+(b)；本轮交付 (b)，(a) 随后以命令形式落地 | SPEC §7.4、§11；C4 现状见 R4 |
+| 版本号策略 | 本项目保持**自己的发布线**，另记「对齐到的上游版本」 | README 顶部基线行 + ROADMAP「Upstream alignment」 |
+| `/router on\|off` 持久性 | 保持**会话级**（DSH 语义自洽）+ 文档写明 | SPEC §10、README 命令表 |
 
 ---
 
-## 下一轮建议顺序（R3 更新）
+## 下一轮做什么
 
-1. **SDK 基线补齐**（E5）——先做，否则后续新代码要改两遍，且双版本风险仍在。R3 新增
-   证据：运行时是 cordis 4.0.2 + `@deepseek-ai/*` 0.1.5-rc.2，项目 pin 仍是 4.0.1 +
-   0.1.0-rc.6；把 `@deepseek-ai/dsh-tool-subagent` 纳入类型依赖后，
-   `subagentModelSelection` 就不必再靠结构化探测。
-2. **P2 编排深度**：验收审计 → 收敛协议 → 每 worker 成本归因 → C4(a) 白名单写入。
-3. **P3**：模型目录单一事实来源、配置层权威展示、覆盖率门槛、打包隔离闸（R3 已用
-   `plugin-load.test.ts` + 默认配置 e2e 覆盖了其中一半：**加载期接线**）。
-4. **R3 遗留（新增）**：
-   - `src/index.ts` **事件回调内部**仍无单测（`agent/pre-step` 清扫顺序、
-     `agent/request-error` 冷却分支）——`plugin-load.test.ts` 只覆盖加载期；
-   - `stats.ts` 置信度分桶 0.7 与若干展示截断（已按"纯展示、非部署可变"记录为可接受，
-     若追求零硬编码可改成配置或直接显示原值）；
-   - `ux.routerLogVerbose` 的实际可见性受部署是否挂日志 sink 影响，README 已如实标注；
-     若要"自带 profile 就能看到路由日志"，需要另找用户可见面（如把最近决策放进
-     `/router status`——`Last decision` 行已经承担了一部分）。
+见 [`ROADMAP.md`](ROADMAP.md) 的 **Planned** 表 —— 它是待办与状态的唯一来源，本审计不再维护
+第二份。按该表口径，R10 时仍未闭合的是：GUI（卡片按钮）形态的 worker 路由授权、v1.6.0 的价格
+单一事实来源，以及 `agent/request-error` 冷却分支的单测。

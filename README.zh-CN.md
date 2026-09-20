@@ -12,7 +12,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#开发)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -162,24 +162,14 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 - **边界**：仅 `pricing`（可选的 USD 计价表）仍由 `/router config` 或 patch 行编辑；两层模型链都可以在卡片中直接编辑。
 - **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片。
 
-#### 上游限制：Web 设置白名单（0.1.0-rc.6）
+#### 仅旧版 harness 需要：Web 设置白名单（≤ 0.1.0-rc.x）
 
-当前 Harness 的 Web API 代理（`@deepseek-ai/dsh-host-apiproxy`）**白名单**了浏览器可读写的 settings 命名空间（`WEB_SETTINGS_NAMESPACES`）；官方卡片（`shell`、`agent-loop`、`web-search-deepseek`）都在名单上，而第三方命名空间会被从浏览器的 `settings.describe` 响应中过滤掉——即使插件已在服务端注册。上游代码注释明确写着"把该决定移到 `settings.register()`（让插件自行暴露配置）是 deferred work"，且该名单不可通过配置扩展。
-
-因此要让卡片在 Web 端可见，需要把 `shift-router` 加入名单（一次性、幂等）：
-
-```sh
-npm run build
-dsh plugin --profile web add /path/to/dsh-shift-router
-node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要，见下
-# 重启 profile（client 包元数据与 apiproxy 都在进程内缓存）
-```
-
-**最后一步仅旧版 harness 需要。** 在 DeepSeek Harness **≤ 0.1.0-rc.x** 上，Web API 代理用白名单
-（`WEB_SETTINGS_NAMESPACES`）限制浏览器可读的 settings 命名空间，第三方卡片需要
-`scripts/expose-gui-settings.mjs` 把自己加入名单。从 **0.1.5-rc.2** 起该包与白名单均已移除——命名空间
-原生暴露，脚本会输出「不需要」并以 0 退出。在旧版 harness 上它会修改 profile 安装的
-`dsh-host-apiproxy/lib/index.js`（幂等；升级/重装依赖后重跑即可）。
+**0.1.0-rc.x 及更早**的 harness 会把第三方 settings 命名空间从浏览器的
+`settings.describe` 响应里过滤掉，除非它出现在 `WEB_SETTINGS_NAMESPACES` 中——这正是
+`scripts/expose-gui-settings.mjs` 存在的原因：它修改 profile 里已安装的
+`dsh-host-apiproxy`（幂等；升级依赖后重跑）。从本项目的基线 **0.1.5-rc.2** 起，该包与白名单
+**均已移除**，命名空间原生暴露，脚本会输出「不需要」并以 0 退出。该脚本不在发布包内
+（`files`），只能从源码检出获得。
 
 ## 命令
 
@@ -243,7 +233,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要�
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（12 个文件、216 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 配置注册表与 GUI 表单模型 / 白名单补丁逻辑）
+npm test            # vitest（18 个文件、336 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
 npm run typecheck
 ```
 
@@ -255,10 +245,11 @@ npm run test:e2e
 
 该脚本会建一个临时 `DSH_HOME`，把**本检出**作为 bundle 装进派生出的 `headless` profile，用假适配器跑一轮，并断言：
 
-- `ROUTER-E2E: turn ran on fake/fake-smart` —— 裁判确实跑了、EV 规则确实升级了、并且真的切换了上线模型到 Smart 层；
+- `ROUTER-E2E: turn ran on fake/fake-smart notice=yes` —— 裁判确实跑了、EV 规则确实升级了、真的切换了上线模型到 Smart 层，并且 `[shift-router]` 路由通知确实进入了模型请求（SPEC §13.1）；
 - 在 `e2e/legacy-config-overlay.yml` 下（**对齐前**配置：遗留旋钮处于旧默认值 + 已被移除的 `requireSmartModel` 键）结果相同 —— 覆盖的是**升级路径**，不只是全新安装；
 - 在 `e2e/orchestration-overlay.yml` 下结果相同 —— 使用插件的**默认**编排模式（`auto`），并挂载 web 专属的 `subagent-model-selection-settings` 行，即曾经导致启动失败的那个组合；
-- `shift-router` settings 命名空间能完成一次写入并读回（`e2e/settings-probe.mjs`）。
+- `shift-router` settings 命名空间能完成一次写入并读回，且 Host 模型目录确实广告出该部署配置的路由（`e2e/settings-probe.mjs`）；
+- **打包产物**安装（`npm pack` → tarball → 第二个 scratch profile）能带着插件启动，浏览器端被提供给 client 模块加载器，且 profile 里**没有**任何 `@deepseek-ai/*` 副本 —— 那里没有 devDependencies，因此"运行时导入了未向消费者声明的包"会在 e2e 失败，而不是在用户机器上失败。
 
 它不会碰你真实的 `DSH_HOME`，跑完自行清理（加 `--keep` 可保留现场）。手工复现：
 
@@ -271,25 +262,29 @@ DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migrat
 
 ```
 src/
-├── index.ts        # 插件入口：事件接线、按 Agent 状态、裁判、编排 section
+├── index.ts        # 插件入口：事件接线、按 Agent 状态、裁判、路由通知
 ├── config.ts       # Schemastery schema + 深合并归一化
 ├── types.ts        # 共享类型 + 默认值
 ├── router.ts       # 纯路由引擎（升级/降级/窗口/缓存感知）
 ├── judge.ts        # 基于 ctx.llm.stream() 的 LLM 裁判 + 回复解析
 ├── failover.ts     # 指数退避冷却状态机
 ├── tier.ts         # 分层模型解析 + 展示
+├── notice.ts       # 纯逻辑：路由通知正文与折叠行（SPEC §13.1）
 ├── orchestrate.ts  # 编排 prompt + 生命周期 + 上限
+├── audit.ts        # 委派运行的验收审计（非阻塞，从不作为门禁）
 ├── stats.ts        # 遥测快照（token / 成本估算 / 节省基线）
 ├── commands.ts     # /router 与 /route-force
 └── client/         # 浏览器端（GUI 设置卡片）
     ├── index.tsx       # client 入口：settings.plugin.item 槽位注册
     ├── controller.ts   # 暂存表单 → settings 作用域写（每 section 一次）
     ├── form-model.ts   # 纯逻辑：字段注册表 / 草稿解析 / 保存计划
+    ├── card-ux.ts      # 纯逻辑：阈值推导 / 链问题 / 折叠头摘要
+    ├── model-catalog.ts# Host 模型目录 → provider/model 选项
     ├── ShiftRouterCard.tsx  # 卡片组件（DSW 设计令牌）
     └── locales.ts      # zh/en 字典
 ```
 
-纯逻辑（router / failover / 裁判解析 / 编排）在隔离环境中做单元测试；DSH 接线由 headless e2e 覆盖。
+纯逻辑（router / failover / 裁判解析 / 编排 / 审计 / 路由通知 / 表单模型、卡片 UX 与目录加载）在隔离环境中做单元测试。DSH 接线分两层验证：`tests/plugin-load.test.ts` 在**真实 Cordis 上下文**中加载插件并驱动真实的 `agent/pre-step` waterfall（未声明的服务读取、非法的提示词段顺序、缺失的路由通知都会立即失败），e2e 则启动 scratch profile —— 包括打包产物与插件的默认编排模式。
 
 ## 许可证
 

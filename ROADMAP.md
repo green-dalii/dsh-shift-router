@@ -14,9 +14,10 @@ v1.6.0 while this project's own releases continued in parallel.
   project's first commit, matching upstream's task-level-orchestration release.
 - **Alignment target**: upstream **v1.6.0** (`69ffb34`, 2026-09-18).
 - **Aligned through**: upstream **v1.6.0**, for the P0 (correctness) + P1
-  (decision core) scope — **shipped in v0.6.0**; the audit halves, the
-  convergence protocol, and per-worker cost attribution remain P2 (see Planned).
-  The delivery audit is in [`ALIGNMENT.md`](ALIGNMENT.md).
+  (decision core) scope plus the P2 round — **shipped in v0.6.0**. What remains is the
+  GUI (card-button) form of worker-route authorisation and the v1.6.0 pricing
+  single-source work (see Planned). The delivery audit is in
+  [`ALIGNMENT.md`](ALIGNMENT.md).
 - The full audit, including what was deliberately **not** ported and why, lives
   in [`ALIGNMENT.md`](ALIGNMENT.md); the normative contract is
   [`SPEC.md`](SPEC.md).
@@ -28,14 +29,14 @@ v1.6.0 while this project's own releases continued in parallel.
 | v1.0.1 | custom providers via `models.json`; wizard stale-list fix | ⛔ not portable (DSH owns providers); catalog refresh tracked below |
 | v1.1.0 | orchestration actually triggers; full status-bar telemetry | ✅ adapted (`systemPrompt` section); status-bar half not portable |
 | v1.1.1 | logging hygiene; status syncs the actually-running model | ✅ shipped in v0.6.0 (route notices — R9 — replace the log ring as the user-visible surface) |
-| v1.2.0 | convergence protocol, ghost-model cleanup, `unsupported_model` failover | ✅ `unsupported_model` failover shipped in v0.6.0; convergence protocol ⏳ P2 |
-| v1.3.0 | acceptance audit (`audit.ts` + auditor prompt) | ⏳ P2 (next round) |
+| v1.2.0 | convergence protocol, ghost-model cleanup, `unsupported_model` failover | ✅ both halves shipped in v0.6.0 (failover; convergence protocol in the P2 round) |
+| v1.3.0 | acceptance audit (`audit.ts` + auditor prompt) | ✅ shipped in the P2 round (non-blocking, deterministic checks + detached LLM pass) |
 | v1.3.1 | pi-tui runtime dependency + release gates | ⛔ packaging is host-specific; the *gate* intent is tracked below |
-| v1.4.0 | **EV economics routing**, gear presets, strict model authority, doc-aware Judge, audit domain | ✅ EV + gears + strict authority + doc-aware Judge shipped in v0.6.0; audit domain ⏳ P2 |
+| v1.4.0 | **EV economics routing**, gear presets, strict model authority, doc-aware Judge, audit domain | ✅ all four shipped in v0.6.0 (audit domain in the P2 round) |
 | v1.4.1 | failover on 402 / Insufficient Balance / 余额不足 | ✅ shipped in v0.6.0 |
-| v1.4.2 | Judge-outage **hold**, retry-aware exit, cooldown-aware audit, TPS median, actual-model sync, status dashboard, `decisionTier`, explicit-tier honoured | ✅ hold / `decisionTier` / explicit-tier / actual-model sync shipped in v0.6.0; audit halves ⏳ P2; **TPS deliberately not ported** (DSH renders `tok/s` natively) |
+| v1.4.2 | Judge-outage **hold**, retry-aware exit, cooldown-aware audit, TPS median, actual-model sync, status dashboard, `decisionTier`, explicit-tier honoured | ✅ hold / `decisionTier` / explicit-tier / actual-model sync in v0.6.0, the audit halves in the P2 round; **TPS deliberately not ported** (DSH renders `tok/s` natively) |
 | v1.4.3 | Codex usage-limit failover | ✅ shipped in v0.6.0 |
-| v1.5.0 | per-worker cost attribution | ⏳ P2 (next round) |
+| v1.5.0 | per-worker cost attribution | ✅ shipped in the P2 round (bounded worker ledger, attributed from the child session) |
 | v1.5.1 | verbose logs to a file | ⛔ not needed (DSH does not hand the terminal to plugins); diagnostics use `ctx.logger` (now supplemented by route notices — see R9) |
 | v1.6.0 | model catalog from the host registry (single source of truth) | ✅ principle shipped in v0.6.0 (GUI card dropdowns — R7); the DSH-side pricing replacement is ⏳ P3 |
 
@@ -50,41 +51,6 @@ v1.6.0 while this project's own releases continued in parallel.
 | v0.5.0 | GUI card redesign per review: Shift-Router title + DSW chevron, grouped row layout, **Fast/Smart model chains in the card with DSH-catalog dropdowns**, dark-theme-safe switches, line-height normalization | ✅ |
 | v0.6.0 | **Upstream P0+P1 alignment** (EV routing, gear presets, strict model authority, doc-aware Judge, Judge-outage hold, failover on 402 / usage-limit / `unsupported_model`) + **GUI card review rounds** (R6 registration, R7 model-catalog remote + copy, R8 layout overlap + information architecture) + **runtime visibility** (R9 route notices written into the session). 336 tests / 18 files; `tsc` host + client, `tsdown` build, and `npm run test:e2e` green | ✅ |
 
-## Next release — upstream P0+P1 alignment (in progress)
-
-Scope agreed with the maintainer: **correctness fixes (P0) + decision-core
-semantics (P1)**. EV routing **replaces** the old confidence-weighted ratio.
-
-**P0 — correctness** (upstream already fixed these; the same defects were still
-live here):
-
-| Item | Upstream | This release |
-|---|---|---|
-| Judge outage must HOLD, never fabricate a fast verdict | v1.4.2 | ✅ |
-| Failover signatures: 402 / insufficient balance / 余额不足 | v1.4.1 | ✅ |
-| Failover signatures: usage-limit exhaustion (no HTTP status) | v1.4.3 | ✅ |
-| Failover signatures: `unsupported_model` / `model_not_found` | v1.2.0 | ✅ |
-| Display syncs the **actually running** model | v1.4.2 (Bug B) | ✅ |
-| Strict model authority (tier change recorded even for a shared model id) | v1.4.0 | ✅ |
-| Explicit tier/gear requests honoured (Judge ≥0.9 + `decisionTier`) | v1.4.2 | ✅ |
-| Escalation counts **consecutive** worker failures | v1.2.0 | ✅ |
-| Rounds counted at **dispatch** (`tools/pre-execute`), not at result | v1.2.0 | ✅ **deliberate divergence**: a dispatched delegation has already spent budget, so counting it keeps `maxRounds` a true ceiling on delegations attempted. Upstream counts at result, which lets an aborted call slip past the cap. |
-| Orchestration state leaked by an interrupted turn is swept | v1.4.2 (B1 analogue) | ✅ (sweep at turn start; in-turn retry means the upstream "retryable tail" hazard cannot occur here) |
-| ~~TPS median + 50 ms guard, turn-scoped fallback~~ | v1.4.2 | ⛔ **not ported** — DSH renders `tok/s` natively from decode time; the plugin's duplicated TPS machinery is **removed** instead |
-
-**P1 — decision core:**
-
-| Item | Upstream | This release |
-|---|---|---|
-| EV economics: θ = 1/R, `pSmart`, `downgradeMemory` (replaces the vote-counting window) | v1.4.0 | ✅ |
-| `decisionTier` as the single "which tier runs this turn" signal | v1.4.2 | ✅ |
-| Gear presets `/router eco|default|sport`, persisted | v1.4.0 | ✅ |
-| Cache-aware as a θ divisor (`sameFamilyPenalty`) + legacy migration | v1.4.0 | ✅ |
-| Judge prompt gains the 4th key `orchestrate`; explicit intent ≥0.9; doc-aware rules | v1.3.0–v1.4.2 | ✅ |
-| Judge `orchestrate` signal gates orchestration entry | v1.1.0 | ✅ |
-| **Worker model injection** (upstream calls tier injection mandatory) | v1.0.0+ | 🟡 documented + optional-service self-check + `/router status` line this release; GUI-assisted authorisation of the host `subagent-model-selection` allowlist is next ([decision](ALIGNMENT.md): option (a)+(b)). The self-check first shipped reading an undeclared service, which aborted the boot — corrected in the installation-verification round (ALIGNMENT §R3) |
-| Removed `orchestration.requireSmartModel` | — | ✅ (deliberate divergence: `decisionTier` makes it redundant, and the knob could only force the CTO prompt onto a Fast run) |
-
 ## Installation verification round (delivered)
 
 A real install into a `web` profile failed to boot; the round that fixed it is
@@ -93,7 +59,7 @@ baseline, permanently:
 
 | Item | Status |
 |---|---|
-| Plugin loads against a **real Cordis context** with the real `inject` gate (`tests/plugin-load.test.ts`): service absent / early / late (mount race) / authorised, plus prompt-section order and variables | ✅ 8 tests |
+| Plugin loads against a **real Cordis context** with the real `inject` gate (`tests/plugin-load.test.ts`): service absent / early / late (mount race) / authorised, plus prompt-section order, variables and a driven `agent/pre-step` turn | ✅ |
 | E2E covers the plugin's **default** orchestration mode with the web-only `subagent-model-selection-settings` row mounted | ✅ `e2e/orchestration-overlay.yml` |
 | The upgrade-path fixture mirrors a **real** pre-alignment profile (it previously pinned `orchestration.mode: off`, which is how the boot bug escaped) | ✅ `e2e/legacy-config-overlay.yml` |
 | Gates were **mutation-verified**: reverting the fix makes 3 unit tests and 2 E2E scenarios fail | ✅ |
@@ -175,10 +141,8 @@ this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| Orchestration acceptance audit (`audit.ts` + auditor prompt, delegated-turn domain, never blocks) | P2 | upstream v1.3.0/v1.4.0/v1.4.2 |
-| Convergence protocol + escalation takeover in the orchestrator prompt | P2 | upstream v1.2.0/v1.3.0 |
-| Per-worker cost attribution (`orchestration $X (N workers)`) | P2 | upstream v1.5.0 |
-| GUI-assisted worker route authorisation (`subagent-model-selection`) | P2 | DSH-specific; see `ALIGNMENT.md` C4 |
+| Orchestration acceptance audit, convergence protocol, per-worker cost attribution | ~~P2~~ | ✅ delivered in the P2 round (see that section) |
+| GUI-assisted worker route authorisation (`subagent-model-selection`) | P2 | DSH-specific; the command form shipped as `/router allow-workers`, the card-button form is open (see `ALIGNMENT.md` C4) |
 | Cross-turn orchestration lifecycle / parallel specialised workers | P3 | upstream is still Phase 3 (not implemented there either) |
 | Tool-result classification as a Judge input signal | P3 | upstream: TBD |
 | GUI: `pricing` list-of-record editor | P3 | needs list-of-record form support |
@@ -187,28 +151,19 @@ this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13
 | Config-layer authority display | P3 | upstream v1.4.2; DSH analogue = settings namespace + patch layers |
 | Examples directory (frontend / ML / cross-provider cost-saving configs) | ongoing | upstream line |
 | CI + coverage thresholds (≥90% lines/functions/statements, ≥85% branches on core modules) | P3 | upstream gate |
-| ~~Packaged-install verification gate~~ | ~~P3~~ | ✅ delivered: `tests/packaged-install.test.ts` (built-artifact imports ⊆ `dependencies`, browser requires ⊆ platform seed ∪ `dsh.client`, `files` completeness) + an `npm pack` → install → **boot** scenario in `npm run test:e2e` |
-| Unit tests for `src/index.ts` **event-callback bodies** (sweep order, `agent/request-error` cooldown branches, `agent/request` rewrite) | P3 | the installation-verification round covered **load-time** wiring only; these run per turn |
+| ~~Packaged-install verification gate~~ | ~~P3~~ | ✅ delivered: `tests/packaged-install.test.ts` (built-artifact imports ⊆ `dependencies` ∪ `peerDependencies`, browser requires ⊆ platform seed ∪ `dsh.client`, `files` completeness) + an `npm pack` → install → **boot** scenario in `npm run test:e2e` |
+| Unit tests for `src/index.ts` **event-callback bodies** | P3 | the load-safety and `agent/pre-step` paths are covered; the remaining branches are the `agent/request-error` cooldown ladder and the `agent/request` rewrite |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
 
 
 ## Explicitly excluded (by design)
 
-Aligned with the original's non-goals (pi SPEC §0) and DSH constraints:
-
-- **3-tier routing** — execution vs judgment is the only meaningful axis.
-- **Keyword/custom rules** — the LLM Judge is the sole classifier. (Upstream
-  briefly shipped an `EXPLICIT_ORCH_RE` keyword gate in v1.3.0 and removed it
-  again in v1.4.2; this project never had one and will not add one.)
-- **USD budget cap** — a routing layer, not a billing layer. (The orchestration
-  loop guard is a cap on rounds/escalations, not a monetised budget.)
-- **Heuristic Judge fallback** — the Judge either returns or holds position.
-- **Cross-session persistent state** — router state stays per-agent and
-  in-memory.
-- **Local ML / ONNX inference** — a different design space.
-- **Runtime npm dependencies** — zero runtime deps beyond DSH's own services.
-- **A plugin-side throughput indicator** — DSH owns `tok/s` (see the alignment
-  table above).
+The non-goals are normative and live in one place: **SPEC §0** (design non-goals)
+and **SPEC §16** (upstream mechanisms deliberately not ported, each with its
+reason). One is repeated here only because it is the upstream feature most likely
+to be re-proposed: a **plugin-side throughput indicator** — DSH renders `tok/s`
+natively from decode time, so porting it would duplicate the harness with a worse
+number.
 
 ## See also
 
