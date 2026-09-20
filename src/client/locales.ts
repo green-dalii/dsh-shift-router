@@ -109,7 +109,25 @@ export type ShiftRouterCardKey =
   | 'modelCustom'
   | 'modelLoading'
   | 'modelCatalogFailed'
+  | 'modelCatalogUnavailable'
+  | 'modelCatalogReason'
   | 'modelCurrent'
+  | 'modelPrimary'
+  | 'modelFallback'
+  | 'modelPickProvider'
+  | 'modelProviderUnavailable'
+  | 'moveUp'
+  | 'moveDown'
+  | 'tierFast'
+  | 'tierSmart'
+  | 'chainEmptyTier'
+  | 'chainDuplicateRoute'
+  | 'chainSharedPrimary'
+  | 'legacyField'
+  | 'thresholdHint'
+  | 'summaryDisabled'
+  | 'summaryMode'
+  | 'summaryChains'
 
 export type ShiftRouterCardDict = Record<ShiftRouterCardKey, string>
 
@@ -215,8 +233,26 @@ export const en: ShiftRouterCardDict = {
   noModels: 'No models yet — add the first one.',
   modelCustom: 'Custom…',
   modelLoading: 'Loading configured models…',
-  modelCatalogFailed: 'Could not load the configured models — fill them in by hand.',
+  modelCatalogFailed: 'Could not load the configured models — enter them manually.',
+  modelCatalogUnavailable: 'This shell does not expose the model catalog — enter models manually.',
+  modelCatalogReason: 'Reason: {message}',
   modelCurrent: 'current',
+  modelPrimary: 'Primary',
+  modelFallback: 'Fallback {n}',
+  modelPickProvider: 'Choose a provider…',
+  modelProviderUnavailable: '{provider} could not list its models ({message}) — enter the model id by hand.',
+  moveUp: 'Move up',
+  moveDown: 'Move down',
+  tierFast: 'Fast',
+  tierSmart: 'Smart',
+  chainEmptyTier: 'No {tier} model: that tier is disabled.',
+  chainDuplicateRoute: '{tier} lists {route} twice; the repeat never runs.',
+  chainSharedPrimary: 'Fast and Smart start on the same model, so the router cannot switch between them.',
+  legacyField: 'Accepted but ignored',
+  thresholdHint: 'θ ≈ {theta} — the Judge confidence at which the Smart tier is used.',
+  summaryDisabled: 'disabled',
+  summaryMode: '{mode} mode',
+  summaryChains: 'Fast {fast} · Smart {smart}',
 }
 
 /** Simplified Chinese copy. */
@@ -322,5 +358,23 @@ export const zh: ShiftRouterCardDict = {
   modelCustom: '自定义…',
   modelLoading: '正在加载已配置的模型…',
   modelCatalogFailed: '无法加载已配置的模型，请手动填写。',
+  modelCatalogUnavailable: '当前 shell 未提供模型目录，请手动填写模型。',
+  modelCatalogReason: '原因：{message}',
   modelCurrent: '当前',
+  modelPrimary: '主选',
+  modelFallback: '备选 {n}',
+  modelPickProvider: '请选择 provider…',
+  modelProviderUnavailable: '{provider} 无法列出模型（{message}），请手动填写模型 id。',
+  moveUp: '上移',
+  moveDown: '下移',
+  tierFast: 'Fast 档',
+  tierSmart: 'Smart 档',
+  chainEmptyTier: '{tier}没有任何模型：该档位等于关闭。',
+  chainDuplicateRoute: '{tier}重复列出 {route}，重复项永远不会被执行。',
+  chainSharedPrimary: 'Fast 与 Smart 的首选模型相同，路由器无法在两档之间切换。',
+  legacyField: '已被接受但会被忽略',
+  thresholdHint: 'θ ≈ {theta} —— Judge 置信度达到该值才走 Smart 档。',
+  summaryDisabled: '已禁用',
+  summaryMode: '{mode} 模式',
+  summaryChains: 'Fast {fast} · Smart {smart}',
 }

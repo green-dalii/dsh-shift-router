@@ -481,3 +481,54 @@ describe('CARD_FIELDS against the built config', () => {
     ])
   })
 })
+
+// ─── control bounds ↔ schema parity ───────────────────────────────────
+
+describe('numeric control bounds mirror the config schema', () => {
+  /**
+   * The card's number inputs carry `min`/`max`/`step` so the browser refuses what
+   * the Host would refuse anyway. The bundle cannot import the schema
+   * (schemastery is not a platform seed word), so the two definitions are pinned
+   * here by BEHAVIOUR: each declared bound must be exactly the schema's
+   * accept/reject boundary (ALIGNMENT §R7).
+   */
+  const numeric = CARD_FIELDS.filter((field) => field.type === 'number' && (field.min !== undefined || field.max !== undefined))
+
+  /** Validate a config carrying exactly one leaf at the given path. */
+  function validateLeaf(path: string, value: number): boolean {
+    const standard = (Config as unknown as {
+      '~standard': { validate(value: unknown): { value: unknown } | { issues: { message: string }[] } }
+    })['~standard']
+    const config: Record<string, unknown> = {}
+    setPath(config, path, value)
+    return !('issues' in standard.validate(config))
+  }
+
+  it('covers every numeric field that declares a bound', () => {
+    expect(numeric.length).toBeGreaterThan(15)
+  })
+
+  it('accepts each declared minimum and rejects just below it', () => {
+    for (const field of numeric) {
+      if (field.min === undefined) continue
+      const step = field.step ?? 1
+      expect(validateLeaf(field.path, field.min), `${field.path} must accept its min (${field.min})`).toBe(true)
+      expect(validateLeaf(field.path, field.min - step), `${field.path} must reject ${field.min - step}`).toBe(false)
+    }
+  })
+
+  it('accepts each declared maximum and rejects just above it', () => {
+    for (const field of numeric) {
+      if (field.max === undefined) continue
+      const step = field.step ?? 1
+      expect(validateLeaf(field.path, field.max), `${field.path} must accept its max (${field.max})`).toBe(true)
+      expect(validateLeaf(field.path, field.max + step), `${field.path} must reject ${field.max + step}`).toBe(false)
+    }
+  })
+
+  it('uses a positive step so the browser control can reach each other value', () => {
+    for (const field of numeric) {
+      expect(field.step ?? 1, `${field.path} step`).toBeGreaterThan(0)
+    }
+  })
+})

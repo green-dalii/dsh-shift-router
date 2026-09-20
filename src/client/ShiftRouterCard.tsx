@@ -23,7 +23,15 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import { CARD_FIELDS, CARD_SECTIONS, type CardField, type ModelRow } from './form-model.js'
 import type { FieldState, ShiftRouterCardFace } from './controller.js'
-import type { CatalogEntry, ModelCatalog } from './model-catalog.js'
+import { CATALOG_UNAVAILABLE, type CatalogEntry, type ModelCatalog } from './model-catalog.js'
+import {
+  chainProblems,
+  chainView,
+  duplicateRoutes,
+  effectiveThreshold,
+  summaryFacts,
+  type ChainProblem,
+} from './card-ux.js'
 import type { ShiftRouterCardKey } from './locales.js'
 
 /** Composed props the section host injects into this card. */
@@ -100,6 +108,23 @@ const name: CSSProperties = {
   fontSize: 15,
   fontWeight: 600,
   lineHeight: 1.35,
+}
+const summary: CSSProperties = {
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 6,
+  marginTop: 2,
+  display: 'flex',
+}
+const summaryChip: CSSProperties = {
+  whiteSpace: 'nowrap',
+  border: '1px solid var(--dsw-alias-border-l2)',
+  color: 'var(--dsw-alias-label-secondary)',
+  borderRadius: 999,
+  padding: '0 7px',
+  fontSize: 11,
+  fontWeight: 500,
+  lineHeight: '18px',
 }
 const description: CSSProperties = {
   color: 'var(--dsw-alias-label-tertiary)',
@@ -333,11 +358,6 @@ const modelRow: CSSProperties = {
   gap: 8,
   display: 'grid',
 }
-const modelIndex: CSSProperties = {
-  color: 'var(--dsw-alias-label-tertiary)',
-  textAlign: 'center',
-  fontSize: 12,
-}
 const rowInput: CSSProperties = {
   ...input,
   width: '100%',
@@ -386,6 +406,60 @@ const modelEmpty: CSSProperties = {
   margin: 0,
   fontSize: 12,
   lineHeight: 1.4,
+}
+const roleBadge: CSSProperties = {
+  ...badge,
+  justifySelf: 'start',
+}
+const rowActions: CSSProperties = {
+  alignItems: 'center',
+  gap: 2,
+  display: 'inline-flex',
+}
+const smallIconBtn: CSSProperties = {
+  ...iconBtn,
+  width: 24,
+  height: 24,
+}
+const smallIconBtnDisabled: CSSProperties = {
+  ...smallIconBtn,
+  color: 'var(--dsw-alias-label-quaternary)',
+  cursor: 'default',
+}
+
+// ── Inline notices (the facts that used to be startup log lines) ───────
+const notice: CSSProperties = {
+  border: '1px solid var(--dsw-alias-border-l2)',
+  background: 'var(--dsw-alias-bg-module-platform)',
+  borderRadius: 8,
+  padding: '8px 10px',
+  margin: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+}
+const noticeLine: CSSProperties = {
+  color: 'var(--dsw-alias-label-secondary)',
+  margin: 0,
+  fontSize: 12,
+  lineHeight: 1.45,
+}
+const rowNotice: CSSProperties = {
+  ...noticeLine,
+  gridColumn: '2 / -1',
+  color: 'var(--dsw-alias-label-tertiary)',
+}
+const duplicateNotice: CSSProperties = {
+  ...rowNotice,
+  color: 'var(--dsw-alias-label-error)',
+}
+const legacyChip: CSSProperties = {
+  ...badge,
+  color: 'var(--dsw-alias-label-tertiary)',
+}
+const derivedHint: CSSProperties = {
+  ...hint,
+  color: 'var(--dsw-alias-label-secondary)',
 }
 
 // ── Footer ────────────────────────────────────────────────────────────
@@ -452,6 +526,8 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
 
   const stateByPath = new Map(state.fields.map((field) => [field.path, field]))
   const blocked = !state.dirty || state.invalid || state.saving
+  const facts = summaryFacts(stateByPath)
+  const problems = chainProblems(chainView(stateByPath))
 
   return (
     <li style={card} className={open ? 'sr-card sr-cardOpen' : 'sr-card'}>
@@ -466,6 +542,13 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
         <span style={headText}>
           <span style={name}>{t('title')}</span>
           <span style={description}>{t('description')}</span>
+          {/* The collapsed card answers "what is set?" without being expanded. */}
+          <span style={summary}>
+            <span style={summaryChip}>
+              {facts.enabled ? t('summaryMode', { mode: facts.mode ?? 'auto' }) : t('summaryDisabled')}
+            </span>
+            <span style={summaryChip}>{t('summaryChains', { fast: facts.fast, smart: facts.smart })}</span>
+          </span>
         </span>
         {state.dirty ? <span style={pending}>{t('unsaved')}</span> : null}
         <span style={{ ...chevron, transform: open ? 'rotate(180deg)' : undefined }}>
@@ -489,6 +572,9 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
                   ) : null}
                 </header>
                 <div style={sectionBody}>
+                  {section.id === 'models' ? (
+                    <ChainNotices problems={problems} catalog={state.catalog} t={t} />
+                  ) : null}
                   <SectionFields
                     fields={sectionFields}
                     stateByPath={stateByPath}
@@ -515,6 +601,46 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
         </div>
       ) : null}
     </li>
+  )
+}
+
+interface ChainNoticesProps {
+  problems: readonly ChainProblem[]
+  catalog: ModelCatalog
+  t: Translate<ShiftRouterCardKey>
+}
+
+/** One localized sentence per chain problem. */
+function problemText(problem: ChainProblem, t: Translate<ShiftRouterCardKey>): string {
+  switch (problem.kind) {
+    case 'empty-tier':
+      return t('chainEmptyTier', { tier: t(problem.tier === 'fast' ? 'tierFast' : 'tierSmart') })
+    case 'shared-primary':
+      return t('chainSharedPrimary')
+  }
+}
+
+/**
+ * The facts about the model configuration that a stock profile cannot show as
+ * logs: whether the catalog is even available, and what is wrong with the chains.
+ */
+function ChainNotices(props: ChainNoticesProps): ReactNode {
+  const { problems, catalog, t } = props
+  const lines: string[] = []
+  if (catalog.status === 'loading') {
+    lines.push(t('modelLoading'))
+  } else if (catalog.status === 'failed') {
+    lines.push(catalog.error === CATALOG_UNAVAILABLE ? t('modelCatalogUnavailable') : t('modelCatalogFailed'))
+    if (catalog.error !== undefined && catalog.error !== CATALOG_UNAVAILABLE) {
+      lines.push(t('modelCatalogReason', { message: catalog.error }))
+    }
+  }
+  for (const problem of problems) lines.push(problemText(problem, t))
+  if (lines.length === 0) return null
+  return (
+    <div style={notice} role="status">
+      {lines.map((line) => <p key={line} style={noticeLine}>{line}</p>)}
+    </div>
   )
 }
 
@@ -563,6 +689,7 @@ function FieldRow(props: FieldRowProps): ReactNode {
   const overridden = fieldState?.overridden ?? false
   const invalid = fieldState?.invalid ?? false
   const id = `shift-router-${field.path.replaceAll('.', '-')}`
+  const theta = thresholdHint(field, stateByPath)
 
   if (field.type === 'models') {
     return (
@@ -633,8 +760,13 @@ function FieldRow(props: FieldRowProps): ReactNode {
         <input
           id={id}
           className="sr-input"
-          type="text"
-          inputMode="numeric"
+          // The browser enforces the schema's own bounds, so an out-of-range
+          // value is corrected at the control instead of at save time.
+          type="number"
+          inputMode="decimal"
+          min={field.min}
+          max={field.max}
+          step={field.step ?? 1}
           style={controlStyle}
           value={text}
           placeholder={t('invalidNumber')}
@@ -660,8 +792,10 @@ function FieldRow(props: FieldRowProps): ReactNode {
             ? t('invalidNumber')
             : t(field.hintKey as ShiftRouterCardKey)}
         </p>
+        {theta !== undefined ? <p style={derivedHint}>{t('thresholdHint', { theta })}</p> : null}
       </div>
       <div style={controlCell}>
+        {field.legacy ? <span style={legacyChip}>{t('legacyField')}</span> : null}
         {overridden ? (
           <span style={badges}>
             <span style={badge}>{t('overridden')}</span>
@@ -674,6 +808,26 @@ function FieldRow(props: FieldRowProps): ReactNode {
       </div>
     </div>
   )
+}
+
+/**
+ * The threshold the economics fields imply, on the two fields that decide it.
+ *
+ * A preset wins over the raw penalty because that is what the router does, so
+ * both rows say the same thing instead of the preset row silently overriding the
+ * number the user typed.
+ * @param field - the field being rendered.
+ * @param stateByPath - the card's per-field state (staged edits included).
+ * @returns θ to two decimals, or undefined when this field is not one of them.
+ */
+function thresholdHint(field: CardField, stateByPath: Map<string, FieldState | undefined>): string | undefined {
+  if (field.path !== 'routing.economics.reworkPenalty' && field.path !== 'routing.economics.mode') {
+    return undefined
+  }
+  const mode = stateByPath.get('routing.economics.mode')?.text ?? ''
+  const penalty = Number(stateByPath.get('routing.economics.reworkPenalty')?.text ?? '')
+  const theta = effectiveThreshold({ mode, reworkPenalty: penalty })
+  return theta === undefined ? undefined : theta.toFixed(2)
 }
 
 interface ModelEditorProps {
@@ -708,12 +862,13 @@ function catalogOptions(
 }
 
 /**
- * The tier model-chain editor: ordered rows of provider/model with add/remove.
+ * The tier model-chain editor: ordered rows of provider/model with add, remove
+ * and reorder.
  *
- * Provider and model are dropdowns sourced from the deployment's configured
- * model catalog (`api.llm.models`); picking "Custom…" swaps the control for a
- * free-text input. While the catalog loads or after a failure, rows fall back
- * to free-text inputs so configuration never blocks.
+ * Provider and model are dropdowns sourced from the deployment's own model
+ * catalog (SPEC §12.2); "Custom…" swaps one control for a free-text input for a
+ * route the Host cannot enumerate, and a provider that failed to list its models
+ * says so in the row instead of silently offering nothing.
  */
 function ModelEditor(props: ModelEditorProps): ReactNode {
   const { field, fieldState, catalog, t, disabled, editRows } = props
@@ -722,15 +877,33 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
   const [customProvider, setCustomProvider] = useState<Set<number>>(new Set())
   const [customModel, setCustomModel] = useState<Set<number>>(new Set())
   const catalogReady = catalog.status === 'ready'
+  const repeated = duplicateRoutes(rows)
+  const tier = t(field.path.startsWith('tiers.fast') ? 'tierFast' : 'tierSmart')
 
   const updateRow = (index: number, patch: Partial<ModelRow>): void => {
     editRows(field.path, rows.map((row, i) => i === index ? { ...row, ...patch } : row))
   }
   const removeRow = (index: number): void => {
+    // The "Custom…" flags are per row index, so any structural change clears
+    // them rather than letting them drift onto a different row.
+    setCustomProvider(new Set())
+    setCustomModel(new Set())
     editRows(field.path, rows.filter((_, i) => i !== index))
   }
   const addRow = (): void => {
     editRows(field.path, [...rows, { provider: '', model: '', priority: rows.length + 1 }])
+  }
+  const moveRow = (index: number, delta: -1 | 1): void => {
+    const target = index + delta
+    const moved = rows[index]
+    const displaced = rows[target]
+    if (moved === undefined || displaced === undefined) return
+    setCustomProvider(new Set())
+    setCustomModel(new Set())
+    const next = [...rows]
+    next[index] = displaced
+    next[target] = moved
+    editRows(field.path, next)
   }
   const toggleCustom = (setter: (updater: (prev: Set<number>) => Set<number>) => void, index: number): void => {
     setter((prev) => {
@@ -749,19 +922,25 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
             const providerSelect = catalogReady && !customProvider.has(index)
             const providerModels = catalog.modelsByProvider[row.provider] ?? []
             const modelSelect = catalogReady && !customModel.has(index) && providerModels.length > 0
+            const failure = catalog.failures.find((candidate) => candidate.id === row.provider)
+            const route = `${row.provider}/${row.model}`
+            const duplicated = row.provider !== '' && row.model !== '' && repeated.has(route)
+            const rowLabel = `${t(field.labelKey as ShiftRouterCardKey)} ${index + 1}`
             return (
               <div key={index} style={modelRow}>
-                <span style={modelIndex}>{index + 1}</span>
+                <span style={roleBadge}>
+                  {index === 0 ? t('modelPrimary') : t('modelFallback', { n: index })}
+                </span>
                 {providerSelect ? (
                   <select
                     className="sr-select sr-input"
                     style={rowInput}
                     value={row.provider}
                     disabled={disabled}
-                    aria-label={`${t(field.labelKey as ShiftRouterCardKey)} ${index + 1} ${t('modelProvider')}`}
+                    aria-label={`${rowLabel} ${t('modelProvider')}`}
                     onChange={(event) => {
                       if (event.target.value === CUSTOM) toggleCustom(setCustomProvider, index)
-                      else updateRow(index, { provider: event.target.value })
+                      else updateRow(index, { provider: event.target.value, model: '' })
                     }}
                   >
                     {catalogOptions(catalog.providers, row.provider, t('modelProvider'), t).map((option) => (
@@ -776,7 +955,7 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
                     value={row.provider}
                     placeholder={t('modelProvider')}
                     disabled={disabled}
-                    aria-label={`${t(field.labelKey as ShiftRouterCardKey)} ${index + 1} ${t('modelProvider')}`}
+                    aria-label={`${rowLabel} ${t('modelProvider')}`}
                     onChange={(event) => updateRow(index, { provider: event.target.value })}
                   />
                 )}
@@ -786,7 +965,7 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
                     style={invalid ? rowInputInvalid : rowInput}
                     value={row.model}
                     disabled={disabled}
-                    aria-label={`${t(field.labelKey as ShiftRouterCardKey)} ${index + 1} ${t('modelName')}`}
+                    aria-label={`${rowLabel} ${t('modelName')}`}
                     onChange={(event) => {
                       if (event.target.value === CUSTOM) toggleCustom(setCustomModel, index)
                       else updateRow(index, { model: event.target.value })
@@ -802,25 +981,59 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
                     className="sr-input"
                     style={invalid ? rowInputInvalid : rowInput}
                     value={row.model}
-                    placeholder={t('modelName')}
-                    disabled={disabled}
-                    aria-label={`${t(field.labelKey as ShiftRouterCardKey)} ${index + 1} ${t('modelName')}`}
+                    placeholder={row.provider === '' ? t('modelPickProvider') : t('modelName')}
+                    disabled={disabled || (row.provider === '' && providerSelect)}
+                    aria-label={`${rowLabel} ${t('modelName')}`}
                     onChange={(event) => updateRow(index, { model: event.target.value })}
                   />
                 )}
-                <button
-                  type="button"
-                  className="sr-iconBtn sr-iconBtnDanger"
-                  style={iconBtn}
-                  disabled={disabled}
-                  aria-label={t('removeModel')}
-                  title={t('removeModel')}
-                  onClick={() => removeRow(index)}
-                >
-                  <svg width={14} height={14} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </button>
+                <span style={rowActions}>
+                  <button
+                    type="button"
+                    className="sr-iconBtn"
+                    style={index === 0 ? smallIconBtnDisabled : smallIconBtn}
+                    disabled={disabled || index === 0}
+                    aria-label={`${t('moveUp')}: ${rowLabel}`}
+                    title={t('moveUp')}
+                    onClick={() => moveRow(index, -1)}
+                  >
+                    <ArrowIcon direction="up" />
+                  </button>
+                  <button
+                    type="button"
+                    className="sr-iconBtn"
+                    style={index === rows.length - 1 ? smallIconBtnDisabled : smallIconBtn}
+                    disabled={disabled || index === rows.length - 1}
+                    aria-label={`${t('moveDown')}: ${rowLabel}`}
+                    title={t('moveDown')}
+                    onClick={() => moveRow(index, 1)}
+                  >
+                    <ArrowIcon direction="down" />
+                  </button>
+                  <button
+                    type="button"
+                    className="sr-iconBtn sr-iconBtnDanger"
+                    style={smallIconBtn}
+                    disabled={disabled}
+                    aria-label={`${t('removeModel')}: ${rowLabel}`}
+                    title={t('removeModel')}
+                    onClick={() => removeRow(index)}
+                  >
+                    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </span>
+                {failure !== undefined ? (
+                  <p style={rowNotice} role="status">
+                    {t('modelProviderUnavailable', { provider: failure.name, message: failure.message })}
+                  </p>
+                ) : null}
+                {duplicated ? (
+                  <p style={duplicateNotice} role="status">
+                    {t('chainDuplicateRoute', { tier, route })}
+                  </p>
+                ) : null}
               </div>
             )
           })}
@@ -828,8 +1041,6 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
       ) : (
         <p style={modelEmpty}>{t('noModels')}</p>
       )}
-      {catalog.status === 'loading' ? <p style={hint}>{t('modelLoading')}</p> : null}
-      {catalog.status === 'failed' ? <p style={hint}>{t('modelCatalogFailed')}</p> : null}
       <button type="button" className="sr-addModel" style={addModel} disabled={disabled} onClick={addRow}>
         <svg width={12} height={12} viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <path d="M6 2.5V9.5M2.5 6H9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -837,5 +1048,22 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
         {t('addModel')}
       </button>
     </div>
+  )
+}
+
+/** The move-up/move-down glyph (a thin chevron, matching the host's icon weight). */
+function ArrowIcon({ direction }: { direction: 'up' | 'down' }): ReactNode {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 14 14"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={direction === 'down' ? { transform: 'rotate(180deg)' } : undefined}
+    >
+      <path d="M3.5 8.75L7 5.25L10.5 8.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }
