@@ -432,7 +432,10 @@ R4 的目标是把「编排能跑」做成「编排可信」，并把上一轮�
 
 ### R4.3 交付核对
 
-（逐项在实现与验证完成后填入——本节在 R4 结束前保持"进行中"）
+| ID | 交付 | 证据 |
+|---|---|---|
+| **C3** | `OrchestrationState` 增 `spawned`/`done`/`spend`/`workerSpends`；`recordWorkerSpend` 按 **child session** 归并（一个 worker 一行）；`session/event` 在 `header.origin === 'subagent'` 分支用 `header.parentSession` 精确定位父任务并按其**实际运行的模型**计价；`/router status` 增 `Orchestration spend: $X · N/M workers reported` | `orchestrate.test.ts`（归并、上限丢最旧、`spend` 与账本解耦、elapsed 保留、格式化）；`commands-handler.test.ts`（状态行）；`config.test.ts`（默认 20） |
+| **C5** | `orchestration.maxSpendUsd`（默认 0=关闭）接入 `capHit`；新增 `capReason()` 作为"哪个帽触发"的唯一权威，deny 理由与提示词收尾通知共用 | `orchestrate.test.ts`（默认关闭、达阈值触发、多帽原因只列已触发者）；`config.test.ts`（负数报错） |
 
 ---
 

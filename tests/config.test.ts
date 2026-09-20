@@ -126,3 +126,19 @@ describe('Config schema', () => {
     }
   })
 })
+
+describe('orchestration cost knobs (C3/C5)', () => {
+  it('defaults to no budget guard and a 20-row worker ledger', () => {
+    const resolved = (validate({}) as { value: { orchestration: Record<string, unknown> } }).value
+    // 0 = the guard is OFF: a routing layer must not impose a monetary cap
+    // unless the deployment asks for one (and with no pricing table the spend
+    // is legitimately 0, so a default-on cap would be inert anyway).
+    expect(resolved.orchestration.maxSpendUsd).toBe(0)
+    expect(resolved.orchestration.workerLedgerCap).toBe(20)
+  })
+
+  it('rejects a negative budget loudly', () => {
+    const result = validate({ orchestration: { maxSpendUsd: -1 } }) as { issues?: { message: string }[] }
+    expect(result.issues?.length).toBeGreaterThan(0)
+  })
+})

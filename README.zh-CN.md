@@ -123,6 +123,8 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `orchestration.mode` | `auto` | `auto`：复杂任务 → Smart CTO；`off`：仅普通双层路由 |
 | `orchestration.maxRounds` | `3` | 委派→审查轮次硬上限（**强制执行**：每次 subagent 委派计一轮；触顶后拒绝 subagent 工具） |
 | `orchestration.escalationThreshold` | `2` | **连续**工作代理失败计一次升级；工作代理成功会清零连击。达到上限后 Smart 必须亲自接管，且 subagent 工具被拒绝（**强制执行**） |
+| `orchestration.maxSpendUsd` | `0` | 单个编排任务的硬预算（USD）；`0` 表示不启用。它是 `capHit` 的一部分，触顶即拒绝继续委派。需要 `pricing` 才有意义——未配置定价时花费合理地保持为 0 |
+| `orchestration.workerLedgerCap` | `20` | 状态报告保留的每 worker 成本行数（超出丢最旧）。任务总额是权威值、不受影响 |
 | `failover.baseMs` | `60000` | 5xx 失败的冷却基础延迟（1 分钟） |
 | `failover.maxMs` | `21600000` | 退避阶梯硬上限（6 小时） |
 | `failover.startAttempts4xx` | `3` | 4xx（429/402/配额）失败从该尝试次数起步（16 分钟），客户端限流通常比服务端抖动更持久 |
@@ -215,7 +217,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要�
 1. **自检** —— 当编排开启且 Fast 链非空时，报告模型可选委派不可用，指明需要启用的设置并说明后果。有两个界面，因为第一个并非总是可达：`ctx.logger` 告警（仅挂载了日志导出器的部署可见），以及 `/router status` 的 `Worker delegation:` 行（始终可见）。该白名单服务只由 `web` 组合挂载，因此在 `headless` 下该行显示 `unavailable on this harness`。
 2. **如实描述** —— 编排提示词告知 CTO：工作代理的模型来自 harness 白名单，下方列出的 Fast 链是部署**应当**已授权的路由。
 
-硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；**连续**失败（`isError`）的 subagent 结果推进连击，达到 `orchestration.escalationThreshold` 时递增 `orchestration.escalations` 并清零连击（工作代理成功同样清零，因此偶发失败不会烧掉上限）。一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）。
+硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；**连续**失败（`isError`）的 subagent 结果推进连击，达到 `orchestration.escalationThreshold` 时递增 `orchestration.escalations` 并清零连击（工作代理成功同样清零，因此偶发失败不会烧掉上限）。`capHit()` 还覆盖可选预算（`orchestration.maxSpendUsd`），并说明具体是哪一顶帽触发。一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）；一旦有 worker 回报，还会显示归因行 `Orchestration spend: $X · N/M workers reported`。成本取自 `pricing`；每个 worker 的花费来自**它自己**会话的用量，并按该 worker 实际运行的模型计价，因此继承了 Smart 模型的 worker 会按 Smart 计价。
 
 ## 开发
 

@@ -375,9 +375,13 @@ personas.
 - A worker failure advances `workerFailStreak`; on reaching
   `escalationThreshold` (default 2) `escalations` increments and the streak
   resets. A successful worker result resets the streak to 0.
-- `capHit()` = `rounds ≥ maxRounds || escalations ≥ escalationThreshold`.
-  While it holds, `tools/pre-execute` **denies** the `subagent` tool outright and
-  the system-prompt section switches to the wrap-up notice.
+- `capHit()` = `rounds ≥ maxRounds || escalations ≥ escalationThreshold ||
+  (maxSpendUsd > 0 && spend ≥ maxSpendUsd)`. While it holds, `tools/pre-execute`
+  **denies** the `subagent` tool outright and the system-prompt section switches
+  to the wrap-up notice. `capReason()` words the reason once, so the deny and the
+  notice cannot disagree.
+- Worker accounting: `spawned` increments at dispatch, `done` at result; `spend`
+  is the task's monotonic USD total (§9).
 - Orchestration is **single-turn**: state is entered at the turn that triggers it
   and released at `agent/turn-stopping`. Leaked state (a turn that never reached
   its stop boundary, e.g. an abort) is swept at the next turn's start.
@@ -481,11 +485,23 @@ back to the router's current model. No transcript archaeology.
   (`input`/`output`/`cacheRead`/`cacheWrite`) to the tier that **actually owns
   the model that ran** (`findTierForModel`, else the current tier) and appends a
   bounded `CallRecord` (`telemetry.callLogCap`, default 1000, oldest dropped).
-- Cost is estimated from `pricing` (USD per 1M tokens). `.dsh` usage events carry
-  no USD.
-  Worker (subagent) messages are deliberately not attributed yet: they belong to
-  the P2 per-worker cost work, so orchestration spend is currently invisible to
-  this ledger rather than mis-attributed.
+- Cost is estimated from `pricing` (USD per 1M tokens). DSH usage events carry no
+  USD, so with no pricing table the spend is legitimately 0 — the plugin never
+  invents prices.
+- **Per-worker attribution (C3).** A subagent worker's usage is attributed to the
+  delegating task, not to the parent's per-tier ledger. Upstream read one cost
+  off the subagent tool result; DSH publishes the child's own usage on the CHILD
+  SESSION's `assistant/message` events, and `dsh-subagent` stamps
+  `header.parentSession`, so attribution is exact rather than inferred. Each
+  worker is **one** ledger row (`orchestration.workerSpends`) accumulated across
+  all of its messages, priced with the model the worker actually ran.
+  `orchestration.spend` is a monotonic task total; the row list is a bounded
+  display window (`orchestration.workerLedgerCap`, oldest dropped) and is
+  **never** the source of the total, so a dropped row cannot leak budget.
+- **Budget guard (C5).** `orchestration.maxSpendUsd` (default `0` = off) is part
+  of `capHit`, so reaching it denies further delegation exactly like the round
+  and escalation caps. `capReason()` is the single authority for *which* cap
+  fired, shared by the deny reason and the prompt's wrap-up notice.
 - **Savings baseline**: every logged call priced at the **Smart tier
   priority-1** model; `savings = baselineTotal − actualTotal`. When that model
   has no pricing entry the baseline is reported as unavailable rather than as
@@ -545,6 +561,8 @@ silently coerce.
 | `orchestration.mode` | `auto` \| `off` | `auto` | |
 | `orchestration.maxRounds` | int 0..100 | `3` | hard cap |
 | `orchestration.escalationThreshold` | int 1..100 | `2` | consecutive worker failures → 1 escalation |
+| `orchestration.maxSpendUsd` | number ≥ 0 | `0` | hard budget per task; `0` = no guard (needs `pricing` to be meaningful) |
+| `orchestration.workerLedgerCap` | int 1..1000 | `20` | per-worker cost rows kept for display (oldest dropped); never the budget total |
 | `failover.baseMs` | int ≥ 100 | `60000` | |
 | `failover.maxMs` | int ≥ 1000 | `21600000` | |
 | `failover.startAttempts4xx` | int 1..20 | `3` | 16 min start |
@@ -579,7 +597,7 @@ presets which are persisted.
 language), the decision window, the last decision (verdict, confidence, action,
 reason) when available, model health/cooldowns, the actual running model, the
 worker-delegation situation (§7.4, `— (orchestration off)` while orchestration
-is off),
+is off), the orchestration spend with its worker completion counts (§9),
 per-tier spend + savings baseline, and any legacy-override **or capped-knob**
 warning (an inert legacy default is silent; only a non-default legacy value, or
 a `downgradeMemory` larger than the window, is reported). It must not render a

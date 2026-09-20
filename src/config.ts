@@ -72,6 +72,10 @@ const OrchestrationSchema = z.object({
   mode: z.union(['auto', 'off']).default('auto'),
   maxRounds: z.natural().min(0).max(100).default(3),
   escalationThreshold: z.natural().min(1).max(100).default(2),
+  // 0 = no budget guard (the default: a routing layer must not impose a
+  // monetised cap unless the deployment asks for one).
+  maxSpendUsd: z.number().min(0).default(0),
+  workerLedgerCap: z.natural().min(1).max(1000).default(20),
 })
 
 const FailoverSchema = z.object({

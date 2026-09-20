@@ -195,8 +195,69 @@ export function createOrchestrationState(): RouterState['orchestration'] {
     active: false,
     rounds: 0,
     escalations: 0,
+    spawned: 0,
+    done: 0,
+    spend: 0,
+    workerSpends: [],
     workerFailStreak: 0,
   }
+}
+
+/**
+ * Attribute one worker's usage to the running task (upstream v1.5.0, DSH form).
+ *
+ * Upstream read `usage.cost.total` off the subagent tool result. DSH publishes a
+ * worker's usage on the CHILD SESSION's `assistant/message` events, so the
+ * caller passes the child session id as `workerKey` and repeated calls for the
+ * same worker accumulate in place — a multi-step worker is one ledger row, not
+ * one row per message.
+ *
+ * `spend` is updated unconditionally and monotonically; the ledger is a bounded
+ * display window and may drop rows, so it must never be the source of the
+ * budget total (see {@link OrchestrationState.spend}).
+ *
+ * @param orch - the running orchestration state.
+ * @param workerKey - child session id.
+ * @param cost - USD for this contribution.
+ * @param outputTokens - output tokens for this contribution.
+ * @param elapsedMs - worker wall time so far, or null when unknown.
+ * @param cap - ledger size (oldest dropped beyond it).
+ * @param at - epoch ms of this contribution.
+ */
+export function recordWorkerSpend(
+  orch: RouterState['orchestration'],
+  workerKey: string,
+  cost: number,
+  outputTokens: number,
+  elapsedMs: number | null,
+  cap: number,
+  at: number = Date.now(),
+): void {
+  orch.spend += cost
+  const existing = orch.workerSpends.find((row) => row.workerKey === workerKey)
+  if (existing) {
+    existing.cost += cost
+    existing.outputTokens += outputTokens
+    if (elapsedMs !== null) existing.elapsedMs = elapsedMs
+    existing.at = at
+  } else {
+    orch.workerSpends.push({ workerKey, cost, outputTokens, elapsedMs, at })
+    if (orch.workerSpends.length > cap) orch.workerSpends.splice(0, orch.workerSpends.length - cap)
+  }
+}
+
+/**
+ * `/router status` rendering of the orchestration spend line, or null when the
+ * task never delegated (a self-executed orchestration has no worker cost to
+ * report, and "$0.0000 (0 workers)" would be noise).
+ *
+ * @param orch - the running orchestration state.
+ * @returns the line content, or null to omit it.
+ */
+export function formatOrchestrationSpend(orch: RouterState['orchestration']): string | null {
+  if (orch.spawned === 0 && orch.spend === 0) return null
+  const workers = `${orch.done}/${orch.spawned} worker${orch.spawned === 1 ? '' : 's'} reported`
+  return `$${orch.spend.toFixed(4)} · ${workers}`
 }
 
 /** Reset orchestration state to inactive. */
@@ -423,5 +484,33 @@ export function capHit(state: RouterState, config: ShiftRouterConfig): boolean {
   if (!orch.active) return false
   if (orch.rounds >= config.orchestration.maxRounds) return true
   if (orch.escalations >= config.orchestration.escalationThreshold) return true
+  // Budget guard (C5). `0` means "no budget" — a routing layer must not invent a
+  // monetary cap, and with no `pricing` table the spend is legitimately 0, so an
+  // enabled-by-default cap would be either wrong or inert.
+  const budget = config.orchestration.maxSpendUsd
+  if (budget > 0 && orch.spend >= budget) return true
   return false
+}
+
+/**
+ * Why {@link capHit} fired, in the words the deny reason and the wrap-up notice
+ * share. Returns null when no cap is hit. Keeping one authority means the
+ * prompt and the `tools/pre-execute` deny can never disagree about the reason.
+ *
+ * @param state - router state.
+ * @param config - effective config.
+ * @returns a human-readable reason, or null.
+ */
+export function capReason(state: RouterState, config: ShiftRouterConfig): string | null {
+  const orch = state.orchestration
+  if (!orch.active) return null
+  const { maxRounds, escalationThreshold, maxSpendUsd } = config.orchestration
+  const reasons: string[] = []
+  if (orch.rounds >= maxRounds) reasons.push(`rounds ${orch.rounds}/${maxRounds}`)
+  if (orch.escalations >= escalationThreshold) reasons.push(`escalations ${orch.escalations}/${escalationThreshold}`)
+  if (maxSpendUsd > 0 && orch.spend >= maxSpendUsd) {
+    reasons.push(`spend $${orch.spend.toFixed(4)}/$${maxSpendUsd.toFixed(2)}`)
+  }
+  if (reasons.length === 0) return null
+  return `orchestration cap reached (${reasons.join(', ')})`
 }

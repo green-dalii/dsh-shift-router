@@ -62,6 +62,8 @@ import {
 import {
   shouldOrchestrate,
   recordWorkerOutcome,
+  recordWorkerSpend,
+  capReason,
   workerModelSelectionWarning,
   readWorkerModelSelection,
   type WorkerModelSelection,
@@ -558,13 +560,19 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const cfg = getConfig()
     if (!cfg.enabled || cfg.routing.mode !== 'auto') return next()
     if (capHit(state, cfg)) {
-      const { maxRounds, escalationThreshold } = cfg.orchestration
+      // One authority for the reason (capReason) so this deny and the prompt's
+      // wrap-up notice can never disagree about which cap fired.
       return {
         kind: 'deny',
-        reason: `dsh-shift-router: orchestration hard cap reached (rounds ${state.orchestration.rounds}/${maxRounds}, escalations ${state.orchestration.escalations}/${escalationThreshold}) — stop delegating and wrap up the task now`,
+        reason: `dsh-shift-router: ${capReason(state, cfg) ?? 'orchestration cap reached'} — stop delegating and wrap up the task now`,
       }
     }
+    // Rounds count at DISPATCH (a deliberate divergence: a dispatched
+    // delegation has already spent budget, so this keeps maxRounds a true
+    // ceiling), and `spawned` tracks the same event for the audit's
+    // completeness check.
     state.orchestration.rounds += 1
+    state.orchestration.spawned += 1
     vlog(`🪄 orchestration delegation ${state.orchestration.rounds}/${cfg.orchestration.maxRounds} (subagent call)`)
     return next()
   })
@@ -575,6 +583,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const state = agent ? stateFor(agent) : undefined
     if (!state?.orchestration.active) return undefined
     const cfg = getConfig()
+    state.orchestration.done += 1
     recordWorkerOutcome(state, cfg, !result.isError)
     if (result.isError) {
       vlog(
@@ -590,6 +599,51 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // ── Telemetry + recovery from assistant messages ────────────────────
   ctx.on('session/event', (session: Session, event: SessionEvent) => {
     if (event.type !== 'assistant/message') return
+
+    // ── Worker usage → the delegating task's ledger (C3) ────────────────
+    // Upstream read a worker's cost off the subagent tool result; DSH reports
+    // the child's own usage on ITS session events, and `dsh-subagent` stamps
+    // `header.parentSession` (`childSessionMeta`), so attribution is exact
+    // rather than inferred. A worker is one ledger row, accumulated across all
+    // of its messages.
+    if (session.header.origin === 'subagent') {
+      const usage = event.data.usage
+      const parentId = session.header.parentSession
+      if (!usage || parentId === undefined) return
+      const parent = ctx.agents.get(parentId)
+      const parentState = parent ? stateFor(parent) : undefined
+      if (!parentState?.orchestration.active) return
+      const workerCfg = getConfig()
+      const workerTokens = {
+        input: usage.inputTokens,
+        output: usage.outputTokens,
+        cacheRead: usage.cacheReadTokens ?? 0,
+        cacheWrite: usage.cacheWriteTokens ?? 0,
+      }
+      const { provider: workerProvider, model: workerModel } = event.data.message.source
+      const workerCost = estimateCost(
+        getModelPricing(workerCfg.pricing, workerProvider, workerModel),
+        workerTokens,
+      )
+      // Wall time the worker has been alive; the session's own creation time is
+      // the spawn instant, so no separate spawn bookkeeping is needed.
+      const startedAt = session.header.createdAt
+      const elapsedMs = startedAt > 0 ? Date.now() - startedAt : null
+      recordWorkerSpend(
+        parentState.orchestration,
+        session.header.id,
+        workerCost,
+        workerTokens.output,
+        elapsedMs,
+        workerCfg.orchestration.workerLedgerCap,
+      )
+      vlog(
+        `🪄 worker ${session.header.id} spent $${workerCost.toFixed(4)}` +
+          ` (task total $${parentState.orchestration.spend.toFixed(4)})`,
+      )
+      return
+    }
+
     const agent = ctx.agents.get(session.id)
     const state = agent ? stateFor(agent) : undefined
     if (!agent || !state) return

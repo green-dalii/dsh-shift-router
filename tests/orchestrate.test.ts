@@ -10,7 +10,10 @@ import {
   createOrchestrationState,
   enterOrchestration,
   exitOrchestration,
+  capReason,
+  formatOrchestrationSpend,
   formatWorkerModelSelection,
+  recordWorkerSpend,
   recordWorkerOutcome,
   renderTierChain,
   resetOrchestration,
@@ -240,5 +243,100 @@ describe('cap enforcement', () => {
     state.orchestration.rounds = 0
     state.orchestration.escalations = cfg.orchestration.escalationThreshold
     expect(capHit(state, cfg)).toBe(true)
+  })
+})
+
+describe('per-worker cost attribution (C3)', () => {
+  const cap = 20
+
+  it('accumulates one row per worker across that worker\'s messages', () => {
+    const state = createRouterState()
+    enterOrchestration(state)
+    const orch = state.orchestration
+    recordWorkerSpend(orch, 'child-a', 0.01, 100, 1000, cap)
+    recordWorkerSpend(orch, 'child-a', 0.02, 250, 4000, cap)
+    recordWorkerSpend(orch, 'child-b', 0.005, 50, 500, cap)
+
+    expect(orch.workerSpends).toHaveLength(2)
+    const a = orch.workerSpends.find((row) => row.workerKey === 'child-a')!
+    expect(a.cost).toBeCloseTo(0.03)
+    expect(a.outputTokens).toBe(350)
+    expect(a.elapsedMs).toBe(4000)
+    // The task total is the sum of every contribution, not the ledger's sum.
+    expect(orch.spend).toBeCloseTo(0.035)
+  })
+
+  it('bounds the display ledger but never the authoritative total', () => {
+    const state = createRouterState()
+    enterOrchestration(state)
+    const orch = state.orchestration
+    for (let i = 0; i < 25; i += 1) recordWorkerSpend(orch, `child-${i}`, 0.01, 10, null, cap)
+    expect(orch.workerSpends).toHaveLength(cap)
+    // Oldest dropped from the DISPLAY list...
+    expect(orch.workerSpends.some((row) => row.workerKey === 'child-0')).toBe(false)
+    expect(orch.workerSpends.at(-1)!.workerKey).toBe('child-24')
+    // ...while the budget total keeps every cent.
+    expect(orch.spend).toBeCloseTo(0.25)
+  })
+
+  it('keeps a known elapsed time when a later contribution has none', () => {
+    const state = createRouterState()
+    enterOrchestration(state)
+    recordWorkerSpend(state.orchestration, 'child-a', 0, 1, 1234, cap)
+    recordWorkerSpend(state.orchestration, 'child-a', 0, 1, null, cap)
+    expect(state.orchestration.workerSpends[0]!.elapsedMs).toBe(1234)
+  })
+
+  it('renders spend with the reported worker count, and nothing when idle', () => {
+    const state = createRouterState()
+    enterOrchestration(state)
+    expect(formatOrchestrationSpend(state.orchestration)).toBeNull()
+    state.orchestration.spawned = 3
+    state.orchestration.done = 2
+    recordWorkerSpend(state.orchestration, 'child-a', 0.0123, 10, null, cap)
+    expect(formatOrchestrationSpend(state.orchestration)).toBe('$0.0123 · 2/3 workers reported')
+    state.orchestration.spawned = 1
+    state.orchestration.done = 1
+    expect(formatOrchestrationSpend(state.orchestration)).toContain('1/1 worker reported')
+  })
+})
+
+describe('orchestration budget guard (C5)', () => {
+  it('is off by default, so spend never trips the cap', () => {
+    const cfg = makeConfig()
+    const state = createRouterState()
+    enterOrchestration(state)
+    state.orchestration.spend = 1_000_000
+    expect(cfg.orchestration.maxSpendUsd).toBe(0)
+    expect(capHit(state, cfg)).toBe(false)
+  })
+
+  it('trips at the configured budget and reports the reason', () => {
+    const cfg = makeConfig()
+    cfg.orchestration.maxSpendUsd = 0.5
+    const state = createRouterState()
+    enterOrchestration(state)
+    recordWorkerSpend(state.orchestration, 'child-a', 0.49, 10, null, 20)
+    expect(capHit(state, cfg)).toBe(false)
+    expect(capReason(state, cfg)).toBeNull()
+    recordWorkerSpend(state.orchestration, 'child-a', 0.01, 10, null, 20)
+    expect(capHit(state, cfg)).toBe(true)
+    expect(capReason(state, cfg)).toContain('spend $0.5000/$0.50')
+  })
+
+  it('names every cap that fired, and none that did not', () => {
+    const cfg = makeConfig()
+    cfg.orchestration.maxRounds = 2
+    cfg.orchestration.escalationThreshold = 3
+    cfg.orchestration.maxSpendUsd = 1
+    const state = createRouterState()
+    enterOrchestration(state)
+    state.orchestration.rounds = 2
+    state.orchestration.escalations = 1
+    state.orchestration.spend = 1
+    const reason = capReason(state, cfg)!
+    expect(reason).toContain('rounds 2/2')
+    expect(reason).toContain('spend $1.0000/$1.00')
+    expect(reason).not.toContain('escalations')
   })
 })

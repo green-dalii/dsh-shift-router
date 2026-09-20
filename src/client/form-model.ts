@@ -79,6 +79,8 @@ export const CARD_FIELDS: readonly CardField[] = [
   { path: 'orchestration.mode', section: 'orchestration', display: 'orchestration', key: 'mode', type: 'enum', enum: ['auto', 'off'], labelKey: 'f.orchMode', hintKey: 'h.orchMode' },
   { path: 'orchestration.maxRounds', section: 'orchestration', display: 'orchestration', key: 'maxRounds', type: 'number', unit: 'rounds', labelKey: 'f.maxRounds', hintKey: 'h.maxRounds' },
   { path: 'orchestration.escalationThreshold', section: 'orchestration', display: 'orchestration', key: 'escalationThreshold', type: 'number', unit: '×', labelKey: 'f.escalationThreshold', hintKey: 'h.escalationThreshold' },
+  { path: 'orchestration.maxSpendUsd', section: 'orchestration', display: 'orchestration', key: 'maxSpendUsd', type: 'number', unit: 'USD', labelKey: 'f.maxSpendUsd', hintKey: 'h.maxSpendUsd' },
+  { path: 'orchestration.workerLedgerCap', section: 'orchestration', display: 'orchestration', key: 'workerLedgerCap', type: 'number', unit: 'rows', labelKey: 'f.workerLedgerCap', hintKey: 'h.workerLedgerCap' },
   { path: 'failover.baseMs', section: 'failover', display: 'failover', key: 'baseMs', type: 'number', unit: 'ms', labelKey: 'f.failoverBaseMs', hintKey: 'h.failoverBaseMs' },
   { path: 'failover.maxMs', section: 'failover', display: 'failover', key: 'maxMs', type: 'number', unit: 'ms', labelKey: 'f.failoverMaxMs', hintKey: 'h.failoverMaxMs' },
   { path: 'failover.startAttempts4xx', section: 'failover', display: 'failover', key: 'startAttempts4xx', type: 'number', unit: '×', labelKey: 'f.startAttempts4xx', hintKey: 'h.startAttempts4xx' },

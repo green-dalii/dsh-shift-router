@@ -59,6 +59,8 @@ export type ShiftRouterCardKey =
   | 'f.orchMode'
   | 'f.maxRounds'
   | 'f.escalationThreshold'
+  | 'f.maxSpendUsd'
+  | 'f.workerLedgerCap'
   | 'f.failoverBaseMs'
   | 'f.failoverMaxMs'
   | 'f.startAttempts4xx'
@@ -85,6 +87,8 @@ export type ShiftRouterCardKey =
   | 'h.orchMode'
   | 'h.maxRounds'
   | 'h.escalationThreshold'
+  | 'h.maxSpendUsd'
+  | 'h.workerLedgerCap'
   | 'h.failoverBaseMs'
   | 'h.failoverMaxMs'
   | 'h.startAttempts4xx'
@@ -156,6 +160,8 @@ export const en: ShiftRouterCardDict = {
   'f.orchMode': 'Orchestration mode',
   'f.maxRounds': 'Max delegation rounds',
   'f.escalationThreshold': 'Escalation threshold',
+  'f.maxSpendUsd': 'Task budget (USD)',
+  'f.workerLedgerCap': 'Worker ledger size',
   'f.failoverBaseMs': 'Initial backoff',
   'f.failoverMaxMs': 'Backoff ceiling',
   'f.startAttempts4xx': '4xx start level',
@@ -182,6 +188,8 @@ export const en: ShiftRouterCardDict = {
   'h.orchMode': 'auto: complex tasks escalate to a smart orchestrator that delegates to fast subagents. off: never orchestrate.',
   'h.maxRounds': 'Hard cap on delegated rounds before the orchestrator insists on smart.',
   'h.escalationThreshold': 'CONSECUTIVE worker failures that count as one escalation. A successful worker resets the streak, so isolated failures do not burn the cap.',
+  'h.maxSpendUsd': 'Hard budget for one orchestrated task. 0 disables the guard. Cost comes from the pricing table below, so with no pricing configured the spend stays 0 and this cap cannot fire.',
+  'h.workerLedgerCap': 'How many per-worker cost rows the status report keeps. The task total is authoritative and unaffected — this only bounds the display list.',
   'h.failoverBaseMs': 'Cooldown after the first 5xx failure; each retry waits 4× longer.',
   'h.failoverMaxMs': 'Ceiling of the exponential backoff.',
   'h.startAttempts4xx': '429/quota failures start the backoff ladder at this level instead of level 1.',
@@ -252,6 +260,8 @@ export const zh: ShiftRouterCardDict = {
   'f.orchMode': '编排模式',
   'f.maxRounds': '最大委派轮数',
   'f.escalationThreshold': '升级阈值',
+  'f.maxSpendUsd': '任务预算（USD）',
+  'f.workerLedgerCap': 'worker 账本条数',
   'f.failoverBaseMs': '初始退避',
   'f.failoverMaxMs': '退避上限',
   'f.startAttempts4xx': '4xx 起始等级',
@@ -278,6 +288,8 @@ export const zh: ShiftRouterCardDict = {
   'h.orchMode': 'auto：复杂任务升级为 Smart 编排器，委派 Fast 子代理执行；off：永不编排。',
   'h.maxRounds': '编排器委派轮数的硬上限，达到后强制走 Smart。',
   'h.escalationThreshold': '**连续**多少次子代理失败记作一次升级。子代理成功会清零连击，因此偶发失败不会烧掉上限。',
+  'h.maxSpendUsd': '单个编排任务的硬预算。0 表示不启用。成本来自下方定价表，因此未配置定价时花费恒为 0，该上限不会触发。',
+  'h.workerLedgerCap': '状态报告保留的每 worker 成本行数。任务总额是权威值、不受影响——这里只限制展示列表长度。',
   'h.failoverBaseMs': '首次 5xx 故障后的冷却时长；每次重试等待翻 4 倍。',
   'h.failoverMaxMs': '指数退避的上限。',
   'h.startAttempts4xx': '429/配额类故障从该等级开始计退避，而非从第 1 级开始。',

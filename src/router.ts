@@ -37,6 +37,7 @@ import {
 } from './types.js'
 import { findBestModelForTier, type ResolvedModel } from './tier.js'
 import { createCooldowns, cooldownPredicate, findTierForModel } from './failover.js'
+import { createOrchestrationState } from './orchestrate.js'
 
 /** R (rework penalty) per named preset. Higher R → lower θ → stickier on Smart. */
 export const ECONOMIC_MODE_PRESETS = { eco: 2, default: 3, sport: 5 } as const
@@ -64,12 +65,7 @@ export function createRouterState(): RouterState {
       smart: emptyTierUsage(),
     },
     callLog: [],
-    orchestration: {
-      active: false,
-      rounds: 0,
-      escalations: 0,
-      workerFailStreak: 0,
-    },
+    orchestration: createOrchestrationState(),
   }
 }
 

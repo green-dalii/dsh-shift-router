@@ -35,7 +35,12 @@ import {
   effectiveDowngradeMemory,
   downgradeMemoryCapped,
 } from './router.js'
-import { resetOrchestration, formatWorkerModelSelection, type WorkerModelSelection } from './orchestrate.js'
+import {
+  resetOrchestration,
+  formatWorkerModelSelection,
+  formatOrchestrationSpend,
+  type WorkerModelSelection,
+} from './orchestrate.js'
 import { formatStats } from './stats.js'
 import { formatRemaining } from './failover.js'
 
@@ -129,6 +134,8 @@ export const CONFIG_FIELDS: ConfigField[] = [
   { path: 'orchestration.mode', type: 'enum', enum: ['auto', 'off'] },
   { path: 'orchestration.maxRounds', type: 'number' },
   { path: 'orchestration.escalationThreshold', type: 'number' },
+  { path: 'orchestration.maxSpendUsd', type: 'number', hint: 'USD' },
+  { path: 'orchestration.workerLedgerCap', type: 'number' },
   { path: 'failover.baseMs', type: 'number', hint: 'ms' },
   { path: 'failover.maxMs', type: 'number', hint: 'ms' },
   { path: 'failover.startAttempts4xx', type: 'number' },
@@ -240,9 +247,15 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
   const sManual = state.manualOverride.active
     ? ` ✅ ${state.manualOverride.tier ?? state.manualOverride.modelId ?? 'active'}`
     : ' ✗'
+  // The spend segment is its own line: it is the per-worker cost attribution
+  // (SPEC §9) and is meaningful even after the task's caps reset.
+  const orchSpend = formatOrchestrationSpend(state.orchestration)
+  const sOrchBudget = config.orchestration.maxSpendUsd > 0
+    ? `, budget $${state.orchestration.spend.toFixed(4)}/$${config.orchestration.maxSpendUsd.toFixed(2)}`
+    : ''
   const sOrch = config.orchestration.mode === 'auto'
     ? (state.orchestration.active
-        ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold}, fail streak ${state.orchestration.workerFailStreak})`
+        ? ` 🪄 active (round ${state.orchestration.rounds}/${config.orchestration.maxRounds}, esc ${state.orchestration.escalations}/${config.orchestration.escalationThreshold}, fail streak ${state.orchestration.workerFailStreak}${sOrchBudget})`
         : ` 🪄 auto (idle)`)
     : ' ✗ (off)'
   const totalTurns = state.window.length + state.upgradeCount + state.downgradeCount
@@ -304,6 +317,7 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     `  Turns: ${totalTurns}   Upgrades: ↑${state.upgradeCount}   Downgrades: ↓${state.downgradeCount}`,
     `  Manual override:${sManual}`,
     `  Orchestration:${sOrch}`,
+    ...(orchSpend === null ? [] : [`  Orchestration spend: ${orchSpend}`]),
     `  Last decision:`,
     sLast,
     `  Running model: ${actual}${drift}`,

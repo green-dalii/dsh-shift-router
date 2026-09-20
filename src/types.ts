@@ -186,6 +186,15 @@ export interface OrchestrationConfig {
    * "off": never orchestrate.
    */
   mode: 'auto' | 'off'
+  /**
+   * Hard budget for one orchestrated task, in USD. `0` disables the guard.
+   * Cost comes from `pricing` (§9): with no pricing table the spend stays 0 and
+   * this cap never fires, which is the honest behaviour — the plugin cannot
+   * invent prices it was not given.
+   */
+  maxSpendUsd: number
+  /** Per-worker ledger size kept for display (oldest dropped). */
+  workerLedgerCap: number
   /** Max review/delegate rounds before Smart takes over (hard cap). */
   maxRounds: number
   /**
@@ -229,6 +238,27 @@ export interface ShiftRouterConfig {
 }
 
 /** Orchestration lifecycle state (per-agent, not persisted). */
+/**
+ * Per-worker cost attribution record (upstream v1.5.0).
+ *
+ * Upstream read one of these off the subagent tool result; DSH reports a
+ * worker's usage on the CHILD SESSION's `assistant/message` events instead, so
+ * a record is keyed by the child session and updated in place as the worker
+ * emits more messages.
+ */
+export interface WorkerSpendRecord {
+  /** Child session id this record aggregates. */
+  workerKey: string
+  /** USD attributed to this worker. */
+  cost: number
+  /** Output tokens the worker produced. */
+  outputTokens: number
+  /** Child-session creation → last observed usage, or null when unknown. */
+  elapsedMs: number | null
+  /** Epoch ms of the last contribution. */
+  at: number
+}
+
 export interface OrchestrationState {
   /** Is the main agent currently running as an orchestrator? */
   active: boolean
@@ -236,6 +266,19 @@ export interface OrchestrationState {
   rounds: number
   /** Escalations reached this task (hard cap: escalationThreshold). */
   escalations: number
+  /** Subagent calls dispatched this task. */
+  spawned: number
+  /** Subagent results received this task. */
+  done: number
+  /**
+   * Authoritative task spend in USD. Monotonic for the task: deliberately
+   * independent of `workerSpends`, which is a bounded DISPLAY window — summing
+   * the ledger after it starts dropping entries would understate the total and
+   * let the budget cap leak.
+   */
+  spend: number
+  /** Bounded per-worker ledger for `/router status` (oldest dropped). */
+  workerSpends: WorkerSpendRecord[]
   /**
    * Consecutive worker failures. A success resets it to 0; reaching
    * `escalationThreshold` increments `escalations` and resets the streak, so
@@ -280,6 +323,8 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     mode: 'auto',
     maxRounds: 3,
     escalationThreshold: 2,
+    maxSpendUsd: 0,
+    workerLedgerCap: 20,
   },
   failover: {
     baseMs: 60_000,

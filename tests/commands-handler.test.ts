@@ -212,6 +212,31 @@ describe('/router status', () => {
     expect(text).toContain('inherit the Smart model')
   })
 
+  // C3/C5: the per-worker cost attribution must be visible in the status
+  // report, and the budget must be named only when one is configured.
+  it('reports the orchestration spend and worker completion counts', async () => {
+    const h = harness()
+    h.config.orchestration.mode = 'auto'
+    h.state.orchestration.active = true
+    h.state.orchestration.spawned = 3
+    h.state.orchestration.done = 2
+    h.state.orchestration.spend = 0.0123
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('Orchestration spend: $0.0123 · 2/3 workers reported')
+    // No budget configured (the default) ⇒ no budget segment anywhere.
+    expect(text).not.toContain('budget $')
+  })
+
+  it('names the budget only when one is configured', async () => {
+    const h = harness()
+    h.config.orchestration.mode = 'auto'
+    h.config.orchestration.maxSpendUsd = 0.25
+    h.state.orchestration.active = true
+    h.state.orchestration.spend = 0.1
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('budget $0.1000/$0.25')
+  })
+
   it('stays silent about delegation when orchestration is off', async () => {
     const h = harness()
     h.config.orchestration.mode = 'off'

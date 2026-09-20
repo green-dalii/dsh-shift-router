@@ -109,8 +109,8 @@ contract is SPEC §7, §9, §13.
 | Item | Upstream | Status |
 |---|---|---|
 | **SDK baseline catch-up** (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | — | ✅ build baseline = runtime baseline; three real breaks fixed (SPEC §1.5) |
-| **C3** per-worker cost attribution | v1.5.0 | 🚧 this round: bounded worker ledger + `orchestration $X (N workers)` |
-| **C5** budget guard | (our own promise) | 🚧 this round: `orchestration.maxSpendUsd` wired into `capHit` |
+| **C3** per-worker cost attribution | v1.5.0 | ✅ bounded worker ledger + `Orchestration spend: $X · N/M workers reported` (DSH form: attributed from the child session, not the tool result) |
+| **C5** budget guard | (our own promise) | ✅ `orchestration.maxSpendUsd` wired into `capHit` + `capReason()` as the single authority |
 | **C2** convergence protocol | v1.2.0 + v1.3.0 | 🚧 this round: structured `## Failure report` contract in the orchestrator prompt |
 | **C1** non-blocking acceptance audit | v1.3.0/v1.4.0/v1.4.2 | 🚧 this round: `src/audit.ts` + auditor prompt + `/router status` / card surfacing |
 | **C4(a)** GUI-assisted worker route authorisation | v1.0.0+ | 🚧 this round: card action writes the Fast chain into the host `subagent-model-selection` namespace |

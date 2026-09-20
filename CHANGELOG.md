@@ -57,6 +57,20 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   orchestration request is a certainty and must be reported with
   `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
   tedious bulk batches classify as `fast` unless they set direction.
+- **Per-worker cost attribution (C3)**: `orchestration.spend` plus a bounded
+  `workerSpends` ledger, shown by `/router status` as
+  `Orchestration spend: $X · N/M workers reported`. Upstream read a worker's cost
+  off the subagent tool result; DSH publishes it on the **child session's** own
+  `assistant/message` events, and `dsh-subagent` sets `header.parentSession`, so
+  the delegating task is identified exactly rather than inferred. A worker is one
+  ledger row accumulated across its messages and priced with the model it
+  actually ran.
+- **`orchestration.maxSpendUsd`** (default `0` = off) and
+  **`orchestration.workerLedgerCap`** (default `20`). The budget is part of
+  `capHit`, so it denies further delegation exactly like the round and
+  escalation caps; `capReason()` words the reason once for both the deny and the
+  prompt's wrap-up notice. `spend` is monotonic and never derived from the
+  bounded ledger, so no display truncation can leak budget.
 - **`ux.promptSectionOrder`** (default `150`): sort position of the orchestrator
   system-prompt section. DSH allocates section order centrally (`SECTION_ORDERS`)
   and reserves no slot for a third-party section, so this is configuration rather
