@@ -82,29 +82,32 @@ node scripts/expose-gui-settings.mjs --profile web   # idempotent
 
 Re-run the script after upgrading/reinstalling `dsh-host-apiproxy`.
 
-## Manual browser E2E (the card)
+## Browser check (the card)
 
-There is no unit test for the DOM; the card is verified in a real browser against a scratch
-profile. Recipe used for every review round:
+There is no DOM in the unit suite, and two defects shipped that only a layout
+engine could see: the card registered into the wrong slot (invisible) and a model
+row's badge covered its select. `e2e/browser-check.mjs` is the check that would
+have caught the second one — it drives a real Chromium against a scratch profile
+and asserts what a browser alone can answer:
+
+- the card renders in Settings → Plugins → Plugin configuration and expands;
+- **zero** bounding-box overlaps among the card's innermost visible elements
+  (this is the layout gate: a fixed track around variable content, or an overlay
+  over a native control, shows up here as an intersection);
+- the deployment's providers actually reach the provider dropdown (the catalog
+  loaded, end to end);
+- the *Advanced* section starts collapsed and its controls appear when expanded.
 
 ```sh
-# 1. scratch home + profile (link this project + @deepseek-ai/dsh-base + dsh-web-app)
-export DSH_HOME=/tmp/scratch-home
-dsh plugin --profile web-e2e add /path/to/dsh-shift-router
-# 2. (harness ≤ 0.1.0-rc.6 only) whitelist the namespace in the scratch profile;
-#    on 0.1.5-rc.2+ there is no dsh-host-apiproxy whitelist and this is a no-op.
-node scripts/expose-gui-settings.mjs --profile web-e2e --home /tmp/scratch-home
-# 3. boot it
-dsh --profile web-e2e web --port 3199
-# 4. drive Chrome (playwright-core): Settings → Plugins → Plugin configuration →
-#    open the Shift-Router card → screenshot / edit / save → assert settings.yaml
+npm i -D playwright-core            # or point PLAYWRIGHT_CORE at an existing copy
+node e2e/browser-check.mjs          # scratch profile, screenshots under /tmp
+node e2e/browser-check.mjs --url '<token url>'   # an already-running server
+node e2e/browser-check.mjs --keep   # keep the scratch home for inspection
 ```
 
-Step 4 is the only check that the card actually renders — the slot registration is unit-tested
-against the real `SlotCore`, but nothing here proves the rendered tree. A missing card usually
-means a rejected registration, so read the browser console first: `SlotCore` throws at
-registration time, and since the slot is declared only when the Plugin configuration tab mounts,
-that error lands long after boot (ALIGNMENT §R6).
+It is deliberately **not** part of `npm test` / `npm run test:e2e`: those must run
+without a browser. Run it whenever you touch `ShiftRouterCard.tsx`, and look at
+the screenshots it writes (light and dark themes both matter).
 
 `e2e/fake-adapter.mjs` is the credential-free LLM adapter used by the headless router
 e2e. Run it with `npm run test:e2e` (`e2e/run-e2e.mjs`): it creates a scratch `DSH_HOME`,

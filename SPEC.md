@@ -736,6 +736,20 @@ visible rather than about decoration:
 - **The collapsed header states the effective configuration** (enabled state,
   routing mode, chain sizes), so the panel answers "what is set?" without being
   expanded.
+- **Advanced settings are collapsed by default.** The open card holds only what
+  changes routing for a typical deployment: the master switch, the two tier
+  chains, the routing mode, the economics knob and its preset, and the
+  orchestration mode, round budget, spend cap and audit switch. Everything else —
+  judge limits, window and cache tuning, failover timing, telemetry, prompt
+  ordering and the legacy leftovers — sits behind ONE *Advanced* disclosure,
+  closed on open, sub-grouped by the setting it belongs to. The visible-by-default
+  set is pinned by a test, so clutter cannot creep back in one field at a time.
+- **Copy is written from the user's side.** A label or hint answers "what does
+  this do to my requests, and when would I change it?" — not how it is
+  implemented. Internal vocabulary (θ, EV, ledger, ring buffer, sort position) is
+  only allowed where the control itself shows it, and a consequence already
+  rendered elsewhere (the θ line under the economics knob) is not re-derived in
+  prose.
 
 **Deferred** (recorded, not silently dropped): sliders for the 0–1 probability
 fields; a filter for the long routing section; and runtime state on the card

@@ -143,6 +143,20 @@ are SPEC §12.2 (model source) and §12.3 (card UX).
 | Chain rows reorder with ↑/↓; numeric controls carry the schema's `min`/`max`/`step`; `legacy` fields are marked inert; the collapsed header summarises the effective config | ✅ |
 | Deferred: 0–1 sliders, a routing-section filter, runtime state on the card (needs a browser↔host channel) | recorded |
 
+## Settings layout + information architecture round (delivered)
+
+The card was measured in a real browser: 21 pairs of elements overlapped, and the
+open card showed 30 controls at once. The audit and the measurements are in
+[ALIGNMENT.md](ALIGNMENT.md) §R8; the rules are SPEC §12.3.
+
+| Item | Status |
+|---|---|
+| The model row's role badge overflowed its fixed 20px grid track onto the provider select, and every unit suffix (`ms`, `tokens`, …) sat under the spin buttons of the new number inputs | ✅ fixed (content-sized row, unit moved out of the input) |
+| Advanced settings (21) moved behind one *Advanced* disclosure, closed on open; the default view keeps the 9 decisions that change routing plus the two tier chains | ✅ |
+| The default-visible set is pinned by a test, so clutter cannot creep back one field at a time | ✅ |
+| Every label, hint and section summary rewritten from the user's side (what it does to your requests, when to change it) in both locales | ✅ |
+| `e2e/browser-check.mjs`: opt-in real-browser check — card renders, **zero** bounding-box overlaps, the deployment's providers reach the dropdown, the advanced section starts collapsed | ✅ |
+
 ## Planned
 
 | Feature | Priority | Notes |

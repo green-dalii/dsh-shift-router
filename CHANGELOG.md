@@ -215,6 +215,27 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   `manual`, `off`, orchestration off, an empty Fast chain and the full
   costs/audit surface each load for real.
 
+### Changed — settings card layout and information architecture
+
+- **Elements overlapped in the model rows.** The row's role badge (Primary /
+  Fallback n) overflowed the fixed 20px grid track it was given and covered the
+  provider select, and every unit suffix (`ms`, `tokens`, …) sat inside its input
+  box, directly under the spin buttons a `type="number"` control draws there.
+  The row now sizes its badge track to its content, and the unit is a sibling of
+  the input instead of an absolute overlay. Measured before/after with
+  `e2e/browser-check.mjs`: 21 overlapping pairs → 0.
+- **The open card showed everything at once.** The 9 settings that change how
+  requests are routed (master switch, both tier chains, routing mode, economics
+  preset and penalty, orchestration mode, round budget, spend cap, audit switch)
+  stay in the open view; the other 21 — judge limits, window and cache tuning,
+  failover timing, telemetry, prompt ordering, legacy leftovers — moved into one
+  *Advanced* disclosure that starts collapsed and keeps its sub-groups. The
+  default-visible set is now pinned by a test.
+- **All descriptions rewritten for users.** Hints used to explain the
+  implementation (θ, cache divisor, worker ledger, ring buffer, prompt sort
+  position); they now say what the setting does to your requests and when you
+  would change it, in both locales.
+
 ### Fixed — the card asked for model ids by hand
 
 - **Model controls never loaded the deployment's models.** The card read the
