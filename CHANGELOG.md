@@ -215,6 +215,30 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   `manual`, `off`, orchestration off, an empty Fast chain and the full
   costs/audit surface each load for real.
 
+### Fixed — the card asked for model ids by hand
+
+- **Model controls never loaded the deployment's models.** The card read the
+  catalog through `ctx.get('connection')?.api.llm.models()`, which does not
+  exist: `ctx.connection` is the wire client (state/identity), and the catalog
+  belongs to `ctx.remote.session.modelCatalog()` — the same remote the `/model`
+  selector uses. `connection?.api` was therefore always `undefined`, the card
+  never issued a load, and every provider/model control silently fell back to a
+  text box. The card now reads that remote (reactively, via `ctx.inject`, so it
+  survives being mounted late) and re-reads it on `llm/adapters-updated`,
+  `settings/document-updated`, `credentials/reference-updated` and
+  `connection/reset`.
+
+### Changed — settings card UX
+
+- Provider failures are shown against the rows they affect instead of leaving an
+  empty dropdown; an empty chain, a duplicated route and an identical Fast/Smart
+  primary are called out inline (they were startup logs, and a stock profile
+  exports no log sink); chain rows reorder with ↑/↓ instead of delete-and-retype;
+  numeric fields use `type="number"` with the config schema's own
+  `min`/`max`/`step`; `legacy` fields are marked as accepted-but-ignored; and the
+  collapsed header summarises the effective configuration. Manual entry remains
+  only as the explicit **Custom…** option.
+
 ### Fixed — GUI settings card never registered
 
 - **The settings card did not appear in Settings → Plugins → Plugin

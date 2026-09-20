@@ -151,7 +151,12 @@ adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
    `@deepseek-ai/dsh-client-ui-settings-plugins`, and the registration passes `key: 'shift-router'`
    (the settings namespace), never `id`. `tests/client-card-slot.test.ts` guards it against the real
    `SlotCore`.
-7. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
+7. **Never guess a platform API — read the caller that already works.** The card's model list comes
+   from `ctx.remote.session.modelCatalog()` (the `/model` selector's remote), and a wrong guess there
+   fails *silently*: the control degrades to a text box and nothing goes red (ALIGNMENT §R7). When
+   adding a card control backed by host data, copy the call from the DSH package that owns the
+   surface, then pin the response shape in a test.
+8. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
    PR; verify the card in the browser e2e above for layout regressions (light and dark themes).
 
 ## Releasing

@@ -555,6 +555,59 @@ ctx.slots.register({ name: 'settings.plugin.item', id: NS, order: 30, … })   /
 
 ---
 
+## R7：设置面板审计——模型目录与交互
+
+卡片可见之后，维护者实测的结论是「**设置面板里模型得手输**，而 `/model` 明明能列出可用模型」。
+审计同时覆盖「为什么手输」和面板其余交互。
+
+### R7.1 根因：读了一个不存在的 remote
+
+卡片把模型目录读作 `ctx.get('connection')?.api.llm.models()`。0.1.5-rc.2 的事实：
+
+| 断言 | 事实 | 证据 |
+|---|---|---|
+| `ctx.connection` 上有 `.api` | ❌ `ConnectionHandle` 只有 `isLoopback` / `generation` / `state` / `rpc` / `reconnect` / … | `dsh-client-connection/lib/types/client/index.d.ts` |
+| 有 `llm.models` 这个 remote | ❌ 不存在；`/model` 选择器读的是 `ctx.remote.session.modelCatalog()` | `dsh-client-ui-model-selection/lib/client.js`、`dsh-api-session-controller` 的 `buildModelCatalog()` |
+
+于是 `connection?.api` 恒为 `undefined`：卡片从不发起加载，目录永久停在 `loading`，
+所有模型控件退化成手输文本框。这与 §R6 是同一类错误的第二次出现——**凭记忆猜平台 API**，
+而它的失败模式是「静默降级」，没有任何闸门会红。
+
+### R7.2 审计发现（按影响排序）
+
+| 发现 | 为什么算问题 | 处置 |
+|---|---|---|
+| 模型只能手输（R7.1） | 配置的核心输入靠记忆，provider/model 都易拼错 | **修**：接 `remote.session.modelCatalog()`，按 provider 分组下拉 |
+| provider 列不出模型时控件静默变空/变手输 | 用户分不清「没有模型」与「列不出来」 | **修**：`failures` 逐行给出原因 |
+| 目录只在挂载时读一次 | 在 Models 页新增 provider 后卡片不刷新 | **修**：`llm/adapters-updated` / `settings/document-updated` / `credentials/reference-updated` / `connection/reset` 触发重读（与官方选择器同一组触发器） |
+| 行序即优先级，但只能删了重加 | 调整 failover 顺序代价高 | **修**：↑ / ↓ 重排 |
+| 数值字段是自由文本 | 越界值只能等保存时报错 | **修**：`type=number` + schema 的 `min`/`max`/`step`，用 parity 测试钉住 |
+| `legacy` / `optional` 语义只有 CLI 看得到 | 卡片把「已接受但被忽略」的字段当活配置展示 | **修**：行内标注 |
+| 启动日志里的告警（空链、两档同模型）在标准 profile 不可见 | SPEC §13：stock profile 没有 log sink | **修**：同判据改为卡片内联 |
+| 折叠时头部不表达任何信息 | 要展开才知道配成什么样 | **修**：头部摘要（模式 + 两档模型数） |
+| 0–1 概率仍用数字框；长表单无过滤；卡片不显示运行期状态 | 可用，非必要；运行期状态需要卡片不具备的通道 | **缓**：记入 SPEC §12.3 末段 |
+
+### R7.3 交付与闸门
+
+| Gate | 内容 | 变异自检 |
+|---|---|---|
+| `tests/model-catalog.test.ts` | 真实响应信封的映射：分组、provider 级失败、`ok:false`、传输层抛错；不再用手写的成功对象 | 忽略 `failures` / 不看 `ok` → **红** |
+| `tests/client-form.test.ts`（新增 parity） | 卡片声明的 `min`/`max`/`step` 与 `src/config.ts` 的 schema 边界逐字段一致 | 改一个上界 → **红** |
+| `tests/client-ux.test.ts` | 纯函数：θ 提示、头部摘要、链告警（空链/重复/两档同模型/legacy 生效） | 关掉任一判据 → **红** |
+| `tests/client-card-slot.test.ts` | 新增：`remote` 缺席时卡片仍注册成功，且状态明确说出「目录不可用」（降级而不是消失） | 去掉显式的不可用状态 → **红** |
+| e2e（settings-probe） | 让 fixture 的假适配器实现 `listModels()`，并读回 **Host 侧目录**（`buildModelCatalog`，`/model` 选择器自身的构建器），断言部署确实 advertise 了配置的路由 | 目录为空/名字与数据源不符 → **红** |
+
+规范落点：SPEC §12.2（模型来源）、§12.3（交互规则）、§14（闸门）。
+
+### R7.4 残余不确定性
+
+- 目录内容仍在**浏览器**里渲染：本轮可验证的边界是「纯映射 + 契约形状 + e2e 的 Host 侧目录」，
+  下拉框本身的观感只有人工浏览器步骤（CONTRIBUTING「Manual browser E2E」）能看到。
+- `min`/`max`/`step` 是**镜像**而非共享：客户端 bundle 不能引入 `@deepseek-ai/schemastery`
+  （它不是平台 seed word），所以边界靠 parity 测试在两处定义之间对齐，而不是靠同一个常量。
+
+---
+
 ## 明确不对齐（附理由）
 
 | 上游特性 | 不对齐的理由 |

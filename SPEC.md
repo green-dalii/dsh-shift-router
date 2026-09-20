@@ -673,10 +673,8 @@ throughput figure (§9).
 ## 12. GUI settings card
 
 The card renders every scalar config leaf plus the two tier chains, grouped into
-sections, with the model dropdowns sourced from the **harness's runtime catalog**
-(`llm.models`) so the card shows exactly what DSH is configured with. `pricing`
-is the only CLI/patch-only surface. The GUI registry and the command registry
-must expose the same set of editable paths (enforced by test).
+sections. `pricing` is the only CLI/patch-only surface. The GUI registry and the
+command registry must expose the same set of editable paths (enforced by test).
 
 ### 12.1 The card's slot (normative)
 
@@ -693,6 +691,56 @@ The `SlotMap` entry is imported **type-only** from that declarer rather than
 re-declared here (§1.5): a local copy is enforced by the compiler instead of the
 host, so a slot re-spelled as `kind: 'list'` passes every gate while rendering
 nowhere (ALIGNMENT §R6).
+
+### 12.2 Where the model lists come from (normative)
+
+The card's provider/model controls are fed by the **Host generation's model
+catalog** — `ctx.remote.session.modelCatalog()`, the same remote the `/model`
+selector reads (`dsh-api-session-controller`'s `buildModelCatalog()` over the
+live LLM registry). Nothing else may be a source: not a hand-kept list, not a
+provider directory, and not an invented remote — a wrong guess here fails
+silently, because the card's only symptom is that a dropdown is a text box
+(ALIGNMENT §R7).
+
+- The remote is read **reactively** (`ctx.inject(['remote', 'remote.session'], …)`),
+  so a composition that mounts it late still gets dropdowns, and one that never
+  mounts it degrades to manual entry **with a stated reason** rather than a
+  silently empty control.
+- The catalog is re-read on `llm/adapters-updated`, `settings/document-updated`,
+  `credentials/reference-updated` and `connection/reset` — the same triggers the
+  canonical selector uses — so a model configured elsewhere appears without a
+  page reload.
+- Provider-level failures are part of the catalog (`failures`) and are shown
+  against the affected rows ("this provider could not list models: …"). A
+  capability gap is never rendered as an empty dropdown.
+- Manual entry survives in exactly one form: the explicit **Custom…** option, for
+  a model the Host cannot enumerate. It is never the default path.
+
+### 12.3 Card UX rules (normative)
+
+The panel is an advanced surface, so these rules are about making consequences
+visible rather than about decoration:
+
+- **Controls carry the schema's bounds.** Numeric fields render `type="number"`
+  with the `min`/`max`/`step` the config schema enforces, mirrored into
+  `CARD_FIELDS` and pinned by a parity test — the client bundle cannot import the
+  host schema (`@deepseek-ai/schemastery` is not a platform seed word).
+- **Consequences are shown, not implied.** `reworkPenalty` displays the threshold
+  it implies (θ = 1/R), the economics preset displays the penalty it applies, an
+  empty chain says the tier is disabled, and duplicated routes or an identical
+  Fast/Smart primary are called out inline. These are the same facts the plugin
+  logs at startup, and §13 says a stock profile exports no logs — so the card is
+  where they must be readable.
+- **Inert fields are marked.** A `legacy` field is accepted but ignored; the card
+  says so instead of presenting it as live configuration.
+- **The collapsed header states the effective configuration** (enabled state,
+  routing mode, chain sizes), so the panel answers "what is set?" without being
+  expanded.
+
+**Deferred** (recorded, not silently dropped): sliders for the 0–1 probability
+fields; a filter for the long routing section; and runtime state on the card
+(last decision, spend, audit) — which needs a browser↔host channel the card does
+not have (§R4, §R6.5).
 
 ---
 
@@ -755,6 +803,11 @@ nowhere (ALIGNMENT §R6).
   both load orders — the card plugin is loaded long before the Settings panel
   declares the slot, and a stub registry has no kind rule to violate. The
   type-only contract (§12.1) makes `key` vs `id` a compile error as well.
+- **The card's data sources are gated by shape.** `tests/model-catalog.test.ts`
+  drives the mapping from the Host catalog — provider groups, provider failures,
+  the `ok:false` envelope and a thrown transport error — because the defect that
+  shipped was a wrong remote, and a test written against a hand-made success
+  object would have blessed it just as the typechecker did.
 - Gates, in order: `npm run typecheck` → `npm run build` → `npm test` →
   `npm run test:e2e`. A red gate is never merged or released.
 

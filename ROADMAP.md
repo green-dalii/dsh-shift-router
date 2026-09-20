@@ -129,6 +129,20 @@ uncertainty are in [ALIGNMENT.md](ALIGNMENT.md) §R6; the contract is SPEC §12.
 | `tests/client-card-slot.test.ts` runs the card's real `apply()` against the harness's real `SlotCore`, in both load orders; the e2e additionally reads the boot payload back from a packed install and asserts the browser half is offered to the client module loader | ✅ 4 tests |
 | Mutation-verified: reverting `key` → `id` fails both that test and `npm run typecheck` | ✅ |
 
+## Settings UX round (delivered)
+
+The card rendered, but asked the user to type provider/model ids by hand. The
+audit and the remaining gaps are in [ALIGNMENT.md](ALIGNMENT.md) §R7; the rules
+are SPEC §12.2 (model source) and §12.3 (card UX).
+
+| Item | Status |
+|---|---|
+| Model lists come from `ctx.remote.session.modelCatalog()` — the same catalog `/model` reads — read reactively and re-loaded on adapter/settings/credentials changes and connection reset; the e2e reads the same Host catalog back and asserts the deployment advertises its configured routes | ✅ |
+| The previous source (`ctx.get('connection')?.api.llm.models()`) does not exist, which is why every model control silently degraded to a text box | ✅ |
+| Provider failures, empty or duplicated chains and an identical Fast/Smart primary are surfaced in the card — they used to be startup logs that a stock profile never shows (SPEC §13) | ✅ |
+| Chain rows reorder with ↑/↓; numeric controls carry the schema's `min`/`max`/`step`; `legacy` fields are marked inert; the collapsed header summarises the effective config | ✅ |
+| Deferred: 0–1 sliders, a routing-section filter, runtime state on the card (needs a browser↔host channel) | recorded |
+
 ## Planned
 
 | Feature | Priority | Notes |
