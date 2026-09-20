@@ -291,21 +291,43 @@ export interface JudgeStreamCall {
  * Default stream caller — drives `ctx.llm.stream()` and assembles the reply.
  * Exported for tests to substitute a fake.
  */
-export async function defaultJudgeStreamCall(
+/** Raw text outcome of one model attempt: the assembled reply, or a failure. */
+export type StreamTextOutcome =
+  | { ok: true; text: string }
+  | { ok: false; code: string | null }
+
+/**
+ * Drive `ctx.llm.stream()` once and assemble the reply text.
+ *
+ * Shared by the Judge and the acceptance auditor (C1): the assembly rules and
+ * the failover-signature derivation are subtle enough that two copies would
+ * drift, and the auditor must fail over exactly like the Judge does.
+ *
+ * @param ctx - anything exposing the llm service.
+ * @param system - system prompt for this call.
+ * @param prompt - user-turn text.
+ * @param provider - route provider.
+ * @param model - route model.
+ * @param signal - cancellation (the caller fuses its timeout in).
+ * @param maxTokens - output cap.
+ * @returns the assembled text, or a failure with a failover code when derivable.
+ */
+export async function streamAssistantText(
   ctx: Pick<Context, 'llm'>,
+  system: string,
   prompt: string,
   provider: string,
   model: string,
   signal: AbortSignal,
-  maxTokens: number = JUDGE_MAX_TOKENS,
-): Promise<JudgeCallOutcome> {
+  maxTokens: number,
+): Promise<StreamTextOutcome> {
   const assembler = new BlockAssembler()
   let stream
   try {
     stream = ctx.llm.stream({
       provider,
       model,
-      system: JUDGE_PROMPT,
+      system,
       messages: [createUserMessage({
         content: [{ type: 'text', text: prompt }],
         source: { kind: 'user' },
@@ -332,6 +354,20 @@ export async function defaultJudgeStreamCall(
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
     .map((block) => block.text)
     .join('')
+  return { ok: true, text }
+}
+
+export async function defaultJudgeStreamCall(
+  ctx: Pick<Context, 'llm'>,
+  prompt: string,
+  provider: string,
+  model: string,
+  signal: AbortSignal,
+  maxTokens: number = JUDGE_MAX_TOKENS,
+): Promise<JudgeCallOutcome> {
+  const outcome = await streamAssistantText(ctx, JUDGE_PROMPT, prompt, provider, model, signal, maxTokens)
+  if (!outcome.ok) return { ok: false, code: outcome.code }
+  const text = outcome.text
 
   const answer = parseJudgeAnswer(text)
   if (!answer) return { ok: false, code: null } // 200-but-unparseable — do NOT cool down

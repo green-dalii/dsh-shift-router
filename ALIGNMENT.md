@@ -436,6 +436,7 @@ R4 的目标是把「编排能跑」做成「编排可信」，并把上一轮�
 |---|---|---|
 | **C3** | `OrchestrationState` 增 `spawned`/`done`/`spend`/`workerSpends`；`recordWorkerSpend` 按 **child session** 归并（一个 worker 一行）；`session/event` 在 `header.origin === 'subagent'` 分支用 `header.parentSession` 精确定位父任务并按其**实际运行的模型**计价；`/router status` 增 `Orchestration spend: $X · N/M workers reported` | `orchestrate.test.ts`（归并、上限丢最旧、`spend` 与账本解耦、elapsed 保留、格式化）；`commands-handler.test.ts`（状态行）；`config.test.ts`（默认 20） |
 | **C5** | `orchestration.maxSpendUsd`（默认 0=关闭）接入 `capHit`；新增 `capReason()` 作为"哪个帽触发"的唯一权威，deny 理由与提示词收尾通知共用 | `orchestrate.test.ts`（默认关闭、达阈值触发、多帽原因只列已触发者）；`config.test.ts`（负数报错） |
+| **C1** | `src/audit.ts`：确定性半（worker 完整性 / CTO 总结 / 是否触帽）总跑；LLM 半仅在 `spawned ≥ 1` + 启用 + 有健康 fast 端点时跑，走 `ctx.llm.stream`（**不持有凭据**）、冷却过滤、失败即降级为 violation；`turn-stopping` 处同步完成确定性半、**分离**执行 LLM 半（不拖慢轮次）；证据捕获（goal / ctoSummary / workerResults）按 `promptCap` 有界；结果落 `state.lastAudit` 并由 `/router status` 的 `Last audit:` 行呈现。与上游的四处适配：转录→事件快照、endpoint+fetch→ctx.llm.stream、`.md` 文件→内联提示词、agent_end 等待→分离执行 | `audit.test.ts`（20 项：确定性判定、解析、提示词构造与截断、自执行/禁用/全冷却跳过、链式 failover、flag→violation、抛错→violation、不可解析→不臆断）；`commands-handler.test.ts`（状态行）；`config.test.ts`（默认值） |
 | **C2** | `ORCHESTRATOR_PROMPT` 新增「Convergence protocol」：`## Failure report` 三要素（what failed / where / acceptance test now）、禁止重发同一报告（即接管信号）、接管阈值与硬帽同源；硬帽段补上预算帽说明 | `orchestrate.test.ts` 三条提示词断言（三要素、no-repeat + takeover、阈值随配置改变） |
 
 ---

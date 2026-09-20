@@ -219,6 +219,9 @@ export function createOrchestrationState(): RouterState['orchestration'] {
     done: 0,
     spend: 0,
     workerSpends: [],
+    goal: null,
+    ctoSummary: null,
+    workerResults: [],
     workerFailStreak: 0,
   }
 }
@@ -289,7 +292,7 @@ export function resetOrchestration(state: RouterState): void {
  * Enter orchestration for this task. Idempotent: re-entering while already
  * active keeps the existing run (does not reset caps mid-task).
  */
-export function enterOrchestration(state: RouterState): void {
+export function enterOrchestration(state: RouterState, goal?: string): void {
   const orch = state.orchestration
   if (!orch.active) {
     orch.active = true
@@ -297,6 +300,10 @@ export function enterOrchestration(state: RouterState): void {
     orch.escalations = 0
     orch.workerFailStreak = 0
   }
+  // The goal is the user's own prompt: the acceptance audit's goal-alignment
+  // check needs it (SPEC §9.3-style audit). Set outside the `if` so a re-entry
+  // that carries a fresher goal cannot be ignored.
+  if (goal !== undefined && goal.trim().length > 0) orch.goal = goal
 }
 
 /** Exit orchestration (task complete, aborted, or cap hit). */

@@ -68,6 +68,12 @@ const UXSchema = z.object({
   promptSectionOrder: z.number().default(150),
 })
 
+const AuditSchema = z.object({
+  enabled: z.boolean().default(true),
+  timeoutMs: z.natural().min(1).max(120_000).default(5000),
+  promptCap: z.natural().min(200).max(1_000_000).default(6000),
+})
+
 const OrchestrationSchema = z.object({
   mode: z.union(['auto', 'off']).default('auto'),
   maxRounds: z.natural().min(0).max(100).default(3),
@@ -76,6 +82,7 @@ const OrchestrationSchema = z.object({
   // monetised cap unless the deployment asks for one).
   maxSpendUsd: z.number().min(0).default(0),
   workerLedgerCap: z.natural().min(1).max(1000).default(20),
+  audit: AuditSchema,
 })
 
 const FailoverSchema = z.object({

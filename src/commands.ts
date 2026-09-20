@@ -41,6 +41,7 @@ import {
   formatOrchestrationSpend,
   type WorkerModelSelection,
 } from './orchestrate.js'
+import { formatAuditLine } from './audit.js'
 import { formatStats } from './stats.js'
 import { formatRemaining } from './failover.js'
 
@@ -136,6 +137,9 @@ export const CONFIG_FIELDS: ConfigField[] = [
   { path: 'orchestration.escalationThreshold', type: 'number' },
   { path: 'orchestration.maxSpendUsd', type: 'number', hint: 'USD' },
   { path: 'orchestration.workerLedgerCap', type: 'number' },
+  { path: 'orchestration.audit.enabled', type: 'boolean' },
+  { path: 'orchestration.audit.timeoutMs', type: 'number', hint: 'ms' },
+  { path: 'orchestration.audit.promptCap', type: 'number', hint: 'chars' },
   { path: 'failover.baseMs', type: 'number', hint: 'ms' },
   { path: 'failover.maxMs', type: 'number', hint: 'ms' },
   { path: 'failover.startAttempts4xx', type: 'number' },
@@ -318,6 +322,7 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     `  Manual override:${sManual}`,
     `  Orchestration:${sOrch}`,
     ...(orchSpend === null ? [] : [`  Orchestration spend: ${orchSpend}`]),
+    ...(state.lastAudit === null ? [] : [`  Last audit: ${formatAuditLine(state.lastAudit)}`]),
     `  Last decision:`,
     sLast,
     `  Running model: ${actual}${drift}`,

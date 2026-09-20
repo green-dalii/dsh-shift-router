@@ -60,6 +60,7 @@ export function createRouterState(): RouterState {
     actualProvider: null,
     actualModel: null,
     lastDecision: null,
+    lastAudit: null,
     tierUsage: {
       fast: emptyTierUsage(),
       smart: emptyTierUsage(),

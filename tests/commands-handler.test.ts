@@ -227,6 +227,18 @@ describe('/router status', () => {
     expect(text).not.toContain('budget $')
   })
 
+  it('surfaces the last acceptance audit, and omits the line before one exists', async () => {
+    const h = harness()
+    const before = ((await router(h, 'status')) as { text: string }).text
+    expect(before).not.toContain('Last audit:')
+    h.state.lastAudit = {
+      auditedAt: 1, spawned: 2, done: 1, complete: false, hasCtoSummary: false, capHit: false,
+      violations: ['worker results incomplete (done 1/2)'],
+    }
+    const after = ((await router(h, 'status')) as { text: string }).text
+    expect(after).toContain('Last audit: ⛔ 1 issue(s): worker results incomplete (done 1/2)')
+  })
+
   it('names the budget only when one is configured', async () => {
     const h = harness()
     h.config.orchestration.mode = 'auto'

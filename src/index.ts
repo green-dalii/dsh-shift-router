@@ -33,7 +33,7 @@ import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-sessio
 // and tool-pipeline event types so the plugin compiles against the running
 // harness's service surface.
 import type {} from '@deepseek-ai/dsh-tools'
-import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { Config, deepMergeConfig } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
@@ -48,7 +48,7 @@ import {
   setManualOverrideModel,
   recordLastDecision,
 } from './router.js'
-import { classify, defaultJudgeStreamCall, type JudgeStreamCall } from './judge.js'
+import { classify, defaultJudgeStreamCall, streamAssistantText, type JudgeStreamCall } from './judge.js'
 import {
   markModelFailed,
   clearModelCooldown,
@@ -76,6 +76,12 @@ import {
   renderTierChain,
 } from './orchestrate.js'
 import { getModelPricing, estimateCost } from './stats.js'
+import {
+  AUDITOR_SYSTEM_PROMPT,
+  appendWorkerResult,
+  auditOrchestration,
+  type AuditStreamCall,
+} from './audit.js'
 import { registerCommands } from './commands.js'
 
 export const name = 'shift-router'
@@ -405,7 +411,9 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     // prompt while a Fast model ran the turn.
     const subagentAvailable = ctx.tools.get(SUBAGENT_TOOL) !== undefined
     if (shouldOrchestrate(cfg, result, subagentAvailable, judgeResult.orchestrate)) {
-      enterOrchestration(state)
+      // The prompt IS the task goal for the audit's goal-alignment check; it is
+      // captured here because this is the moment the task starts.
+      enterOrchestration(state, prompt)
       // Race-free self-check: this is the first moment the router really is
       // about to delegate, so an absent selection service is now a fact about
       // the deployment rather than a mount-ordering artefact (SPEC §7.4).
@@ -538,13 +546,85 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const state = stateFor(agent)
     if (!state) return
     if (state.manualOverride.active) clearManualOverride(state)
-    if (state.orchestration.active) {
-      if (capHit(state, getConfig())) {
-        vlog('🪄 orchestration cap hit — turn closed, orchestrator state released')
-      }
-      exitOrchestration(state)
-      vlog('🪄 orchestration turn ended — exited orchestrator state')
+    if (!state.orchestration.active) return
+
+    // ── Acceptance audit (C1) ──────────────────────────────────────────
+    // Snapshot the evidence BEFORE releasing the orchestration state, then run
+    // the audit. The deterministic half is free and completes here; the LLM
+    // half is deliberately DETACHED — awaiting an auditor call at the turn
+    // boundary would delay the user's turn by up to `audit.timeoutMs`, and the
+    // whole point of the audit is that it is a safety net, not a gate. The
+    // result lands in `state.lastAudit` for `/router status` whenever it
+    // settles, and a failure can only ever add a violation.
+    const cfg = getConfig()
+    const orch = state.orchestration
+    const auditInput = {
+      spawned: orch.spawned,
+      done: orch.done,
+      rounds: orch.rounds,
+      maxRounds: cfg.orchestration.maxRounds,
+      escalations: orch.escalations,
+      escalationThreshold: cfg.orchestration.escalationThreshold,
+      capReason: capReason(state, cfg),
+      finalText: orch.ctoSummary ?? '',
+      workerResults: orch.workerResults.join('\n\n--- worker result ---\n\n'),
+      goal: orch.goal ?? undefined,
+      enabled: cfg.orchestration.audit.enabled,
     }
+    // The auditor runs on the Fast tier, cooldown-filtered by the same
+    // predicate the router uses, so it can never re-burn a route this turn
+    // just cooled down (and is skipped entirely when all of them are cooling).
+    const auditEndpoints = (cfg.tiers.fast.models ?? [])
+      .slice()
+      .sort((a, b) => a.priority - b.priority)
+      .map((ref) => ({ provider: ref.provider, model: ref.model }))
+    const now = Date.now()
+    const auditOptions = {
+      endpoints: auditEndpoints,
+      isCool: cooldownPredicate(state.modelCooldowns, now),
+      timeoutMs: cfg.orchestration.audit.timeoutMs,
+      promptCap: cfg.orchestration.audit.promptCap,
+    }
+    const auditStreamCall: AuditStreamCall = (provider, model, prompt, signal) =>
+      streamAssistantText(
+        ctx,
+        AUDITOR_SYSTEM_PROMPT,
+        prompt,
+        provider,
+        model,
+        signal,
+        1000,
+      )
+
+    const cappedEarlier = capHit(state, cfg)
+    exitOrchestration(state)
+    vlog('🪄 orchestration turn ended — exited orchestrator state')
+    if (cappedEarlier) {
+      vlog('🪄 orchestration cap hit — turn closed, orchestrator state released')
+    }
+
+    // Detached on purpose (see above). It touches only the captured snapshot
+    // plus `state.lastAudit`, so a reload mid-audit cannot break anything.
+    void auditOrchestration(auditInput, auditOptions, auditStreamCall)
+      .then((audit) => {
+        state.lastAudit = audit
+        if (audit.violations.length > 0) {
+          // A stock profile has no log sink (§13), so the command surface is
+          // what makes this readable — but log it too where a sink exists.
+          ctx.logger.warn(
+            '[shift-router] acceptance audit flagged %d issue(s): %s',
+            audit.violations.length,
+            audit.violations.join(' | '),
+          )
+        } else if (cfg.ux.routerLogVerbose) {
+          vlog(`✓ acceptance audit clean (workers ${auditInput.done}/${auditInput.spawned})`)
+        }
+      })
+      .catch((error) => {
+        // Belt and braces: auditOrchestration already converts failures into
+        // violations, so reaching here means a bug in the audit itself.
+        ctx.logger.warn('[shift-router] acceptance audit failed: %s', String(error))
+      })
   })
 
   // ── Orchestration hard caps (enforced, not just prompted) ──────────
@@ -577,13 +657,24 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     return next()
   })
 
-  ctx.on('tools/result', (exec: ToolExecution, result: { isError: boolean }): undefined => {
+  ctx.on('tools/result', (exec: ToolExecution, result: Readonly<ToolExecutionResult>): undefined => {
     if (exec.name !== SUBAGENT_TOOL) return undefined
     const agent = exec.agent
     const state = agent ? stateFor(agent) : undefined
     if (!state?.orchestration.active) return undefined
     const cfg = getConfig()
     state.orchestration.done += 1
+    // Collect the worker's own words as audit evidence (C1). Bounded from the
+    // audit's prompt cap, and only for orchestration runs — this is the
+    // grounding the deterministic half cannot check on its own.
+    appendWorkerResult(
+      state.orchestration.workerResults,
+      result.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n'),
+      cfg.orchestration.audit.promptCap,
+    )
     recordWorkerOutcome(state, cfg, !result.isError)
     if (result.isError) {
       vlog(
@@ -653,6 +744,18 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     const model = msg.source.model
     const usage = event.data.usage
     const now = Date.now()
+
+    // The acceptance audit (C1) reads the CTO's latest message as the claim it
+    // must verify. Last assistant message of an ACTIVE orchestration wins:
+    // earlier ones are intermediate narration, not the acceptance report.
+    if (state.orchestration.active) {
+      const finalText = msg.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim()
+      if (finalText.length > 0) state.orchestration.ctoSummary = finalText
+    }
 
     // Sync what ACTUALLY ran (display only): `current*` is the router's
     // intent, these are the fact. Never lets a stale intent be shown as the

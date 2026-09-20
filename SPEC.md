@@ -437,6 +437,37 @@ capability is **absent** rather than disabled. Therefore:
 - The orchestrator prompt states this condition factually instead of asserting a
   guarantee.
 
+### 7.4.1 Acceptance audit (safety net, never a gate)
+
+Hard caps stop a run from flying away; they cannot stop a CTO from *claiming*
+acceptance it never verified. The audit is the fallback review, and it is
+**advisory by construction**:
+
+- **Deterministic checks (free, always run):** every dispatched worker reported
+  back (`done ≥ spawned`), the final assistant message carries a CTO summary,
+  and the run did not end at a hard cap. All three are pure functions over
+  snapshots the plugin already keeps.
+- **LLM review (config-gated, one small Fast-tier call):** the auditor reads the
+  goal, the CTO summary and the worker results, and flags ungrounded acceptance,
+  goal drift, or placeholder work passed off as done. It runs **only** for a run
+  that actually delegated (`spawned ≥ 1`), only when `orchestration.audit.enabled`,
+  and only past cooldown-filtered routes — a route this turn just cooled is never
+  re-burned, and with every route cooling the pass is skipped.
+- **Not blocking, by design.** The deterministic half completes at the turn
+  boundary; the LLM half is detached and writes `state.lastAudit` when it
+  settles, because awaiting it would delay the user's turn by up to
+  `audit.timeoutMs`. The audit never changes a routing decision, never blocks a
+  turn, and never throws: a failure becomes a violation, because the run is
+  already over and an audit can only add information.
+- **Self-executed runs are outside the domain** (`spawned = 0`): the
+  delegation-closure invariants never engaged, so no CTO summary is owed and no
+  LLM pass runs.
+- Evidence is bounded from `audit.promptCap` (≤ 8 worker results, each ≤
+  cap/8 and floored at 200 chars, truncation marked) so the auditor's cost is a
+  deployment decision rather than a function of transcript size.
+- The result is surfaced by `/router status` as `Last audit: …` — the command
+  surface, because the stock compositions export no `ctx.logger` sink (§13).
+
 ### 7.5 Retry interaction
 
 DSH resolves transport retries **inside** the turn: `agent/request-error` may
@@ -579,6 +610,9 @@ silently coerce.
 | `orchestration.escalationThreshold` | int 1..100 | `2` | consecutive worker failures → 1 escalation |
 | `orchestration.maxSpendUsd` | number ≥ 0 | `0` | hard budget per task; `0` = no guard (needs `pricing` to be meaningful) |
 | `orchestration.workerLedgerCap` | int 1..1000 | `20` | per-worker cost rows kept for display (oldest dropped); never the budget total |
+| `orchestration.audit.enabled` | boolean | `true` | run the acceptance audit after a delegating run (§7.4.1) |
+| `orchestration.audit.timeoutMs` | int 1..120000 ms | `5000` | auditor call budget; deterministic checks always run |
+| `orchestration.audit.promptCap` | int 200..1000000 chars | `6000` | auditor prompt cap (cost bound, and the evidence bound) |
 | `failover.baseMs` | int ≥ 100 | `60000` | |
 | `failover.maxMs` | int ≥ 1000 | `21600000` | |
 | `failover.startAttempts4xx` | int 1..20 | `3` | 16 min start |
@@ -613,7 +647,8 @@ presets which are persisted.
 language), the decision window, the last decision (verdict, confidence, action,
 reason) when available, model health/cooldowns, the actual running model, the
 worker-delegation situation (§7.4, `— (orchestration off)` while orchestration
-is off), the orchestration spend with its worker completion counts (§9),
+is off), the orchestration spend with its worker completion counts (§9), the
+last acceptance audit when one has run (§7.4.1),
 per-tier spend + savings baseline, and any legacy-override **or capped-knob**
 warning (an inert legacy default is silent; only a non-default legacy value, or
 a `downgradeMemory` larger than the window, is reported). It must not render a

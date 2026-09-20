@@ -61,6 +61,9 @@ export type ShiftRouterCardKey =
   | 'f.escalationThreshold'
   | 'f.maxSpendUsd'
   | 'f.workerLedgerCap'
+  | 'f.auditEnabled'
+  | 'f.auditTimeoutMs'
+  | 'f.auditPromptCap'
   | 'f.failoverBaseMs'
   | 'f.failoverMaxMs'
   | 'f.startAttempts4xx'
@@ -89,6 +92,9 @@ export type ShiftRouterCardKey =
   | 'h.escalationThreshold'
   | 'h.maxSpendUsd'
   | 'h.workerLedgerCap'
+  | 'h.auditEnabled'
+  | 'h.auditTimeoutMs'
+  | 'h.auditPromptCap'
   | 'h.failoverBaseMs'
   | 'h.failoverMaxMs'
   | 'h.startAttempts4xx'
@@ -162,6 +168,9 @@ export const en: ShiftRouterCardDict = {
   'f.escalationThreshold': 'Escalation threshold',
   'f.maxSpendUsd': 'Task budget (USD)',
   'f.workerLedgerCap': 'Worker ledger size',
+  'f.auditEnabled': 'Acceptance audit',
+  'f.auditTimeoutMs': 'Auditor timeout',
+  'f.auditPromptCap': 'Auditor prompt cap',
   'f.failoverBaseMs': 'Initial backoff',
   'f.failoverMaxMs': 'Backoff ceiling',
   'f.startAttempts4xx': '4xx start level',
@@ -190,6 +199,9 @@ export const en: ShiftRouterCardDict = {
   'h.escalationThreshold': 'CONSECUTIVE worker failures that count as one escalation. A successful worker resets the streak, so isolated failures do not burn the cap.',
   'h.maxSpendUsd': 'Hard budget for one orchestrated task. 0 disables the guard. Cost comes from the pricing table below, so with no pricing configured the spend stays 0 and this cap cannot fire.',
   'h.workerLedgerCap': 'How many per-worker cost rows the status report keeps. The task total is authoritative and unaffected — this only bounds the display list.',
+  'h.auditEnabled': 'After an orchestrated run that actually delegated, check that every worker reported back, that a CTO summary exists, and — with one small Fast-tier call — that the acceptance claim is grounded in the worker results. The audit never blocks or changes the turn; findings appear as "Last audit" in /router status.',
+  'h.auditTimeoutMs': 'How long the auditor call may take. The free deterministic checks always run; the auditor is best-effort.',
+  'h.auditPromptCap': 'Character cap for the auditor prompt (goal + CTO summary + worker results). This is the auditor cost bound.',
   'h.failoverBaseMs': 'Cooldown after the first 5xx failure; each retry waits 4× longer.',
   'h.failoverMaxMs': 'Ceiling of the exponential backoff.',
   'h.startAttempts4xx': '429/quota failures start the backoff ladder at this level instead of level 1.',
@@ -262,6 +274,9 @@ export const zh: ShiftRouterCardDict = {
   'f.escalationThreshold': '升级阈值',
   'f.maxSpendUsd': '任务预算（USD）',
   'f.workerLedgerCap': 'worker 账本条数',
+  'f.auditEnabled': '验收审计',
+  'f.auditTimeoutMs': '审计超时',
+  'f.auditPromptCap': '审计提示词上限',
   'f.failoverBaseMs': '初始退避',
   'f.failoverMaxMs': '退避上限',
   'f.startAttempts4xx': '4xx 起始等级',
@@ -290,6 +305,9 @@ export const zh: ShiftRouterCardDict = {
   'h.escalationThreshold': '**连续**多少次子代理失败记作一次升级。子代理成功会清零连击，因此偶发失败不会烧掉上限。',
   'h.maxSpendUsd': '单个编排任务的硬预算。0 表示不启用。成本来自下方定价表，因此未配置定价时花费恒为 0，该上限不会触发。',
   'h.workerLedgerCap': '状态报告保留的每 worker 成本行数。任务总额是权威值、不受影响——这里只限制展示列表长度。',
+  'h.auditEnabled': '在一次**确实委派过**的编排结束后，检查是否每个 worker 都回报了、是否存在 CTO 总结，并用一次小的 Fast 档调用核对验收声明是否有 worker 结果支撑。审计绝不阻断或改变轮次；结论以 `/router status` 的 Last audit 行呈现。',
+  'h.auditTimeoutMs': '审计调用的最长耗时。免费的确定性检查总会执行；LLM 复核是尽力而为。',
+  'h.auditPromptCap': '审计提示词（目标 + CTO 总结 + worker 结果）的字符上限，即审计成本上限。',
   'h.failoverBaseMs': '首次 5xx 故障后的冷却时长；每次重试等待翻 4 倍。',
   'h.failoverMaxMs': '指数退避的上限。',
   'h.startAttempts4xx': '429/配额类故障从该等级开始计退避，而非从第 1 级开始。',

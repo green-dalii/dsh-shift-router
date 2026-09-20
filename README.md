@@ -126,6 +126,9 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `orchestration.escalationThreshold` | `2` | **Consecutive** worker failures that count as one escalation; a successful worker result resets the streak. At the cap Smart must take over and the subagent tool is denied (**enforced**) |
 | `orchestration.maxSpendUsd` | `0` | Hard budget for one orchestrated task, in USD; `0` disables it. It is part of `capHit`, so reaching it denies further delegation. Needs a `pricing` entry to be meaningful — with no pricing the spend is legitimately 0 |
 | `orchestration.workerLedgerCap` | `20` | Per-worker cost rows kept for the status report (oldest dropped). The task total is authoritative and unaffected |
+| `orchestration.audit.enabled` | `true` | After a run that actually delegated, audit the acceptance claim: every worker reported, a CTO summary exists, and (one small Fast-tier call) the claim is grounded in the worker results |
+| `orchestration.audit.timeoutMs` | `5000` | Auditor call budget. The free deterministic checks always run |
+| `orchestration.audit.promptCap` | `6000` | Character cap for the auditor prompt — the cost bound, and the cap that bounds how much worker evidence is kept |
 | `failover.baseMs` | `60000` | Cooldown base delay for 5xx failures (1m) |
 | `failover.maxMs` | `21600000` | Hard cap on the backoff ladder (6h) |
 | `failover.startAttempts4xx` | `3` | 4xx (429/402/quota) failures start at this attempt (16m), client limits usually outlive server blips |
@@ -222,6 +225,8 @@ So the router does two things instead of asserting a guarantee it cannot keep:
 2. **Factual prompt** — the orchestrator prompt tells the CTO that a worker's model comes from the harness allowlist, and that the Fast chain listed below is what the deployment should have authorised.
 
 The caps are enforced by the router, not just described: every `subagent` tool call while an orchestration turn is active increments `orchestration.rounds`; **consecutive** failed (`isError`) subagent results advance a streak, and reaching `orchestration.escalationThreshold` increments `orchestration.escalations` and resets the streak (a successful worker result also resets it, so isolated failures do not burn the cap). `capHit()` also covers the optional budget (`orchestration.maxSpendUsd`) and names the cap that fired. Once `capHit()` is true the `subagent` tool is **denied** at `tools/pre-execute` and the orchestrator prompt section is replaced by a "wrap up now" notice. `/router status` shows the live counters (`round x/max, esc y/threshold`), and — once workers have reported — the attribution line `Orchestration spend: $X · N/M workers reported`. Cost comes from the `pricing` table; a worker's spend is taken from **its own** session's usage and priced with the model the worker actually ran, so a worker that inherited the Smart model shows up priced as Smart.
+
+The caps stop a run from flying away; they cannot stop a CTO from *claiming* acceptance it never verified. So a run that actually delegated is also **audited**: deterministic checks always run (every dispatched worker reported, a CTO summary exists, no cap ended the run), and — when the audit is enabled — one small Fast-tier call verifies that the claim is grounded in the worker results, aligned with your goal, and not placeholder work. The audit never blocks or changes a turn: the LLM half runs detached, and its findings appear as `Last audit:` in `/router status`.
 
 ## Development
 

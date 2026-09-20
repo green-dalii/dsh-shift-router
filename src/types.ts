@@ -195,6 +195,8 @@ export interface OrchestrationConfig {
   maxSpendUsd: number
   /** Per-worker ledger size kept for display (oldest dropped). */
   workerLedgerCap: number
+  /** Post-run acceptance audit (C1). */
+  audit: OrchestrationAuditConfig
   /** Max review/delegate rounds before Smart takes over (hard cap). */
   maxRounds: number
   /**
@@ -235,6 +237,47 @@ export interface ShiftRouterConfig {
    * spend from this table when the user fills it in. Empty by default.
    */
   pricing: ModelPricing[]
+}
+
+/**
+ * Configuration for the orchestration acceptance audit (C1).
+ *
+ * All three knobs are deployment decisions: whether to audit at all, how long
+ * the auditor may take, and how much evidence it may read (the cost bound).
+ */
+export interface OrchestrationAuditConfig {
+  /** Run the audit after an orchestrated run. Default true. */
+  enabled: boolean
+  /** Max ms for the auditor LLM call; deterministic checks always run. */
+  timeoutMs: number
+  /** Character cap for the whole auditor prompt. */
+  promptCap: number
+}
+
+/**
+ * Result of the acceptance audit for one orchestrated run.
+ *
+ * `violations` is the whole point: an empty list means the loop closed. The
+ * deterministic fields are always present; `llm` only when the auditor ran.
+ */
+export interface OrchestrationAudit {
+  /** Epoch ms when the audit ran. */
+  auditedAt: number
+  /** Workers dispatched / reported, so the record reads on its own. */
+  spawned: number
+  done: number
+  /** Every dispatched worker reported back. */
+  complete: boolean
+  /** The final assistant message carried a CTO summary. */
+  hasCtoSummary: boolean
+  /** The run ended at a hard cap. */
+  capHit: boolean
+  /** Findings, human-readable. Empty = clean. */
+  violations: string[]
+  /** The run never delegated, so only deterministic checks applied. */
+  selfExecuted?: boolean
+  /** Auditor verdict, present only when the LLM pass ran and parsed. */
+  llm?: { verdict: 'pass' | 'flag'; issues: string[] }
 }
 
 /** Orchestration lifecycle state (per-agent, not persisted). */
@@ -279,6 +322,12 @@ export interface OrchestrationState {
   spend: number
   /** Bounded per-worker ledger for `/router status` (oldest dropped). */
   workerSpends: WorkerSpendRecord[]
+  /** The user's prompt for this task, captured for the audit's goal-alignment check. */
+  goal: string | null
+  /** The CTO's latest assistant message during this task (the acceptance claim). */
+  ctoSummary: string | null
+  /** Worker result texts collected for the auditor, bounded (see appendWorkerResult). */
+  workerResults: string[]
   /**
    * Consecutive worker failures. A success resets it to 0; reaching
    * `escalationThreshold` increments `escalations` and resets the streak, so
@@ -325,6 +374,7 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     escalationThreshold: 2,
     maxSpendUsd: 0,
     workerLedgerCap: 20,
+    audit: { enabled: true, timeoutMs: 5000, promptCap: 6000 },
   },
   failover: {
     baseMs: 60_000,
@@ -412,6 +462,8 @@ export interface RouterState {
   actualModel: string | null
   /** The most recent routing decision (display only). */
   lastDecision: LastDecision | null
+  /** Result of the last orchestration acceptance audit (C1), or null. */
+  lastAudit: OrchestrationAudit | null
   /**
    * Cumulative per-tier spend. Populated from assistant/message usage
    * (token counts) plus estimated USD when the caller supplies pricing.

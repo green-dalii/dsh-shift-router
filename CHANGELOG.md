@@ -57,6 +57,16 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   orchestration request is a certainty and must be reported with
   `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
   tedious bulk batches classify as `fast` unless they set direction.
+- **Acceptance audit (C1)**, a fallback review that never blocks: deterministic
+  checks (every dispatched worker reported, a CTO summary exists, the run did not
+  end at a cap) always run, and a small Fast-tier auditor call verifies that the
+  acceptance claim is grounded in the worker results, aligned with the user's
+  goal, and not placeholder work. Findings surface as `Last audit:` in
+  `/router status`. DSH adaptations: evidence is collected from the plugin's own
+  event streams instead of an `agent_end` transcript, the auditor runs through
+  `ctx.llm.stream` (the plugin holds no credentials), the prompt is inlined
+  rather than shipped as a `.md`, and the LLM half is detached at the turn
+  boundary so an audit can never delay a turn.
 - **Convergence protocol in the orchestrator prompt (C2)**: every re-delegation
   must carry a `## Failure report` with *what failed* / *where* / *the acceptance
   test to re-run now*; re-sending the same report is forbidden (that is the

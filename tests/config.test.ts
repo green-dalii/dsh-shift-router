@@ -137,6 +137,11 @@ describe('orchestration cost knobs (C3/C5)', () => {
     expect(resolved.orchestration.workerLedgerCap).toBe(20)
   })
 
+  it('defaults the acceptance audit to on, with a bounded cost', () => {
+    const resolved = (validate({}) as { value: { orchestration: { audit: Record<string, unknown> } } }).value
+    expect(resolved.orchestration.audit).toEqual({ enabled: true, timeoutMs: 5000, promptCap: 6000 })
+  })
+
   it('rejects a negative budget loudly', () => {
     const result = validate({ orchestration: { maxSpendUsd: -1 } }) as { issues?: { message: string }[] }
     expect(result.issues?.length).toBeGreaterThan(0)
