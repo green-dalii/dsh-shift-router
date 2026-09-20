@@ -440,6 +440,22 @@ R4 的目标是把「编排能跑」做成「编排可信」，并把上一轮�
 | **C1** | `src/audit.ts`：确定性半（worker 完整性 / CTO 总结 / 是否触帽）总跑；LLM 半仅在 `spawned ≥ 1` + 启用 + 有健康 fast 端点时跑，走 `ctx.llm.stream`（**不持有凭据**）、冷却过滤、失败即降级为 violation；`turn-stopping` 处同步完成确定性半、**分离**执行 LLM 半（不拖慢轮次）；证据捕获（goal / ctoSummary / workerResults）按 `promptCap` 有界；结果落 `state.lastAudit` 并由 `/router status` 的 `Last audit:` 行呈现。与上游的四处适配：转录→事件快照、endpoint+fetch→ctx.llm.stream、`.md` 文件→内联提示词、agent_end 等待→分离执行 | `audit.test.ts`（20 项：确定性判定、解析、提示词构造与截断、自执行/禁用/全冷却跳过、链式 failover、flag→violation、抛错→violation、不可解析→不臆断）；`commands-handler.test.ts`（状态行）；`config.test.ts`（默认值） |
 | **C2** | `ORCHESTRATOR_PROMPT` 新增「Convergence protocol」：`## Failure report` 三要素（what failed / where / acceptance test now）、禁止重发同一报告（即接管信号）、接管阈值与硬帽同源；硬帽段补上预算帽说明 | `orchestrate.test.ts` 三条提示词断言（三要素、no-repeat + takeover、阈值随配置改变） |
 
+### R4.4 Gate 结果与闸门自检（R4 收尾）
+
+| Gate | 结果 |
+|---|---|
+| `npx tsc --noEmit`（宿主） | ✅ |
+| `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
+| `npx vitest run` | ✅ **275 tests / 14 files**（R4 新增 `audit.test.ts` 等，净增 47 项） |
+| `npm run build`（tsc + tsc client + tsdown） | ✅ |
+| `npm run test:e2e` | ✅ 三场景（新装 / pre-alignment / 默认 auto + web 服务行）+ 设置往返；**默认 auto 场景会走到新的 `turn-stopping` 审计路径**，故该路径也被真实执行 |
+| 真实 `web` 组合启动（派生 profile + `--port 0`） | ✅ 进程正常进入服务状态，无 plugin tree 报错 |
+| **闸门自检（变异测试）** | ✅ **7/7 被抓**：C3 账本不累加 / C3 spend 改为账本求和 / C5 预算不入 capHit / C2 删掉 failure-report 契约 / C1 自执行轮次进入 LLM 复核 / C1 忽略触帽原因 / C4(a) 撤销写成启用 |
+
+R4 的新增接口（`OrchestrationState` 的 `spawned/done/spend/workerSpends/goal/ctoSummary/workerResults`、`RouterState.lastAudit`、`orchestration.{maxSpendUsd,workerLedgerCap,audit.*}`）全部有默认值且有单测；`config.test.ts` 与 CLI/GUI 双注册表一致性测试继续覆盖新叶子。
+
+**未在本轮交付（如实记录）**：编排状态在**卡片**上的运行期展示（`Worker delegation` / `Last audit` 只出现在 `/router status`）。原因：卡片是设置表单，展示运行期状态需要一条插件并不具备的浏览器↔宿主通道；R3 的结论也表明命令才是自带 profile 下始终可达的界面。若将来要做，正确形态是给插件加一个 remote/API 面（而不是把状态塞进设置快照）。
+
 ---
 
 ## 明确不对齐（附理由）
