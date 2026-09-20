@@ -22,12 +22,14 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { ShiftRouterCardController } from './controller.js'
-import type { LlmCatalogApi } from './model-catalog.js'
+import { CATALOG_REFRESH_EVENTS, type ModelCatalogRemote } from './model-catalog.js'
 import { ShiftRouterCard } from './ShiftRouterCard.js'
 import { en, zh, type ShiftRouterCardKey } from './locales.js'
 
@@ -60,14 +62,28 @@ export const inject = ['slots', 'locale', 'settingsScope']
  */
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'shift-router: card dictionaries')
-  // `connection` (dsh-client-connection) provides the api the model dropdowns
-  // read the deployment's configured models from; it may be absent in exotic
-  // shells, in which case the card falls back to free-text model rows.
-  const connection = ctx.get('connection') as { api?: unknown } | undefined
-  const controller = new ShiftRouterCardController(
-    ctx.settingsScope.bind({ namespace: NS }),
-    connection?.api as LlmCatalogApi | undefined,
-  )
+  const controller = new ShiftRouterCardController(ctx.settingsScope.bind({ namespace: NS }))
+  // Until the composition provides the catalog remote, the card says so rather
+  // than showing a loading state that will never resolve — the failure mode that
+  // quietly turned every model control into a text box (ALIGNMENT §R7).
+  controller.attachCatalog(undefined)
+  // Model lists come from the Host generation catalog — the same remote the
+  // `/model` selector reads (SPEC §12.2). It is read reactively: a composition
+  // that provides `remote` after this plugin loads still gets dropdowns, and one
+  // that never does keeps a card that says why instead of failing to mount.
+  ctx.inject(['remote', 'remote.session'], (rctx) => {
+    const remote: ModelCatalogRemote = rctx.remote
+    controller.attachCatalog(remote)
+    for (const event of CATALOG_REFRESH_EVENTS) {
+      rctx.effect(
+        () => rctx.remote.$on(event, () => void controller.refreshCatalog()),
+        `shift-router: reload models on ${event}`,
+      )
+    }
+  })
+  // A reconnect is a new Host generation: the previous catalog is not evidence
+  // about this one.
+  ctx.on('connection/reset', () => void controller.refreshCatalog())
   // Keyed slot: `key` (the settings namespace) is the cell key the tab
   // dispatches on. A keyed cell has no `id`/`order` — registration order is the
   // ledger's, and the tab renders in the served-namespace order.

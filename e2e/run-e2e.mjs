@@ -265,6 +265,10 @@ try {
   }
   console.log(`  probe: ${probe ? JSON.stringify(probe) : '(no result file)'}`)
   assert(probe?.ok === true, `settings round-trip ok (${probe?.detail ?? 'missing'})`)
+  // The card's dropdowns read exactly this catalog: if the deployment advertises
+  // no models, the card has nothing to offer however well it is wired.
+  assert(probe?.models?.includes('fake/fake-smart') && probe?.models?.includes('fake/fake-fast'),
+    `the host catalog advertises the configured models (${probe?.models?.join(', ') || 'none'})`)
 } finally {
   if (KEEP) {
     console.log(`\nkept the scratch home: ${home}`)

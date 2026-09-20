@@ -32,6 +32,19 @@ class FakeAdapter extends LlmAdapter {
     }
   }
 
+  /**
+   * The advisory catalog the GUI card and the `/model` selector read. Without
+   * it a deployment advertises no models at all, which is exactly the state that
+   * leaves a provider's dropdown empty — so the fixture must have one for the
+   * e2e to prove the card's source answers.
+   */
+  async listModels(provider) {
+    return [
+      { provider, id: 'fake-fast', name: 'Fake Fast' },
+      { provider, id: 'fake-smart', name: 'Fake Smart' },
+    ]
+  }
+
   stream(options) {
     const isJudge = (options.system ?? '').includes('Judge System Prompt')
     const text = isJudge

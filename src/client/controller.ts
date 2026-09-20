@@ -24,7 +24,13 @@ import {
   type SectionPatch,
   type StagedDraft,
 } from './form-model.js'
-import { EMPTY_CATALOG, loadModelCatalog, type LlmCatalogApi, type ModelCatalog } from './model-catalog.js'
+import {
+  CATALOG_UNAVAILABLE,
+  EMPTY_CATALOG,
+  loadModelCatalog,
+  type ModelCatalog,
+  type ModelCatalogRemote,
+} from './model-catalog.js'
 
 /** One field's rendered state: the control's text or rows and its override marker. */
 export interface FieldState {
@@ -73,6 +79,7 @@ export class ShiftRouterCardController {
   private readonly fields: readonly CardField[]
   private readonly staged = new Map<string, StagedDraft>()
   private catalog: ModelCatalog = EMPTY_CATALOG
+  private source: ModelCatalogRemote | undefined
   private saving = false
   private failed = false
   private readonly listeners = new Set<() => void>()
@@ -80,19 +87,37 @@ export class ShiftRouterCardController {
 
   constructor(
     scope: SettingsScope<unknown>,
-    api?: LlmCatalogApi,
     fields: readonly CardField[] = CARD_FIELDS,
   ) {
     this.scope = scope
     this.fields = fields
     this.store = createSnapshotStore(this.projection())
     this.scope.subscribe(() => this.publish())
-    if (api !== undefined) void this.refreshCatalog(api)
   }
 
-  /** Load the configured-model catalog in the background and republish. */
-  private async refreshCatalog(api: LlmCatalogApi): Promise<void> {
-    this.catalog = await loadModelCatalog(api)
+  /**
+   * Attach (or detach) the Host model catalog and read it.
+   *
+   * The remote is a reactive dependency: the card is mounted before the client
+   * assembly may have provided it, and a composition that never does keeps a
+   * usable card — manual entry with a stated reason, never an empty dropdown
+   * (SPEC §12.2).
+   * @param source - the remote face, or undefined when the service is absent.
+   */
+  attachCatalog(source: ModelCatalogRemote | undefined): void {
+    this.source = source
+    this.catalog = source === undefined
+      ? { ...EMPTY_CATALOG, status: 'failed', error: CATALOG_UNAVAILABLE }
+      : EMPTY_CATALOG
+    this.publish()
+    if (source !== undefined) void this.refreshCatalog()
+  }
+
+  /** Re-read the catalog (called when the Host's model inputs may have changed). */
+  async refreshCatalog(): Promise<void> {
+    const source = this.source
+    if (source === undefined) return
+    this.catalog = await loadModelCatalog(source)
     this.publish()
   }
 

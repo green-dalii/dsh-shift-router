@@ -27,6 +27,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ROUTER_SETTINGS_NAMESPACE } from '../src/index.js'
 import * as card from '../src/client/index.js'
+import { CATALOG_UNAVAILABLE, type ModelCatalog, type ModelCatalogRemote } from '../src/client/model-catalog.js'
 import { ShiftRouterCard } from '../src/client/ShiftRouterCard.js'
 
 // In the browser the card's store comes from the platform seed
@@ -114,16 +115,37 @@ function declareCardSlot(core: SlotCore): () => void {
   )
 }
 
+/** The model catalog the fake remote answers with. */
+const CATALOG_REMOTE: ModelCatalogRemote = {
+  session: {
+    modelCatalog: async () => ({
+      ok: true as const,
+      value: {
+        default: { provider: 'p', model: 'm' },
+        routableProviders: ['p'],
+        groups: [{ id: 'p', name: 'P', models: [{ id: 'm', name: 'M' }] }],
+        failures: [],
+      },
+    }),
+  },
+}
+
 /**
  * A context with the services the browser half requires, whose `slots` is the
  * real registry (a stub has no kind rules to violate) and whose `slots.inject`
  * mirrors the runtime service: run the callback now when the slot is already
  * declared, otherwise on the declaration.
  * @param core - the real slot registry.
- * @returns the fake context and the effects it installed.
+ * @param options - whether the composition provides the model-catalog remote.
+ * @returns the fake context, the effects it installed, and the subscribed events.
  */
-function cardContext(core: SlotCore): { ctx: Context; effects: string[] } {
+function cardContext(core: SlotCore, options: { remote?: boolean } = { remote: true }): {
+  ctx: Context
+  effects: string[]
+  remoteEvents: string[]
+} {
   const effects: string[] = []
+  const remoteEvents: string[] = []
   const boundScope = {
     subscribe: () => () => {},
     getSnapshot: () => SNAPSHOT,
@@ -153,17 +175,44 @@ function cardContext(core: SlotCore): { ctx: Context; effects: string[] } {
       }
     },
   }
-  const ctx = {
-    effect: (callback: () => () => void, label: string) => {
-      effects.push(label)
-      return callback()
+  const effect = (callback: () => () => void, label: string) => {
+    effects.push(label)
+    return callback()
+  }
+  // The reactive dependency `apply` declares: the callback runs exactly when the
+  // composition provides the services, as Cordis does.
+  const remoteContext = {
+    effect,
+    remote: {
+      session: CATALOG_REMOTE.session,
+      $on: (event: string) => {
+        remoteEvents.push(event)
+        return () => {}
+      },
     },
+  }
+  const ctx = {
+    effect,
     get: () => undefined,
+    inject: (deps: readonly string[], callback: (scope: unknown) => void) => {
+      if (options.remote === true) callback(remoteContext)
+      return () => {}
+    },
+    on: () => () => {},
     locale: { register: () => () => {} },
     settingsScope: { bind: () => boundScope },
     slots,
   }
-  return { ctx: ctx as unknown as Context, effects }
+  return { ctx: ctx as unknown as Context, effects, remoteEvents }
+}
+
+/** The card's published state, reached through the face the slot injects. */
+function cardFace(core: SlotCore): { getSnapshot(): { catalog: ModelCatalog } } {
+  const face = core.entries(SLOT)[0]?.inject?.() as
+    | { hooks: { shiftRouterCard: { getSnapshot(): { catalog: ModelCatalog } } } }
+    | undefined
+  if (face === undefined) throw new Error('the card was not registered')
+  return face.hooks.shiftRouterCard
 }
 
 /** The tab's own selection rule, copied from `ConfigurablePluginsTabController`. */
@@ -224,6 +273,41 @@ describe('the card registers into the keyed settings slot', () => {
     expect(entry?.locale).toBe('shift-router')
     const face = entry?.inject?.() as { edit?: unknown } | undefined
     expect(typeof face?.edit).toBe('function')
-    expect(effects).toEqual(['shift-router: card dictionaries'])
+    // Its dictionary registration is an effect, so unloading the plugin removes it.
+    expect(effects).toContain('shift-router: card dictionaries')
+  })
+
+  it('loads the deployment catalog and subscribes to its refresh events', async () => {
+    const core = new SlotCore()
+    mountHostSettings(core)
+    const { ctx, remoteEvents } = cardContext(core)
+    card.apply(ctx)
+
+    // The card's own state is the observable: the dropdowns become real only
+    // once the Host answered.
+    const face = cardFace(core)
+    expect(face.getSnapshot().catalog.providers).toEqual([])
+    await vi.waitFor(() => expect(face.getSnapshot().catalog.status).toBe('ready'))
+    expect(face.getSnapshot().catalog.providers).toEqual([{ id: 'p', name: 'P' }])
+    expect(remoteEvents).toEqual([
+      'llm/adapters-updated',
+      'settings/document-updated',
+      'credentials/reference-updated',
+    ])
+  })
+
+  it('still mounts, and says why, when the composition provides no catalog', () => {
+    // The catalog is an enhancement: a shell without it must keep a usable card
+    // (manual entry with a stated reason), never lose the card entirely.
+    const core = new SlotCore()
+    mountHostSettings(core)
+    const { ctx, remoteEvents } = cardContext(core, { remote: false })
+    expect(() => card.apply(ctx)).not.toThrow()
+    expect(core.entries(SLOT)).toHaveLength(1)
+    expect(remoteEvents).toEqual([])
+    expect(cardFace(core).getSnapshot().catalog).toMatchObject({
+      status: 'failed',
+      error: CATALOG_UNAVAILABLE,
+    })
   })
 })
