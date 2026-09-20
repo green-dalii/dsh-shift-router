@@ -1,0 +1,58 @@
+# dsh-shift-router — the DEFAULT orchestration config, exercised for real
+#
+# `orchestration.mode` defaults to `auto`, and that is the mode that shipped
+# broken: the worker-model self-check read `ctx.subagentModelSelection` as an
+# undeclared service, which throws while the service is absent and aborts the
+# whole DSH boot. Both pre-existing overlays pinned `mode: off`, so no E2E ever
+# executed that branch and `--dump-config` cannot see it either (it composes
+# configuration; it never instantiates a plugin).
+#
+# This overlay therefore asserts the thing that was missing: a profile boots
+# under the plugin's own default mode, routes a turn, and reports the worker
+# situation instead of crashing.
+#
+# The second row is the REAL service row from `dsh-web-app`'s composition, not a
+# stub: the `web` profile mounts it as a sibling of this plugin and the two load
+# concurrently, which is the ordering that produced the boot abort. Mounting it
+# here gives the E2E the same composition shape. (The deterministic
+# before/after ordering is pinned by tests/plugin-load.test.ts, where it can be
+# forced instead of raced.)
+
+- insert:
+    - id: shift-router-e2e-adapter
+      name: ./fake-adapter.mjs
+    # Verbatim from @deepseek-ai/dsh-web-app/cordis.patch.yml — web-only row.
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
+- id: shift-router
+  config:
+    enabled: true
+    tiers:
+      fast:
+        label: Fast (e2e)
+        models:
+          - { provider: fake, model: fake-fast, priority: 1 }
+      smart:
+        label: Smart (e2e)
+        models:
+          - { provider: fake, model: fake-smart, priority: 1 }
+    routing:
+      mode: auto
+      economics:
+        reworkPenalty: 3
+        downgradeMemory: 2
+      window:
+        size: 5
+        minConfidence: 0.5
+      cacheAware:
+        enabled: true
+        sameFamilyPenalty: 1.5
+        idleBoundaryMs: 300000
+    # The default. Orchestration is ON, which is what arms the self-check.
+    orchestration:
+      mode: auto
+    failover:
+      baseMs: 60000
+      maxMs: 21600000
+      startAttempts4xx: 3

@@ -14,7 +14,12 @@
  *      patched with the PRE-alignment config (legacy knobs at their old
  *      defaults plus the removed `requireSmartModel` key), and assert the same
  *      outcome — the upgrade path is part of "installs and runs"
- *   6. assert the `shift-router` settings namespace round-trips a write
+ *   6. run a third turn under `e2e/orchestration-overlay.yml`, which uses the
+ *      plugin's DEFAULT orchestration mode and mounts the web-only
+ *      `subagent-model-selection-settings` row beside it. That branch used to
+ *      abort the whole boot, so this asserts the composition applies and the
+ *      turn still routes.
+ *   7. assert the `shift-router` settings namespace round-trips a write
  *
  * Usage:
  *   node e2e/run-e2e.mjs            # scratch home under the OS temp dir
@@ -105,6 +110,29 @@ try {
   assert(legacyLine.includes('ROUTER-E2E: turn ran on fake/fake-smart'),
     'a profile still carrying the legacy knobs routes identically (inert defaults + removed key ignored)')
   assert(!legacy.output.includes('expected'), 'the legacy document loads without a schema rejection')
+
+  step('booting the DEFAULT orchestration config with the web-only selection service mounted')
+  const orchestrated = await run(
+    ['--profile', PROFILE, '--patch', join(HERE, 'orchestration-overlay.yml'), PROMPT],
+  )
+  const orchLine = orchestrated.output.split('\n').find((l) => l.includes('ROUTER-E2E:'))?.trim() ?? ''
+  console.log(`  output: ${orchLine || '(nothing)'}`)
+  // The whole point: this run used to die with
+  //   cannot get property "subagentModelSelection" without inject
+  // and take the plugin tree with it.
+  assert(!orchestrated.output.includes('without inject'),
+    'the plugin does not read an undeclared service (the boot abort is gone)')
+  assert(!orchestrated.output.includes('failed to apply loader entry'),
+    'every row in the composition — including the web-only settings row — applied')
+  assert(orchLine.includes('ROUTER-E2E: turn ran on fake/fake-smart'),
+    'orchestration mode auto still routes the turn to the Smart tier model')
+  // NOT asserted here: the router's `ctx.logger.warn` self-check text. Cordis's
+  // logger only fills a 1000-entry memory ring, and no shipped DSH composition
+  // registers an exporter, so plugin log lines never reach stdout in ANY
+  // profile — asserting on them would assert on nothing. The self-check's
+  // wiring (present-early, present-late, absent, allowlisted) is pinned in
+  // tests/plugin-load.test.ts against a real Cordis context instead, and its
+  // user-visible form is pinned by the `/router status` tests.
 
   step('checking the settings namespace round-trip')
   let probe = null

@@ -14,8 +14,13 @@
 #   - `routing.economics` is absent and is filled from schema defaults.
 #
 # `e2e/run-e2e.mjs` runs one turn under this overlay and asserts the same
-# outcome as the current-config overlay. Orchestration is off so the assertion
-# targets the model switch.
+# outcome as the current-config overlay.
+#
+# `orchestration.mode: auto` is deliberate: this fixture exists to mirror a real
+# pre-alignment profile (the one that failed to boot), and those carry the
+# default mode. Pinning it to `off` — as this fixture used to — is exactly how
+# the boot regression escaped the E2E suite, so the fixture now reproduces the
+# failing composition instead of avoiding it.
 
 - insert:
     - id: shift-router-e2e-adapter
@@ -46,7 +51,7 @@
         sameFamilyThreshold: 0.9
         idleBoundaryMs: 300000
     orchestration:
-      mode: off
+      mode: auto
       maxRounds: 3
       escalationThreshold: 2
       # Removed by the alignment round; must be ignored, never a load failure.
