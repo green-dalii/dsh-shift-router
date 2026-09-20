@@ -61,6 +61,16 @@ export interface CommandDeps {
    */
   workerModelSelection(): WorkerModelSelection | undefined
   /**
+   * Authorise this plugin's Fast-tier routes in the HOST's
+   * `subagent-model-selection` namespace (C4(a)), so the orchestrator can pin
+   * workers to Fast instead of letting them inherit the Smart model.
+   *
+   * `enabled: false` revokes authorisation without dropping the route list.
+   * The write goes through the settings provider, which is namespace-agnostic
+   * (`get`/`update` take the namespace), so no ownership transfer is needed.
+   */
+  authorizeWorkerRoutes(enabled: boolean): Promise<{ ok: true; detail: string } | { ok: false; reason: string }>
+  /**
    * Persist a partial patch into the shift-router settings namespace.
    * Resolves null on success, or a human-readable failure reason.
    */
@@ -433,12 +443,25 @@ async function configSummary(config: ShiftRouterConfig, deps: CommandDeps): Prom
 export function registerCommands(deps: CommandDeps): CommandDefinition[] {
   const router: CommandDefinition = {
     name: 'router',
-    description: 'dsh-shift-router: show status, enable/disable, gear preset, orchestration mode (on|off|status|stats|verbose|config|orchestrate|eco|default|sport)',
-    input: { hint: 'status | stats | on | off | verbose | config | orchestrate auto|off | eco|default|sport' },
+    description: 'dsh-shift-router: show status, enable/disable, gear preset, orchestration mode (on|off|status|stats|verbose|config|orchestrate|allow-workers|eco|default|sport)',
+    input: { hint: 'status | stats | on | off | verbose | config | orchestrate auto|off | allow-workers [off] | eco|default|sport' },
     handler: async ({ agent, rawInput }) => {
       const config = deps.getConfig()
       const arg = rawInput.trim().toLowerCase()
 
+      if (arg === 'allow-workers' || arg === 'allow-workers on' || arg === 'allow-workers off') {
+        const enabled = arg !== 'allow-workers off'
+        const outcome = await deps.authorizeWorkerRoutes(enabled)
+        if (!outcome.ok) {
+          return { kind: 'error', text: `🪄 worker authorisation not written: ${outcome.reason}` }
+        }
+        return {
+          kind: 'success',
+          text: enabled
+            ? `🪄 workers may now be pinned to Fast — ${outcome.detail}`
+            : `🪄 worker model selection revoked (${outcome.detail})`,
+        }
+      }
       if (arg === 'orchestrate') {
         return {
           kind: 'success',

@@ -436,6 +436,16 @@ capability is **absent** rather than disabled. Therefore:
   is the surface a user can actually read.
 - The orchestrator prompt states this condition factually instead of asserting a
   guarantee.
+- **Assisted authorisation (`/router allow-workers [off]`).** The plugin writes
+  the Fast chain into the host namespace itself (`settings.update(
+  'subagent-model-selection', { enabled, allowedModels })`). The settings
+  provider is namespace-agnostic — `get`/`update` take the namespace — so this
+  needs no ownership transfer, and `enabled: false` revokes authorisation while
+  keeping the route list. The write is refused with a specific reason when the
+  composition mounts no such namespace (`headless`), when the settings service is
+  absent, or when the Fast chain is empty; the command reports exactly which
+  routes it wrote. This is the surface that works in every profile, including
+  the ones a GUI card cannot reach (§13).
 
 ### 7.4.1 Acceptance audit (safety net, never a gate)
 
@@ -639,6 +649,7 @@ presets which are persisted.
 | `/router on` \| `/router off` | enable/disable routing for this session |
 | `/router verbose` \| `/router log` | toggle `ux.routerLogVerbose` |
 | `/router orchestrate [auto\|on\|off]` | orchestration mode |
+| `/router allow-workers [on\|off]` | write/revoke the Fast chain in the host `subagent-model-selection` allowlist (C4(a)) |
 | `/router eco` \| `/router default` \| `/router sport` | gear presets → `routing.economics.mode`, **persisted** |
 | `/router config …` | numbered registry + `get` / `set` / `unset` / `diff` / `set-fast` / `set-smart` / `reset` |
 | `/route-force <fast\|smart\|auto\|provider/model>` | one-turn override; `auto` clears |

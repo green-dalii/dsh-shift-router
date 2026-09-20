@@ -113,7 +113,7 @@ contract is SPEC §7, §9, §13.
 | **C5** budget guard | (our own promise) | ✅ `orchestration.maxSpendUsd` wired into `capHit` + `capReason()` as the single authority |
 | **C2** convergence protocol | v1.2.0 + v1.3.0 | ✅ structured `## Failure report` contract (what/where/acceptance) + no-repeat-then-takeover rule, sharing the enforced threshold |
 | **C1** non-blocking acceptance audit | v1.3.0/v1.4.0/v1.4.2 | ✅ `src/audit.ts` + inlined auditor prompt + `Last audit:` in `/router status` (deterministic checks always; LLM pass detached, cooldown-filtered, delegation-only) |
-| **C4(a)** GUI-assisted worker route authorisation | v1.0.0+ | 🚧 this round: card action writes the Fast chain into the host `subagent-model-selection` namespace |
+| **C4(a)** assisted worker route authorisation | v1.0.0+ | ✅ `/router allow-workers [on\|off]` writes/revokes the Fast chain in the host `subagent-model-selection` allowlist (delivered as a command rather than a card button: it works in every profile and is unit-testable; the card edits the Fast chain, which is the input) |
 | **C6** cross-turn lifecycle / parallel workers | upstream Phase 3 | ⛔ not aligned — **upstream has not shipped it either** |
 
 ## Planned

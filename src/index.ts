@@ -104,6 +104,16 @@ export const ROUTER_SETTINGS_NAMESPACE = 'shift-router'
 const SUBAGENT_TOOL = 'subagent'
 
 /**
+ * Host settings namespace holding the worker-route allowlist (C4(a)).
+ *
+ * Deliberately a literal: the owning package exports
+ * `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE`, but it is a devDependency
+ * (type-only), and a runtime value import would make it load-bearing. A test
+ * pins this literal against that exported constant so drift fails loudly.
+ */
+const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection'
+
+/**
  * A top-level agent is routable; subagents (orchestration workers) keep their
  * pinned model and are never touched by the router.
  */
@@ -871,6 +881,43 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     },
     subagentAvailable: () => ctx.tools.get(SUBAGENT_TOOL) !== undefined,
     workerModelSelection: () => readWorkerModelSelection(ctx),
+    authorizeWorkerRoutes: async (enabled) => {
+      // The settings provider is namespace-agnostic: `get`/`update` take the
+      // namespace, so authorising the HOST's worker-route allowlist needs no
+      // ownership transfer. The namespace literal is pinned against the owning
+      // package's exported constant by a test, because importing that value
+      // would make a devDependency load-bearing at runtime.
+      const settings = settingsProvider
+      if (settings === undefined) {
+        return { ok: false, reason: 'the settings service is unavailable in this composition' }
+      }
+      if (settings.get(SUBAGENT_MODEL_SELECTION_NS) === undefined) {
+        return {
+          ok: false,
+          reason: 'this profile does not mount the harness "subagent-model-selection" namespace (the web composition does; headless does not)',
+        }
+      }
+      const routes: { provider: string; model: string }[] = []
+      const seen = new Set<string>()
+      for (const ref of getConfig().tiers.fast.models) {
+        const key = `${ref.provider}/${ref.model}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        routes.push({ provider: ref.provider, model: ref.model })
+      }
+      if (routes.length === 0) {
+        return { ok: false, reason: 'the Fast tier chain is empty — configure it first (/router config set-fast provider/model)' }
+      }
+      try {
+        // `enabled: false` revokes authorisation but keeps the routes, so a
+        // later re-enable does not need the chain to be re-listed.
+        await settings.update(SUBAGENT_MODEL_SELECTION_NS, { enabled, allowedModels: routes })
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+      const list = routes.map((route) => `${route.provider}/${route.model}`).join(', ')
+      return { ok: true, detail: `${routes.length} route(s): ${list}` }
+    },
     updateSettings,
     resetSettings,
     mutateSettings,

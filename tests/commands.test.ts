@@ -128,3 +128,26 @@ describe('flattenLeaves', () => {
     expect(leaves[0]!.path).toBe('tiers.fast.models')
   })
 })
+
+describe('host worker-route namespace (C4(a))', () => {
+  // The plugin writes the HOST's namespace by literal, because the owning
+  // package is a type-only devDependency and a runtime value import would make
+  // it load-bearing. These two assertions are what keep that literal honest:
+  // a rename or a schema change upstream fails here instead of silently
+  // authorising nothing.
+  it('matches the namespace the owning package exports', async () => {
+    const mod = await import('@deepseek-ai/dsh-tool-subagent/model-selection-settings')
+    expect(mod.SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE).toBe('subagent-model-selection')
+  })
+
+  it('writes a patch the owning package schema accepts', async () => {
+    const mod = await import('@deepseek-ai/dsh-tool-subagent/model-selection-settings')
+    const schema = mod.SUBAGENT_MODEL_SELECTION_SETTINGS_SCHEMA as unknown as {
+      '~standard': { validate(v: unknown): { value?: unknown; issues?: unknown[] } }
+    }
+    const candidate = { enabled: true, allowedModels: [{ provider: 'p', model: 'fake-fast' }] }
+    const result = schema['~standard'].validate(candidate)
+    expect(result.issues).toBeUndefined()
+    expect(result.value).toEqual(candidate)
+  })
+})

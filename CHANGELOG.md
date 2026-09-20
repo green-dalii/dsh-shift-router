@@ -57,6 +57,14 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   orchestration request is a certainty and must be reported with
   `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
   tedious bulk batches classify as `fast` unless they set direction.
+- **`/router allow-workers [on\|off]`** (C4(a)): writes this plugin's Fast-tier
+  chain into the harness's own `subagent-model-selection` allowlist so the
+  orchestrator can pin workers to Fast instead of letting them inherit the Smart
+  model. The settings provider is namespace-agnostic, so no ownership transfer is
+  needed; `off` revokes authorisation but keeps the routes; an impossible write
+  (a profile without that namespace, no settings service, an empty Fast chain)
+  reports the specific reason. Needs `@deepseek-ai/dsh-tool-subagent`'s
+  namespace, which is pinned against the owning package by test.
 - **Acceptance audit (C1)**, a fallback review that never blocks: deterministic
   checks (every dispatched worker reported, a CTO summary exists, the run did not
   end at a cap) always run, and a small Fast-tier auditor call verifies that the

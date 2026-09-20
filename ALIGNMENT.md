@@ -427,7 +427,8 @@ R4 的目标是把「编排能跑」做成「编排可信」，并把上一轮�
 | **C5** | `orchestration.maxSpendUsd`（默认 0 = 不限）接进 `capHit`；触顶时拒绝 `subagent` 并切换为收尾提示 | 单测：0 表示不限；spend ≥ 阈值时 capHit 为真；提示词与拒绝条件一致 |
 | **C2** | 提示词新增**收敛协议**：每次重派必须带 `## Failure report`（什么失败 / 在哪 / 现在用什么验收测试复测）；禁止重发同一份报告，第二次即接管；`escalationThreshold` 是提示词与硬帽共用的阈值 | 提示词断言（三要素、接管条件、与硬帽阈值一致） |
 | **C1** | **不阻断**的验收审计：确定性检查（worker 是否都回话、有无 CTO 总结、是否触帽）总是跑；LLM 复核仅在**确实委派过**（spawned ≥ 1）且 fast 档有健康端点时跑；结果落 `lastAudit`，在 `/router status` 与卡片可见；审计永不影响轮次结论 | 纯函数单测（提取、判定、解析、冷却过滤）+ 接线单测 + 状态行断言 |
-| **C4(a)** | 卡片提供「把 Fast 链写入宿主 `subagent-model-selection` 白名单」的动作；写入目标 namespace 而非本插件 namespace；写入后自检告警消失 | 可行性调查结论 + 写路径单测 + 不可写时的诚实降级 |
+| **C4(a)** | 提供「把 Fast 链写入宿主 `subagent-model-selection` 白名单」的动作，写入目标 namespace 而非本插件 namespace。**交付形态修正**：做成 `/router allow-workers` 命令而非卡片按钮——可行性已核实（settings provider 的 `get`/`update` 是 namespace 无关的，跨插件写入已被 e2e 的 settings-probe 实证），但命令是**每个 profile 都可用**（headless 也能用）且**可单测**的界面；卡片本轮只负责编辑 Fast 链（授权的输入），运行期委派状态仍以 `/router status` 的 `Worker delegation:` 行为准——卡片是设置表单，展示运行期状态需要插件并不具备的浏览器↔宿主通道 | 见下「交付」 |
+| **C4(a)** | `/router allow-workers [on\|off]`：宿主侧经 settings provider（namespace 无关的 `get`/`update`）把 Fast 链写入 `subagent-model-selection`（`{enabled, allowedModels}`），去重；`off` 只撤销授权、保留路由；不可写时给出**具体原因**（该 profile 未挂载该 namespace / settings 服务缺失 / Fast 链为空） | `commands-handler.test.ts` 四条（写入并回报内容、`on` 形式、`off` 撤销、失败原因）；`commands.test.ts` 两条**把字面量钉在拥有包导出的常量与 schema 上**（重命名/改 schema 会红） |
 | **C6** | 不对齐，仅记录「上游亦未落地」 | ROADMAP 标注 |
 
 ### R4.3 交付核对

@@ -37,6 +37,9 @@ interface Harness {
   state: RouterState
   /** Set what the harness reports about model-selectable delegation (SPEC §7.4). */
   setWorkerModelSelection(value: { enabled: boolean; routes: number } | undefined): void
+  /** How many authorisation writes the commands requested, and in which direction. */
+  authorizations: boolean[]
+  setAuthOutcome(value: { ok: true; detail: string } | { ok: false; reason: string }): void
   /** Every settings patch the commands persisted, in order. */
   patches: Record<string, unknown>[]
   /** Every path-op batch the commands sent. */
@@ -67,6 +70,9 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
   const ops: readonly unknown[][] = []
   let changes = 0
   let workerSelection: { enabled: boolean; routes: number } | undefined
+  const authorizations: boolean[] = []
+  let authOutcome: { ok: true; detail: string } | { ok: false; reason: string } =
+    { ok: true, detail: '1 route(s): fake/fake-fast' }
   const deps: CommandDeps = {
     getConfig: () => config,
     getState: () => state,
@@ -76,6 +82,10 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
     clearManualOverride: () => { state.manualOverride = { active: false } },
     subagentAvailable: () => true,
     workerModelSelection: () => workerSelection,
+    authorizeWorkerRoutes: async (enabled) => {
+      authorizations.push(enabled)
+      return authOutcome
+    },
     updateSettings: async (patch) => {
       patches.push(patch)
       // The real settings write lands in this namespace, so mirror it: a test
@@ -90,9 +100,10 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
     listModels: async () => ['fake-fast', 'fake-smart'],
   }
   return {
-    deps, config, state, patches, ops,
+    deps, config, state, patches, ops, authorizations,
     configChanged: () => changes,
     setWorkerModelSelection: (value) => { workerSelection = value },
+    setAuthOutcome: (value) => { authOutcome = value },
   }
 }
 
@@ -417,5 +428,40 @@ describe('handler wiring', () => {
     const geared = harness()
     await router(geared, 'eco')
     expect(geared.configChanged()).toBe(0)
+  })
+})
+
+describe('/router allow-workers (C4(a) worker route authorisation)', () => {
+  it('authorises the Fast chain and reports exactly what it wrote', async () => {
+    const h = harness()
+    h.setAuthOutcome({ ok: true, detail: '2 route(s): p/fast-1, p/fast-2' })
+    const result = await router(h, 'allow-workers')
+    expect(result.kind).toBe('success')
+    expect((result as { text: string }).text).toContain('2 route(s): p/fast-1, p/fast-2')
+    expect(h.authorizations).toEqual([true])
+  })
+
+  it('accepts the explicit `on` form', async () => {
+    const h = harness()
+    await router(h, 'allow-workers on')
+    expect(h.authorizations).toEqual([true])
+  })
+
+  it('revokes without dropping the routes', async () => {
+    const h = harness()
+    h.setAuthOutcome({ ok: true, detail: '2 route(s): p/fast-1, p/fast-2' })
+    const result = await router(h, 'allow-workers off')
+    expect(result.kind).toBe('success')
+    expect((result as { text: string }).text).toContain('revoked')
+    expect(h.authorizations).toEqual([false])
+  })
+
+  it('surfaces the real reason when the write is impossible', async () => {
+    // e.g. a headless profile, which mounts no such namespace.
+    const h = harness()
+    h.setAuthOutcome({ ok: false, reason: 'this profile does not mount the harness "subagent-model-selection" namespace' })
+    const result = await router(h, 'allow-workers')
+    expect(result.kind).toBe('error')
+    expect((result as { text: string }).text).toContain('does not mount')
   })
 })

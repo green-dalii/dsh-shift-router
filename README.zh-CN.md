@@ -177,6 +177,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要�
 | `/router on` / `/router off` | 启用 / 停用（会话级） |
 | `/router verbose` / `/router log` | 详细日志开关 |
 | `/router orchestrate auto\|off` | 编排模式 |
+| `/router allow-workers [on\|off]` | 把本插件的 Fast 链写入 harness 的 `subagent-model-selection` 白名单，使 worker 可被固定到 Fast（`off` 只撤销授权、保留路由）。会如实回报写入内容或失败原因 |
 | `/router eco` / `/router default` / `/router sport` | 档位预设：设置 `routing.economics.mode`（持久化）——更省 ↔ 更黏在 Smart |
 | `/router config` | 交互式编辑器：带编号的字段列表（含当前值）+ 可用 providers + 用法 |
 | `/router config get <N\|path>` | 显示单个字段当前值，如 `get 4` 或 `get routing.judgeTimeout` |
@@ -217,8 +218,9 @@ node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要�
 
 因此路由器不去断言一个它无法保证的事，而是做两件事：
 
-1. **自检** —— 当编排开启且 Fast 链非空时，报告模型可选委派不可用，指明需要启用的设置并说明后果。有两个界面，因为第一个并非总是可达：`ctx.logger` 告警（仅挂载了日志导出器的部署可见），以及 `/router status` 的 `Worker delegation:` 行（始终可见）。该白名单服务只由 `web` 组合挂载，因此在 `headless` 下该行显示 `unavailable on this harness`。
-2. **如实描述** —— 编排提示词告知 CTO：工作代理的模型来自 harness 白名单，下方列出的 Fast 链是部署**应当**已授权的路由。
+1. **辅助授权** —— `/router allow-workers` 代你把 Fast 链写入 harness 白名单（这是插件在组合期无法替你做的那一步）。
+2. **自检** —— 当编排开启且 Fast 链非空时，报告模型可选委派不可用，指明需要启用的设置并说明后果。有两个界面，因为第一个并非总是可达：`ctx.logger` 告警（仅挂载了日志导出器的部署可见），以及 `/router status` 的 `Worker delegation:` 行（始终可见）。该白名单服务只由 `web` 组合挂载，因此在 `headless` 下该行显示 `unavailable on this harness`。
+3. **如实描述** —— 编排提示词告知 CTO：工作代理的模型来自 harness 白名单，下方列出的 Fast 链是部署**应当**已授权的路由。
 
 硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；**连续**失败（`isError`）的 subagent 结果推进连击，达到 `orchestration.escalationThreshold` 时递增 `orchestration.escalations` 并清零连击（工作代理成功同样清零，因此偶发失败不会烧掉上限）。`capHit()` 还覆盖可选预算（`orchestration.maxSpendUsd`），并说明具体是哪一顶帽触发。一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）；一旦有 worker 回报，还会显示归因行 `Orchestration spend: $X · N/M workers reported`。成本取自 `pricing`；每个 worker 的花费来自**它自己**会话的用量，并按该 worker 实际运行的模型计价，因此继承了 Smart 模型的 worker 会按 Smart 计价。
 

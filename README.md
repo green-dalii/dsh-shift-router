@@ -178,6 +178,7 @@ node scripts/expose-gui-settings.mjs --profile web   # legacy harnesses only —
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
 | `/router verbose` / `/router log` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
+| `/router allow-workers [on\|off]` | Authorise this plugin's Fast-tier routes in the harness `subagent-model-selection` allowlist, so workers can be pinned to Fast (`off` revokes, keeping the routes). Reports exactly what it wrote, or why it could not |
 | `/router eco` / `/router default` / `/router sport` | Gear presets: set `routing.economics.mode` (persisted) — cheaper ↔ stickier on Smart |
 | `/router config` | Interactive editor: numbered field list with current values + available providers + usage |
 | `/router config get <N\|path>` | Show one field's current value, e.g. `get 4` or `get routing.judgeTimeout` |
@@ -221,8 +222,9 @@ The original pi plugin delegated through pi-subagents with `agent: "worker"`, `c
 
 So the router does two things instead of asserting a guarantee it cannot keep:
 
-1. **Self-check** — when orchestration is enabled and the Fast chain is non-empty, it reports that model-selectable delegation is unavailable, naming the setting to enable and stating the consequence. Two surfaces, because the first one is not always reachable: a `ctx.logger` warning (visible wherever a log exporter is mounted), and a `Worker delegation:` line in `/router status`, which always works. The allowlist service is mounted by the `web` composition only, so on `headless` the line reads `unavailable on this harness`.
-2. **Factual prompt** — the orchestrator prompt tells the CTO that a worker's model comes from the harness allowlist, and that the Fast chain listed below is what the deployment should have authorised.
+1. **Assisted authorisation** — `/router allow-workers` writes the Fast chain into the harness allowlist for you (it is the one step the plugin cannot do for itself at composition time).
+2. **Self-check** — when orchestration is enabled and the Fast chain is non-empty, it reports that model-selectable delegation is unavailable, naming the setting to enable and stating the consequence. Two surfaces, because the first one is not always reachable: a `ctx.logger` warning (visible wherever a log exporter is mounted), and a `Worker delegation:` line in `/router status`, which always works. The allowlist service is mounted by the `web` composition only, so on `headless` the line reads `unavailable on this harness`.
+3. **Factual prompt** — the orchestrator prompt tells the CTO that a worker's model comes from the harness allowlist, and that the Fast chain listed below is what the deployment should have authorised.
 
 The caps are enforced by the router, not just described: every `subagent` tool call while an orchestration turn is active increments `orchestration.rounds`; **consecutive** failed (`isError`) subagent results advance a streak, and reaching `orchestration.escalationThreshold` increments `orchestration.escalations` and resets the streak (a successful worker result also resets it, so isolated failures do not burn the cap). `capHit()` also covers the optional budget (`orchestration.maxSpendUsd`) and names the cap that fired. Once `capHit()` is true the `subagent` tool is **denied** at `tools/pre-execute` and the orchestrator prompt section is replaced by a "wrap up now" notice. `/router status` shows the live counters (`round x/max, esc y/threshold`), and — once workers have reported — the attribution line `Orchestration spend: $X · N/M workers reported`. Cost comes from the `pricing` table; a worker's spend is taken from **its own** session's usage and priced with the model the worker actually ran, so a worker that inherited the Smart model shows up priced as Smart.
 
