@@ -314,6 +314,32 @@ export function readWorkerModelSelection(ctx: Context): WorkerModelSelection | u
 }
 
 /**
+ * One-line `/router status` rendering of the worker-delegation situation.
+ *
+ * The startup self-check is a `ctx.logger.warn`, and the shipped DSH
+ * compositions register **no log exporter** — cordis's logger only fills a
+ * 1000-entry memory ring, so a warning nobody exports is a warning nobody
+ * reads. The command output is the surface a user actually looks at, so the
+ * same fact is stated there, in the same words as the warning's consequence.
+ *
+ * @param selection — the probed preference, or `undefined` when absent.
+ * @returns the line content, without the leading label.
+ */
+export function formatWorkerModelSelection(selection: WorkerModelSelection | undefined): string {
+  if (selection !== undefined && selection.enabled && selection.routes > 0) {
+    const routes = `${selection.routes} authorised route${selection.routes === 1 ? '' : 's'}`
+    return `✅ model-selectable (${routes}) — workers can be pinned to the Fast tier`
+  }
+  const state = selection === undefined
+    ? 'unavailable on this harness'
+    : selection.enabled
+      ? 'enabled but no routes authorised'
+      : 'off'
+  return `⚠ not model-selectable (harness "subagent-model-selection" is ${state}) `
+    + `— workers inherit the Smart model`
+}
+
+/**
  * The warning to log for the worker-model self-check (SPEC §7.4), or null when
  * nothing should be said.
  *

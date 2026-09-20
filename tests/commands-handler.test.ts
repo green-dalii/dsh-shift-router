@@ -35,6 +35,8 @@ interface Harness {
   deps: CommandDeps
   config: ShiftRouterConfig
   state: RouterState
+  /** Set what the harness reports about model-selectable delegation (SPEC §7.4). */
+  setWorkerModelSelection(value: { enabled: boolean; routes: number } | undefined): void
   /** Every settings patch the commands persisted, in order. */
   patches: Record<string, unknown>[]
   /** Every path-op batch the commands sent. */
@@ -64,6 +66,7 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
   const patches: Record<string, unknown>[] = []
   const ops: readonly unknown[][] = []
   let changes = 0
+  let workerSelection: { enabled: boolean; routes: number } | undefined
   const deps: CommandDeps = {
     getConfig: () => config,
     getState: () => state,
@@ -72,6 +75,7 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
     setManualOverrideModel: (_agent, provider, modelId) => { state.manualOverride = { active: true, provider, modelId } },
     clearManualOverride: () => { state.manualOverride = { active: false } },
     subagentAvailable: () => true,
+    workerModelSelection: () => workerSelection,
     updateSettings: async (patch) => {
       patches.push(patch)
       // The real settings write lands in this namespace, so mirror it: a test
@@ -85,7 +89,11 @@ function harness(overrides: Partial<ShiftRouterConfig> = {}): Harness {
     listProviders: () => ['fake'],
     listModels: async () => ['fake-fast', 'fake-smart'],
   }
-  return { deps, config, state, patches, ops, configChanged: () => changes }
+  return {
+    deps, config, state, patches, ops,
+    configChanged: () => changes,
+    setWorkerModelSelection: (value) => { workerSelection = value },
+  }
 }
 
 /** Run one `/router ...` invocation against a harness. */
@@ -188,6 +196,29 @@ describe('/router status', () => {
     expect(text).toContain('Running model: p2/s')
     expect(text).toContain('architecture')
     expect(text).not.toContain('tok/s') // throughput belongs to the harness
+  })
+
+  // SPEC §7.4. The startup self-check is a `ctx.logger.warn`, and the shipped
+  // DSH compositions register no log exporter — cordis's logger only fills a
+  // memory ring. So the status output is the surface that actually reaches a
+  // user, and it has to carry this fact.
+  it('reports worker delegation as not model-selectable when the harness preference is off', async () => {
+    const h = harness()
+    h.config.orchestration.mode = 'auto'
+    h.setWorkerModelSelection({ enabled: false, routes: 0 })
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('Worker delegation: ⚠ not model-selectable')
+    expect(text).toContain('subagent-model-selection')
+    expect(text).toContain('inherit the Smart model')
+  })
+
+  it('stays silent about delegation when orchestration is off', async () => {
+    const h = harness()
+    h.config.orchestration.mode = 'off'
+    h.setWorkerModelSelection({ enabled: false, routes: 0 })
+    const text = ((await router(h, 'status')) as { text: string }).text
+    expect(text).toContain('Worker delegation: — (orchestration off)')
+    expect(text).not.toContain('inherit the Smart model')
   })
 
   it('explains a hold rather than showing an unexplained stay', async () => {

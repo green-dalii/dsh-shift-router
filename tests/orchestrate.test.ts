@@ -10,6 +10,7 @@ import {
   createOrchestrationState,
   enterOrchestration,
   exitOrchestration,
+  formatWorkerModelSelection,
   recordWorkerOutcome,
   renderTierChain,
   resetOrchestration,
@@ -117,6 +118,27 @@ describe('workerModelSelectionWarning (SPEC §7.4)', () => {
   it('warns when the allowlist is off or empty', () => {
     expect(workerModelSelectionWarning({ enabled: false, routes: 3 })).toContain('disabled')
     expect(workerModelSelectionWarning({ enabled: true, routes: 0 })).toContain('no authorised routes')
+  })
+})
+
+describe('formatWorkerModelSelection (the /router status surface)', () => {
+  // The warning above goes to `ctx.logger`, which the shipped compositions
+  // never export, so `/router status` is where a user can actually read this.
+  it('confirms a working allowlist with its route count', () => {
+    expect(formatWorkerModelSelection({ enabled: true, routes: 1 })).toContain('1 authorised route)')
+    expect(formatWorkerModelSelection({ enabled: true, routes: 3 })).toContain('3 authorised routes')
+    expect(formatWorkerModelSelection({ enabled: true, routes: 3 })).toContain('pinned to the Fast tier')
+  })
+
+  it('states the consequence in every unusable case', () => {
+    for (const selection of [undefined, { enabled: false, routes: 1 }, { enabled: true, routes: 0 }]) {
+      const line = formatWorkerModelSelection(selection)
+      expect(line).toContain('⚠ not model-selectable')
+      expect(line).toContain('subagent-model-selection')
+      expect(line).toContain('inherit the Smart model')
+    }
+    expect(formatWorkerModelSelection(undefined)).toContain('unavailable on this harness')
+    expect(formatWorkerModelSelection({ enabled: true, routes: 0 })).toContain('no routes authorised')
   })
 })
 

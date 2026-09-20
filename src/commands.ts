@@ -35,7 +35,7 @@ import {
   effectiveDowngradeMemory,
   downgradeMemoryCapped,
 } from './router.js'
-import { resetOrchestration } from './orchestrate.js'
+import { resetOrchestration, formatWorkerModelSelection, type WorkerModelSelection } from './orchestrate.js'
 import { formatStats } from './stats.js'
 import { formatRemaining } from './failover.js'
 
@@ -48,6 +48,12 @@ export interface CommandDeps {
   setManualOverrideModel(agent: Agent, provider: string, model: string): void
   clearManualOverride(agent: Agent): void
   subagentAvailable(): boolean
+  /**
+   * What the harness reports about model-selectable subagent delegation, or
+   * undefined when the composition mounts no such service (SPEC §7.4). Read
+   * through a probe, never as a bare `ctx.subagentModelSelection`.
+   */
+  workerModelSelection(): WorkerModelSelection | undefined
   /**
    * Persist a partial patch into the shift-router settings namespace.
    * Resolves null on success, or a human-readable failure reason.
@@ -302,6 +308,11 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
     `  Running model: ${actual}${drift}`,
     `  Intended model: ${intended}`,
     `  Subagent tool: ${deps.subagentAvailable() ? '✅' : '✗ (orchestration degraded — no subagent tool)'}`,
+    `  Worker delegation: ${
+      config.orchestration.mode === 'auto'
+        ? formatWorkerModelSelection(deps.workerModelSelection())
+        : '— (orchestration off)'
+    }`,
     `  Cache-aware: ${shareProviderFamily(config)
       ? `🎯 same-family (θ ÷ ${config.routing.cacheAware?.enabled ? sameFamilyThetaFactor(config) : '— (disabled in config)'}, warm-cache guarded for ${Math.round((config.routing.cacheAware?.idleBoundaryMs ?? 0) / 1000)}s after the last message)`
       : '— (cross-family: no cache penalty)'}`,

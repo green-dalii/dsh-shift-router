@@ -705,6 +705,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       if (state) clearManualOverride(state)
     },
     subagentAvailable: () => ctx.tools.get(SUBAGENT_TOOL) !== undefined,
+    workerModelSelection: () => readWorkerModelSelection(ctx),
     updateSettings,
     resetSettings,
     mutateSettings,
