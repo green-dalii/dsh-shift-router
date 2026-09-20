@@ -771,10 +771,62 @@ not have (§R4, §R6.5).
   not of the plugin: `ctx.logger` remains the correct channel and any deployment
   that mounts a sink sees everything. The consequence for this plugin is a rule,
   not a workaround — **anything a user must be able to read in a stock profile
-  has to be surfaced by a command (§11), not by a log line.**
+  has to be surfaced by a command (§11) or a route notice (§13.1), not by a log
+  line.**
 - Startup logs (where a sink exists): enabled state, orchestration mode; and
   warns on identical tiers, an empty fast tier, and un-authorised worker model
   selection (§7.4).
+
+### 13.1 Route notices (normative)
+
+A decision that changes which model serves the conversation is a fact about the
+user's own session, so it is written **into** the session, not merely beside it.
+This is the answer to "the plugin is enabled and I cannot see it doing anything":
+the router never changes the session's selected model (it overrides the wire
+model per request, §1.1), so nothing in the stock UI would otherwise announce it.
+
+- **Channel.** The `agent/pre-step` waterfall. The listener awaits `next()`,
+  returns a `reject` decision untouched, and otherwise returns it with one extra
+  message from `createUserMessage` (`@deepseek-ai/dsh-llm`):
+  `source: { kind: 'plugin', plugin: 'shift-router', form: 'notice', summary }`.
+  The harness's own model-selection notice uses this exact channel
+  (`dsh-agent`'s `model-selection`), which is the evidence that a third-party
+  plugin may write one; a rejected or aborted step never carries one.
+- **The text must name the plugin.** `source.plugin` is durable, but the Chat
+  client renders a `notice` through `NoticeBody`, which draws only the message
+  content, and the collapsed row draws only `summary`. Nothing in the UI reads
+  the `plugin` field, so an unlabelled one-liner is indistinguishable from
+  harness output — the confusion this section exists to end. Every notice
+  therefore starts with a literal `[shift-router]`.
+- **When one is emitted.** (a) Whenever the decision moves the turn to a
+  different tier or model: the switch is the interruption-worthy fact. (b) On
+  every judged turn when `ux.routerLogVerbose` is set, including a turn that
+  holds position. Verbose already promises "tell me every decision"; before this
+  it wrote that promise into a log ring nobody reads (§13), so making it the
+  per-turn notice switch is what makes the promise true at all. No notice is
+  emitted for a non-routable agent, a rejected step, a disabled router or a
+  non-`auto` routing mode: there is no decision to report. Nor when no model
+  could be resolved at all (an empty chain, or every candidate in cooldown):
+  nothing reached the wire, `initial` would be a lie by the second turn, and that
+  condition is already stated once at startup and in `/router status`.
+- **What it says.** One line: the plugin prefix, the tier transition with the
+  configured tier labels, the model transition (`model` alone when the provider
+  is unchanged, `provider/model` otherwise — the abbreviation rule the harness's
+  own notice uses), the action (`upgrade`/`downgrade`/`stay`), the Judge's
+  `reason` when it gave one, its confidence, and the wall time the decision took.
+  Those are the fields that make a switch auditable; a notice that said only
+  "switched" would be decoration.
+- **`summary`.** The same transition, passed through `boundContextSummary` so it
+  obeys the platform's `CONTEXT_SUMMARY_MAX_CHARS` (120) bound and the row stays
+  readable while collapsed.
+- **English.** The message enters the next request, so it is model-facing as well
+  as user-facing; the Judge's `reason` is already an English phrase and the
+  harness's own notice is English. A locale switch would have to "translate"
+  model ids and Judge output, which it cannot.
+- **Not covered (deferred, recorded).** A mid-turn failover switch: it happens
+  inside a request attempt, where no message channel exists — the next turn's
+  notice reports the model it actually runs. `/route-force`: the command itself
+  is the user's own visible act, and its effect appears in the next notice.
 
 ---
 

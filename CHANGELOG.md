@@ -215,6 +215,29 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   `manual`, `off`, orchestration off, an empty Fast chain and the full
   costs/audit surface each load for real.
 
+### Added — runtime visibility (route notices)
+
+- **A routing switch is now written into the session, not just into a log ring.**
+  Until now an enabled plugin produced no visible trace at runtime: it never
+  changes the session's selected model (it overrides the wire model per request),
+  its only surfaces were `/router …` and the settings card, and
+  `ux.routerLogVerbose` wrote to `ctx.logger`, which the shipped DSH profiles
+  export nowhere. A tier or model switch now appends one `form: 'notice'`
+  message on the `agent/pre-step` waterfall — the same channel the harness's own
+  model-selection notice uses — so the transcript says which tier and model the
+  turn runs on, why the Judge decided that, and how long it took (SPEC §13.1).
+- **`ux.routerLogVerbose` now means what it says.** It still feeds `ctx.logger`,
+  and it additionally emits a notice on *every* judged turn, including one that
+  holds position, instead of promising a per-turn account nobody could read.
+- **The notice names the plugin.** It starts with `[shift-router]` because the
+  durable `source.plugin` field is never rendered: the Chat client draws only the
+  message content, and the collapsed row only the `summary`. This is also why the
+  `[model changed: …]` line users see is **not** this plugin — it is
+  `@deepseek-ai/dsh-agent`'s model-selection notice, and it fires on session-model
+  changes, which the router never makes (ALIGNMENT §R9).
+- No status bar was invented: DSH's client `SlotMap` has no statusbar/toolbar
+  seat, so the harness-proven notice channel is used instead.
+
 ### Changed — settings card layout and information architecture
 
 - **Elements overlapped in the model rows.** The row's role badge (Primary /

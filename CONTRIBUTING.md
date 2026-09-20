@@ -161,6 +161,9 @@ adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
    surface, then pin the response shape in a test.
 8. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
    PR; verify the card in the browser e2e above for layout regressions (light and dark themes).
+9. **User-visible host text names the plugin.** A message the plugin writes into a session must
+   start with `[shift-router]`: the `source.plugin` field is durable but the Chat client never
+   renders it, so an unlabelled one-liner reads as harness output (SPEC §13.1, ALIGNMENT §R9).
 
 ## Releasing
 

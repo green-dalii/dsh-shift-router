@@ -157,6 +157,19 @@ open card showed 30 controls at once. The audit and the measurements are in
 | Every label, hint and section summary rewritten from the user's side (what it does to your requests, when to change it) in both locales | ✅ |
 | `e2e/browser-check.mjs`: opt-in real-browser check — card renders, **zero** bounding-box overlaps, the deployment's providers reach the dropdown, the advanced section starts collapsed | ✅ |
 
+## Runtime visibility round (delivered)
+
+An enabled plugin that shows no sign of running is indistinguishable from a broken
+one. The audit — including why the `[model changed: …]` line users see is *not*
+this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13.1.
+
+| Item | Status |
+|---|---|
+| Route notices: a tier/model switch is written into the session as a `form: 'notice'` message (`[shift-router] …`) instead of only into a log ring no stock profile exports | ✅ |
+| The notice text names the plugin, because the durable `source.plugin` field is never rendered by the Chat client | ✅ |
+| `ux.routerLogVerbose` now means what it says: every judged turn gets a notice, not just every switch | ✅ |
+| No status bar is invented — DSH has no statusbar/toolbar slot; the harness-proven notice channel is used instead | ✅ |
+
 ## Planned
 
 | Feature | Priority | Notes |

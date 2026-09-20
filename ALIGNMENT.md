@@ -689,6 +689,65 @@ boxes: 156 | overlaps: 21
 - 默认视图的内容划分是**产品判断**，不是可推导的结论；它是被测试钉住的**当前决定**，
   将来要改就改测试与 SPEC，而不是靠实现漂移。
 
+## R9：运行时可观测性——「插件启用了，但我看不出它在跑」
+
+维护者连续提出三个问题：① 看不到任何运行迹象（没有状态栏、没有工具栏、没有 judge、没有切换提示）；
+② 会话里那句 `[model changed: …]` 是不是插件打印的；③ 如果是，文案要改好，否则用户不知道这是插件的信息。
+
+### R9.1 先纠正前提：那行不是我们发的
+
+| 问题 | 答案 | 证据 |
+|---|---|---|
+| `[model changed: …]` 是 shift-router 输出的吗 | **不是** | 生产者在 `@deepseek-ai/dsh-agent`：`lib/types/model-selection.js` 的 `modelSwitchNotice()` 构造 `createUserMessage({ source: { kind:'plugin', plugin:'model-selection', form:'notice', summary } })`，由该模块的 `agent/pre-step` 监听器在**会话选中模型**与上一次请求 `config` 不同时追加。shift-router 的 `src/`/`tests/`/`e2e/` 里 `model changed` 出现 **0** 次 |
+
+所以维护者看到的每一次该提示，都是**会话级模型切换**（`/model`、模型选择器、`agent-default-model` 变化），
+与逐请求的档位路由无关。这也解释了一个反直觉现象：**harness 会为「会话模型变了」插话，却不会为
+「这个请求被路由到别的模型」插话**——而后者才是 shift-router 的工作。
+
+### R9.2 「看不见」的三个独立原因
+
+1. **机制上不留痕**：shift-router 从不改会话模型，只在 `agent/request` waterfall 里逐请求覆盖上线模型
+   （SPEC §1.1）。UI 里没有任何一处会因此变化。
+2. **运行面只有两个**：`/router …`、`/route-force` 命令（SPEC §11）与设置卡片（SPEC §12）。
+3. **`ux.routerLogVerbose: true` 是空承诺**：它写 `ctx.logger`，而随发行版的 profile 不注册任何 exporter
+   （SPEC §13 早已写明）。维护者把它打开、期待「每轮都能看到」，实际写进了没人读的 1000 条环形缓冲。
+   这不是配置错误，是**缺口**：verbose 在语义上承诺了逐轮可见性，却没有任何可见通道。
+
+### R9.3 可用面的普查（决定做什么、不做什么）
+
+查遍 harness 的 `SlotMap`：**不存在 statusbar / toolbar 槽位**。可用的会话级面只有
+`conversation.session.header.actions|utilities`（标题旁 list 槽）、`conversation.chat.node`（按节点 keyed）、
+`rightbar.session` / `sidebar.right.pane.tab`（需要 dockkit tab 类型）、`settings.*`。
+
+选**会话内 notice**（而不是硬造一个状态栏）的理由：
+
+- 它是 harness 自己**已经证明可用**的通道（model-selection 就在用），第三方插件可以写；
+- 语义最贴：路由切换是「刚刚发生的一件事」，而 notice 的定义正是 *one-off account of something that
+  just happened*；
+- 造一个常驻状态面需要替换 `main`/`sidebar`（会连带替换掉它声明的座位）或新增 rightbar tab 类型，
+  成本与收益不成比例。
+
+**明确不做**：修改上游那句 `[model changed: …]`。它在 `node_modules/@deepseek-ai/dsh-agent` 里，改它等于
+patch 上游、升级即丢；而且 `plugin` 字段（`model-selection`）**在 UI 里从不被渲染**——`NoticeBody`
+只画 content，折叠行只读 `summary`（`dsh-client-ui-chat/lib/client.js`）。正确的结论不是「去改上游文案」，
+而是「**我们自己的通知必须自带署名**」，这条已写成 SPEC §13.1 的规范。
+
+### R9.4 交付与闸门
+
+| Gate | 内容 | 变异自检 |
+|---|---|---|
+| `tests/route-notice.test.ts` | 纯函数：档位或模型变化 → 必发；provider 相同用短名、不同用 `provider/model`；`[shift-router]` 前缀；`summary` 受 120 字符约束；judge 无 `reason`/`confidence` 时不出现空字段；held、initial 的措辞 | 去掉前缀 → 红；去掉 provider 比较 → 红 |
+| `tests/plugin-load.test.ts` | `agent/pre-step` 监听器返回的决定带上了 notice 消息（真上下文加载，消息形状按 harness 的 `UserMessage` 校验） | 不追加消息 → 红 |
+| `npm run test:e2e` | 真实 harness 跑一轮路由，断言会话事件流里出现 `source.plugin === 'shift-router'` 的 notice | 不写消息 → 红 |
+
+### R9.5 残余不确定性
+
+- notice 只在 **step 1**（轮次开始）发：一轮内多次 failover 那一刻没有消息通道，故不报；下一轮的
+  notice 会报出它实际使用的模型。
+- 文案是英文：这条消息同时进入模型请求，而 judge 的 `reason` 本身就是英文短语。
+- `source.plugin` 目前在 UI 里不可见；若上游将来渲染它，我们的 `[shift-router]` 前缀会略显冗余——
+  宁可冗余，不可无名。
+
 ---
 
 ## 明确不对齐（附理由）

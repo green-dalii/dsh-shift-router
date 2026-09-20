@@ -35,6 +35,7 @@
 - **运行时故障转移** —— 429 / 402 / 5xx / 配额 / 用量上限 / 模型下线 等失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h04m → 4h16m，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
 - **任务级编排** —— 复杂任务会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、**连续**工作代理失败计一次升级，一旦触顶 `subagent` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
 - **成本遥测** —— 按层统计 token，可选的 USD 计价表（`/router status` 会显示"本次会话若全程使用 Smart 模型将花费多少"）。**吞吐速率不在此列**：DSH 原生已在消息页脚与 trajectory 面板显示 `tok/s`，且按解码时间计算，口径更准。
+- **动作可见** —— 切换档位或模型时会往对话里写一条 `[shift-router] Fast → Smart · …` 通知（harness 没有给插件预留状态栏座位），所以插件启用后不会"静默地什么都没发生"。把 `ux.routerLogVerbose` 打开，则每一轮判定都会有一条通知，而不只是切换时。
 - **零配置启动** —— 未配置分层前完全无操作；配置完成后路由立即生效。配置可通过 GUI 设置面板 **和** `/router config` 命令实时编辑（持久化，无需重启）。
 
 ## 安装
@@ -132,7 +133,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `failover.maxMs` | `21600000` | 退避阶梯硬上限（6 小时） |
 | `failover.startAttempts4xx` | `3` | 4xx（429/402/配额）失败从该尝试次数起步（16 分钟），客户端限流通常比服务端抖动更持久 |
 | `telemetry.callLogCap` | `1000` | 基线成本计算保留的最大逐条消息归属记录数 |
-| `ux.routerLogVerbose` | `false` | 把路由决策打印到本插件的 `ctx.logger`。注意：DSH 自带 profile **未挂载任何日志导出器**，因此只有额外挂载导出器的部署才看得到；`/router status` 才是始终可用的界面 |
+| `ux.routerLogVerbose` | `false` | 把路由决策打印到本插件的 `ctx.logger`，**并**在每一轮判定后写一条路由通知（包括保持原位的轮次）。DSH 自带 profile **未挂载任何日志导出器**，所以日志只在额外挂载导出器的部署可见；通知与 `/router status` 才是始终可用的界面 |
 | `ux.promptSectionOrder` | `150` | 编排器系统提示词段落的排序位置。DSH 集中分配提示词顺序（`SECTION_ORDERS`），未给第三方段落预留槽位，因此这是配置项而非常量 |
 | `pricing` | `[]` | 可选 `{provider, model, input, output, cacheRead?, cacheWrite?}` 每百万 token 的 USD 计价表，用于成本遥测 |
 

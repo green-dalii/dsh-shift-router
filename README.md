@@ -36,6 +36,7 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 - **Runtime failover** — 429 / 402 / 5xx / quota / usage-limit / unsupported-model failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h04m → 4h16m → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
 - **Task-level orchestration** — complex tasks run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, consecutive worker failures count an escalation, and once a cap is hit the `subagent` tool is denied outright and the system prompt switches to a "wrap up now" notice.
 - **Cost telemetry** — per-tier token tracking and an optional USD pricing table (`/router status` shows "what this session would have cost on the Smart model").
+- **Visible when it acts** — a tier or model switch is written into the transcript as a `[shift-router] Fast → Smart · …` notice (the harness has no status-bar seat for plugins), so an enabled router is never silently invisible. Set `ux.routerLogVerbose` to get one notice per judged turn, not just per switch.
 - **Zero-config startup** — a no-op until you configure tiers; then routing just works. Configuration is editable live via the GUI settings panel **and** `/router config` commands (persisted, no restart).
 
 ## Install
@@ -133,7 +134,7 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `failover.maxMs` | `21600000` | Hard cap on the backoff ladder (6h) |
 | `failover.startAttempts4xx` | `3` | 4xx (429/402/quota) failures start at this attempt (16m), client limits usually outlive server blips |
 | `telemetry.callLogCap` | `1000` | Max per-message attribution records kept for baseline cost computation |
-| `ux.routerLogVerbose` | `false` | Print router decisions to the plugin's `ctx.logger`. Note: the stock DSH profiles register **no log exporter**, so these lines are visible only where a deployment mounts one — `/router status` is the surface that always works |
+| `ux.routerLogVerbose` | `false` | Print router decisions to the plugin's `ctx.logger`, **and** emit a route notice on every judged turn (including one that holds position). The stock DSH profiles register **no log exporter**, so the log lines are visible only where a deployment mounts one — the notice and `/router status` are the surfaces that always work |
 | `ux.promptSectionOrder` | `150` | Sort position of the orchestrator system-prompt section. DSH allocates prompt order centrally (`SECTION_ORDERS`) and reserves no slot for third-party sections, so this is a setting, not a constant |
 | `pricing` | `[]` | Optional `{provider, model, input, output, cacheRead?, cacheWrite?}` USD-per-1M-token table for cost telemetry |
 
