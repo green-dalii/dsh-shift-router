@@ -369,6 +369,22 @@ The chains are additionally exposed as prompt variables
 `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` for deployment
 personas.
 
+### 7.2.1 Convergence protocol
+
+An unstructured "not right yet" is what makes an orchestration loop spend rounds
+without progressing, so the prompt states the required shape of every
+re-delegation as a **contract**:
+
+- a `## Failure report` block with exactly three parts — *what failed* (observed
+  behaviour), *where* (file/line/symbol plus the error text), and *the acceptance
+  test to re-run now*;
+- **never re-send the same report** — the same failure for the same reason means
+  the phase is not converging, and the CTO must take it over instead of spending
+  another round;
+- takeover after `escalationThreshold` consecutive failures on one phase — the
+  same value the router enforces in §7.3, so the prompt cannot promise a
+  threshold that differs from the hard cap.
+
 ### 7.3 Hard caps (enforced, not prompted)
 
 - `rounds` increments per delegation; `maxRounds` (default 3) caps them.

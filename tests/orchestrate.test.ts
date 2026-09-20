@@ -72,6 +72,31 @@ describe('buildOrchestratorPrompt', () => {
     expect(prompt).toContain('subagent-model-selection')
     expect(prompt).not.toContain('agentOptions')
   })
+
+  // C2 convergence protocol: an unstructured "not right yet" is what makes a
+  // loop spend rounds without converging, so the required shape is part of the
+  // contract — and the takeover threshold is the SAME value the hard cap uses.
+  it('states the required failure-report shape on every re-delegation', () => {
+    const cfg = makeConfig()
+    cfg.orchestration.escalationThreshold = 4
+    const prompt = buildOrchestratorPrompt(cfg, undefined)
+    expect(prompt).toContain('## Failure report')
+    expect(prompt).toContain('1. What failed')
+    expect(prompt).toContain('2. Where')
+    expect(prompt).toContain('3. Acceptance test now')
+    // The prompt must not restate a threshold the router does not enforce.
+    expect(prompt).toContain('**4** consecutive')
+  })
+
+  it('forbids re-sending the same report and makes takeover mandatory', () => {
+    const prompt = buildOrchestratorPrompt(makeConfig(), undefined)
+    expect(prompt).toMatch(/Never re-send the same failure report/i)
+    expect(prompt).toMatch(/take\s+it\s+over\s+yourself/i)
+  })
+
+  it('mentions the budget cap so the wrap-up notice is not a surprise', () => {
+    expect(buildOrchestratorPrompt(makeConfig(), undefined)).toContain('maxSpendUsd')
+  })
 })
 
 describe('shouldOrchestrate', () => {

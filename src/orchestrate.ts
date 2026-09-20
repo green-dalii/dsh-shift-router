@@ -100,11 +100,29 @@ coverage without bloat. Follow these principles:
 - Review each worker's result against its acceptance criteria. **Only flag
   blocking issues** — a picky reviewer burns budget and demoralizes the loop.
   Non-blocking nits go in a "notes" line, not a re-delegation trigger.
-- When you re-delegate, give the worker concrete feedback: what failed,
-  exactly where, and what "done" means now.
+
+## Convergence protocol (how a re-delegation must be written)
+
+Vague feedback is how a loop stops converging: the worker cannot tell what you
+saw, repeats the same work, and the round budget burns without progress. Every
+re-delegation therefore **must** carry a failure report with exactly these three
+parts, in this shape:
+
+\`\`\`
+## Failure report
+1. What failed — the observed behaviour or outcome, not a judgement.
+2. Where — file / line / symbol, and the error text if there is one.
+3. Acceptance test now — the exact check to re-run, e.g.
+   \`npm test tests/billing.test.ts\`.
+\`\`\`
+
+- **Never re-send the same failure report.** If the worker comes back with the
+  same failure for the same reason, the phase is not converging — take it over
+  yourself instead of spending another round on it.
 - **If workers fail {{escalationThreshold}} times in a row on the same phase,
   take over that phase yourself** — implement it directly. Do not keep
-  cycling. (A success resets the streak, so isolated failures are fine.)
+  cycling. (A success resets the streak, so isolated failures are fine; the
+  router enforces this cap itself, so a takeover is not optional.)
 
 ## Hard caps (enforced by the router, not negotiable)
 
@@ -112,6 +130,8 @@ coverage without bloat. Follow these principles:
   Plan accordingly — batch work, don't drip-feed.
 - Escalate (take over yourself) after **{{escalationThreshold}}** consecutive
   failed attempts on one phase.
+- A task budget may also be in force (\`orchestration.maxSpendUsd\`); reaching it
+  counts as a cap. When the router denies a delegation it names which cap fired.
 - If you hit a cap, wrap up: deliver the best current state, summarize what
   remains, and stop. Do not ask the router for more rounds.
 

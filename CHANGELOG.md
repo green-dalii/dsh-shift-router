@@ -57,6 +57,11 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   orchestration request is a certainty and must be reported with
   `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
   tedious bulk batches classify as `fast` unless they set direction.
+- **Convergence protocol in the orchestrator prompt (C2)**: every re-delegation
+  must carry a `## Failure report` with *what failed* / *where* / *the acceptance
+  test to re-run now*; re-sending the same report is forbidden (that is the
+  signal to take the phase over), and the takeover threshold is the same value
+  the router enforces as a hard cap.
 - **Per-worker cost attribution (C3)**: `orchestration.spend` plus a bounded
   `workerSpends` ledger, shown by `/router status` as
   `Orchestration spend: $X · N/M workers reported`. Upstream read a worker's cost
