@@ -1,0 +1,54 @@
+# dsh-shift-router — pre-alignment config, on the current build
+#
+# The upgrade path, kept as a fixture: this is what a profile patched before the
+# EV round actually contains — the two legacy knobs at their old defaults plus
+# `orchestration.requireSmartModel`, a key the alignment round REMOVED. It must
+# load and route exactly like the current config, because:
+#
+#   - `routing.window.threshold: 0.6` and
+#     `routing.cacheAware.sameFamilyThreshold: 0.9` are their pre-EV defaults and
+#     are therefore INERT (a wizard snapshot, not an override) — no `⚠ legacy`
+#     warning, and θ still comes from `routing.economics.reworkPenalty`;
+#   - `orchestration.requireSmartModel` is simply ignored (Schemastery passes
+#     unknown keys through, so removing a key can never break a load);
+#   - `routing.economics` is absent and is filled from schema defaults.
+#
+# `e2e/run-e2e.mjs` runs one turn under this overlay and asserts the same
+# outcome as the current-config overlay. Orchestration is off so the assertion
+# targets the model switch.
+
+- insert:
+    - id: shift-router-e2e-adapter
+      name: ./fake-adapter.mjs
+
+- id: shift-router
+  config:
+    enabled: true
+    tiers:
+      fast:
+        label: Fast
+        models:
+          - { provider: fake, model: fake-fast, priority: 1 }
+      smart:
+        label: Smart
+        models:
+          - { provider: fake, model: fake-smart, priority: 1 }
+    routing:
+      mode: auto
+      judgeTimeout: 5000
+      # Pre-EV values: inert at their defaults.
+      window:
+        size: 5
+        threshold: 0.6
+        minConfidence: 0.5
+      cacheAware:
+        enabled: true
+        sameFamilyThreshold: 0.9
+        idleBoundaryMs: 300000
+    orchestration:
+      mode: off
+      maxRounds: 3
+      escalationThreshold: 2
+      # Removed by the alignment round; must be ignored, never a load failure.
+      requireSmartModel: true
+    pricing: []

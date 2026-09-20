@@ -10,7 +10,11 @@
  *   3. run one turn under `--patch e2e/overlay.yml` (fake LLM adapter)
  *   4. assert the turn ran on the Smart tier model — i.e. the Judge ran, the EV
  *      rule escalated, and the wire model was actually switched
- *   5. assert the `shift-router` settings namespace round-trips a write
+ *   5. run a second turn under `e2e/legacy-config-overlay.yml`, a profile
+ *      patched with the PRE-alignment config (legacy knobs at their old
+ *      defaults plus the removed `requireSmartModel` key), and assert the same
+ *      outcome — the upgrade path is part of "installs and runs"
+ *   6. assert the `shift-router` settings namespace round-trips a write
  *
  * Usage:
  *   node e2e/run-e2e.mjs            # scratch home under the OS temp dir
@@ -80,16 +84,27 @@ try {
   const added = await run(['plugin', '--profile', PROFILE, 'add', REPO])
   assert(added.code === 0, 'dsh plugin add succeeded')
 
+  const PROMPT = 'design a migration plan for our billing system'
+
   step('running one turn on the fake adapter (no credentials)')
   const turn = await run(
-    ['--profile', PROFILE, '--patch', join(HERE, 'overlay.yml'),
-      'design a migration plan for our billing system'],
+    ['--profile', PROFILE, '--patch', join(HERE, 'overlay.yml'), PROMPT],
     { env: { SHIFT_ROUTER_E2E_PROBE_OUT: probeOut } },
   )
   const line = turn.output.split('\n').find((l) => l.includes('ROUTER-E2E:'))?.trim() ?? ''
   console.log(`  output: ${line || '(nothing)'}`)
   assert(line.includes('ROUTER-E2E: turn ran on fake/fake-smart'),
     'the Judge ran, the EV rule escalated, and the turn ran on the Smart tier model')
+
+  step('running one turn with a PRE-alignment config (the upgrade path)')
+  const legacy = await run(
+    ['--profile', PROFILE, '--patch', join(HERE, 'legacy-config-overlay.yml'), PROMPT],
+  )
+  const legacyLine = legacy.output.split('\n').find((l) => l.includes('ROUTER-E2E:'))?.trim() ?? ''
+  console.log(`  output: ${legacyLine || '(nothing)'}`)
+  assert(legacyLine.includes('ROUTER-E2E: turn ran on fake/fake-smart'),
+    'a profile still carrying the legacy knobs routes identically (inert defaults + removed key ignored)')
+  assert(!legacy.output.includes('expected'), 'the legacy document loads without a schema rejection')
 
   step('checking the settings namespace round-trip')
   let probe = null

@@ -241,6 +241,9 @@ That builds a throwaway `DSH_HOME`, installs **this checkout** as a bundle into 
 
 - `ROUTER-E2E: turn ran on fake/fake-smart` — the Judge ran, the EV rule escalated, and the
   wire model was actually switched to the Smart tier;
+- the same outcome under `e2e/legacy-config-overlay.yml`, a profile patched with the
+  **pre-alignment** config (the legacy knobs at their old defaults plus the removed
+  `requireSmartModel` key) — i.e. the upgrade path, not just a fresh install;
 - the `shift-router` settings namespace round-trips a write (`e2e/settings-probe.mjs`).
 
 It never touches your real `DSH_HOME` and cleans up after itself (`--keep` to inspect). To run

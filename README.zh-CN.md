@@ -233,6 +233,7 @@ npm run test:e2e
 该脚本会建一个临时 `DSH_HOME`，把**本检出**作为 bundle 装进派生出的 `headless` profile，用假适配器跑一轮，并断言：
 
 - `ROUTER-E2E: turn ran on fake/fake-smart` —— 裁判确实跑了、EV 规则确实升级了、并且真的切换了上线模型到 Smart 层；
+- 在 `e2e/legacy-config-overlay.yml` 下（**对齐前**配置：遗留旋钮处于旧默认值 + 已被移除的 `requireSmartModel` 键）结果相同 —— 覆盖的是**升级路径**，不只是全新安装；
 - `shift-router` settings 命名空间能完成一次写入并读回（`e2e/settings-probe.mjs`）。
 
 它不会碰你真实的 `DSH_HOME`，跑完自行清理（加 `--keep` 可保留现场）。手工复现：
