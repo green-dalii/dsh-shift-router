@@ -14,10 +14,10 @@
  * contract is spelled locally and checked against the host only by behavior.
  */
 
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import { ShiftRouterCardController } from './controller.js'
 import type { LlmCatalogApi } from './model-catalog.js'
 import { ShiftRouterCard } from './ShiftRouterCard.js'
@@ -46,9 +46,10 @@ export const inject = ['slots', 'locale', 'settingsScope']
 
 /**
  * Mount the shift-router settings card.
- * @param ctx - the browser plugin context.
+ * @param ctx - the browser plugin context (cordis `Context`, augmented by the
+ *   client packages: `ctx.slots`, `ctx.locale`, `ctx.settingsScope`).
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'shift-router: card dictionaries')
   // `connection` (dsh-client-connection) provides the api the model dropdowns
   // read the deployment's configured models from; it may be absent in exotic

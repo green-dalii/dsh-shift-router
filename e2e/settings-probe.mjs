@@ -17,12 +17,12 @@
  */
 
 import { writeFileSync } from 'node:fs'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 
 export const name = 'settings-probe'
 export const inject = ['settings']
 
-const NS = settingsNamespace('shift-router')
+// Plain literal: `settingsNamespace()` was removed in dsh-settings 0.1.5.
+const NS = 'shift-router'
 const OUT = process.env.SHIFT_ROUTER_E2E_PROBE_OUT ?? '/tmp/dsh-settings-probe.json'
 
 /** Two alternating targets so consecutive runs always change the value. */

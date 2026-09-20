@@ -77,6 +77,27 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   available, naming the harness setting to enable and stating the consequence
   (workers would otherwise inherit the Smart model).
 
+### Changed — build baseline
+
+- **SDK baseline caught up to the runtime the harness actually ships:**
+  `@deepseek-ai/*` `0.1.0-rc.6` → `0.1.5-rc.2`, `@deepseek-ai/cordis` `4.0.1` →
+  `4.0.2`, `@deepseek-ai/schemastery` `^3.18.1` → `^3.18.2`. Until now the plugin
+  compiled against one SDK and ran against another; the checkouts that made that
+  survivable are gone, and three real breaks surfaced immediately:
+  - `settingsNamespace()` no longer exists — a namespace is now a branded string
+    (`SettingsNamespace`) validated by `register()`, so the literal is used
+    directly. The E2E's settings probe had been importing the *old* constructor
+    from its own (stale) dependency copy, which is why it never caught this.
+  - `dsh-client-runtime` **does not exist at this baseline** (the profile's entry
+    is a dangling symlink into the npx cache). The client half's type-only
+    `ClientContext` / `SettingsScope` imports are replaced by `Context` from
+    cordis plus the packages that actually declare the augmentations:
+    `ctx.slots` now comes from `dsh-client-ui-renderer/client`, and the client
+    `SettingsScope` from `dsh-client-ui-settings/client`.
+  - `@deepseek-ai/dsh-tool-subagent` is now a (type-only) devDependency, so the
+    host's `subagent-model-selection` surface has real types instead of a
+    structural cast.
+
 ### Changed — routing semantics
 
 - **A Judge outage is now a HOLD, not a `fast` verdict.** Previously every

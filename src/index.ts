@@ -25,7 +25,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision, RequestErrorAction } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
@@ -84,8 +83,14 @@ export { Config }
 /** Services the router needs before apply runs. */
 export const inject = ['llm', 'tools', 'commands', 'agents', 'systemPrompt'] as const
 
-/** Settings namespace shown in the GUI settings panel. */
-export const ROUTER_SETTINGS_NAMESPACE = settingsNamespace('shift-router')
+/**
+ * Settings namespace shown in the GUI settings panel.
+ *
+ * A plain literal: since `@deepseek-ai/dsh-settings` 0.1.5 the namespace is a
+ * branded string (`SettingsNamespace`) that `register()` validates, and the
+ * `settingsNamespace()` constructor no longer exists.
+ */
+export const ROUTER_SETTINGS_NAMESPACE = 'shift-router'
 
 /** Subagent tool name registered by dsh-tool-subagent. */
 const SUBAGENT_TOOL = 'subagent'

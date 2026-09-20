@@ -183,7 +183,7 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 | **E2** | 上游 CI：`build` 先于 `test` | README 让用户跑 `--patch e2e/overlay.yml`，但 **`e2e/overlay.yml` 从未入库** | 干净 checkout 下 README 的免凭据端到端路径**不可复现**。补 `e2e/overlay.yml` + 脚本入口 | S |
 | **E3** | 上游覆盖率门槛：lines/functions/statements ≥90、branches ≥85（`router.ts`/`failover.ts`） | 无覆盖率门槛；`src/index.ts`（全部 DSH 接线）、`stats.ts`、`tier.ts`、客户端 controller/卡片**零单测** | 对齐前先把核心决策模块的测试补到门槛（尤其 B1/B5 落地时是 TDD 的天然时机） | M–L |
 | **E4** | 上游 `pack:check` + `check-isolated-load` | 无打包隔离校验 | 造 DSH 等价物：`pnpm pack` → `dsh plugin add <tarball>` → 断言宿主模块全部可解析（对应本仓库已知的 `dsh-client-store` 外部化改动） | M |
-| **E5** | — | 依赖 `@deepseek-ai/*` **0.1.0-rc.6** / cordis **4.0.1**；skill 基线是 **0.1.5-rc.2** / cordis **4.0.2** | 本项目落后 SDK 基线数个 rc。有破坏性改名（如 `CallId`→`ToolCallId`）。**建议对齐动作之前先升 SDK**，否则新写的代码要改两遍 | M–L |
+| **E5** | — | ~~依赖 `@deepseek-ai/*` **0.1.0-rc.6** / cordis **4.0.1**~~ → **P2 轮已升到 0.1.5-rc.2 / 4.0.2** | 本项目落后 SDK 基线数个 rc。有破坏性改名（如 `CallId`→`ToolCallId`）。**建议对齐动作之前先升 SDK**，否则新写的代码要改两遍 | M–L |
 | **E6** | 上游 v1.4.3 死代码清理 | 死导出：`formatTierDisplayWithSpeed`、`judgeFallbackPrompt`+`FALLBACK_PROMPT`、`jsonStr`、`remainingCooldownMs`（仅测试用）；未用依赖 `@deepseek-ai/dsh-timeout`；README 测试数漂移（62/95 vs 实际 109）；README 宣称复用 harness「JSON-mode enforcement」但代码未传任何 response-format；README 集成表漏 `agent/turn-stopping`、`assistant/chunk`；`orchestration.startedAt` 只写不读；working tree 有 4 个未提交文件（含 lockfile 从 0.3.0 重生成） | 逐条清账；未提交改动需补 CHANGELOG 并落库 | S–M |
 
 ---
@@ -242,7 +242,7 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 
 1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。变异测试证实了这一点：把 `state.lastActivityAt = now` 整行删除，**测试全绿**——说明该修复只由代码保证。
    **R3 部分收口**：`tests/plugin-load.test.ts` 现在用**真实 Cordis 上下文**加载插件（`ctx.plugin()`，真实 `inject` 闸门），覆盖了启动自检的接线（服务缺失 / 先到 / 后到 / 已授权）以及 prompt section 的顺序与变量注册。它抓不住的仍是**事件回调内部**的逻辑（`agent/pre-step` 的清扫顺序、`agent/request-error` 分支），那部分仍只有 e2e 与纯函数单测。
-2. **SDK 漂移（E5）已由证据升级为 P2**：harness 通过 `LlmAdapter.prepareCall` 派发，而该 API 在 0.1.0-rc.6 不存在——本轮 e2e 的 fake adapter 就因此失败。插件自身的运行时值导入（`BlockAssembler`、`createUserMessage`、`settingsNamespace`）同样来自被钉住的旧版本，属真实的双版本风险，而非仅 fixture 问题。
+2. ~~**SDK 漂移（E5）已由证据升级为 P2**~~ → **已在 P2 轮闭环**，见「R4：P2 轮」§R4.1。当初的证据（`LlmAdapter.prepareCall` 在 0.1.0-rc.6 不存在、`BlockAssembler`/`createUserMessage`/`settingsNamespace` 来自被钉住的旧版本）全部成立，且升级当刻就暴露了三处真实断裂。
 3. **C4(a) GUI 代写 `subagent-model-selection` 白名单**未实现（需跨命名空间写权限的可行性调查），作为 P2 保留；本轮交付的是 (b)：文档化 + 自检 + 提示词如实描述 + `/router status` 行。R3 修正：**(b) 原本用 `ctx.logger.warn` 交付，而自带组合不挂载任何日志导出器，告警实际无人可见**（见 R3 一节），因此补了状态行；自检的"能看到"这一半是 R3 才补上的。
 4. **P2 编排深度**（验收审计、收敛协议、每 worker 成本归因）与 **P3** 项（模型目录单一事实来源、配置层权威展示、GUI pricing 编辑器/目录热刷新、覆盖率门槛、打包隔离闸）按约定未在轮内实施，已在 ROADMAP 的 Planned 表登记。
 5. **worker（子代理）用量不进遥测**：worker 没有路由器状态，其 usage 被跳过，因此编排花费对 `/router status` 不可见。SPEC §9 已如实收窄为"被路由的顶层 Agent 的消息"，并把 worker 归因留给 P2 的每 worker 成本工作——**宁可不记，也不记错**。
@@ -403,6 +403,39 @@ plan 策略之前"），并写进 SPEC §1.4 第 3 条作为规范。
 
 ---
 
+## R4：P2 轮（编排深度 + SDK 基线补齐）
+
+R4 的目标是把「编排能跑」做成「编排可信」，并把上一轮登记的 SDK 双版本风险一次性消掉。
+每一项都先在这里写清**语义、DSH 适配形态与验收标准**，再动代码。
+
+### R4.1 SDK 基线补齐（E5 闭环）
+
+| 项 | 结论 |
+|---|---|
+| 版本 | `@deepseek-ai/cordis` 4.0.1 → **4.0.2**；`dsh-{agent,commands,llm,session,settings,system-prompt,tools}` 0.1.0-rc.6 → **0.1.5-rc.2**；`schemastery` → **^3.18.2**；客户端 `dsh-client-*` → **^0.1.5-rc.2**；新增类型依赖 `dsh-tool-subagent` |
+| 为什么必须做 | 插件**编译**用自己 node_modules 的类型，**运行**用 harness 的包。此前二者差数个 rc，属结构性风险 |
+| 实测断裂 1 | `settingsNamespace()` 在 0.1.5 已删除（namespace 变成 branded string，由 `register()` 校验）⇒ 改为字面量。**e2e 的 settings-probe 之前一直在 import 旧构造函数**（它从本仓库自己的旧依赖副本解析），所以这条从未被 e2e 抓到——正是双版本风险的活样本 |
+| 实测断裂 2 | `dsh-client-runtime` 在该基线**不存在**（profile 里那个条目是悬空符号链接，指向 npx 缓存）。客户端 `ClientContext` → cordis `Context`；`ctx.slots` 由 `dsh-client-ui-renderer/client` 声明；浏览器侧 `SettingsScope` 由 `dsh-client-ui-settings/client` 声明 |
+| 实测断裂 3 | `dsh-tool-subagent` 未纳入类型依赖，导致上一轮只能用结构化 cast 读 host 服务（那正是 boot 事故的诱因）⇒ 现在纳入（type-only），SPEC §1.5 记录基线契约 |
+| 验收 | `tsc` 宿主 + 客户端 ✅；228 单测 ✅；build ✅；e2e 三场景 + 设置往返 ✅（e2e 的 fixture 现在也走新依赖，故断裂 1 被真实覆盖） |
+
+### R4.2 语义定义（先文档后代码）
+
+| ID | 本项目语义（R4 交付） | 验收标准 |
+|---|---|---|
+| **C3** | 每 worker 成本账本：`tools/result` 的 subagent 结果带 usage 时，按 cost / outputTokens / 挂钟时间入账；账本上限 20 条（丢最旧）；每任务重置；`/router status` 显示 `orchestration $X (N workers)` | 纯函数单测（入账、上限、重置、聚合）+ 状态输出断言 |
+| **C5** | `orchestration.maxSpendUsd`（默认 0 = 不限）接进 `capHit`；触顶时拒绝 `subagent` 并切换为收尾提示 | 单测：0 表示不限；spend ≥ 阈值时 capHit 为真；提示词与拒绝条件一致 |
+| **C2** | 提示词新增**收敛协议**：每次重派必须带 `## Failure report`（什么失败 / 在哪 / 现在用什么验收测试复测）；禁止重发同一份报告，第二次即接管；`escalationThreshold` 是提示词与硬帽共用的阈值 | 提示词断言（三要素、接管条件、与硬帽阈值一致） |
+| **C1** | **不阻断**的验收审计：确定性检查（worker 是否都回话、有无 CTO 总结、是否触帽）总是跑；LLM 复核仅在**确实委派过**（spawned ≥ 1）且 fast 档有健康端点时跑；结果落 `lastAudit`，在 `/router status` 与卡片可见；审计永不影响轮次结论 | 纯函数单测（提取、判定、解析、冷却过滤）+ 接线单测 + 状态行断言 |
+| **C4(a)** | 卡片提供「把 Fast 链写入宿主 `subagent-model-selection` 白名单」的动作；写入目标 namespace 而非本插件 namespace；写入后自检告警消失 | 可行性调查结论 + 写路径单测 + 不可写时的诚实降级 |
+| **C6** | 不对齐，仅记录「上游亦未落地」 | ROADMAP 标注 |
+
+### R4.3 交付核对
+
+（逐项在实现与验证完成后填入——本节在 R4 结束前保持"进行中"）
+
+---
+
 ## 明确不对齐（附理由）
 
 | 上游特性 | 不对齐的理由 |
@@ -427,7 +460,7 @@ plan 策略之前"），并写进 SPEC §1.4 第 3 条作为规范。
 | worker 模型注入（C4） | 按建议 (a)+(b)；(a) 需先调查跨命名空间写权限，故本轮交付 **(b)** | 启动自检 + 提示词如实描述 + SPEC §7.4；ROADMAP 登记 (a) |
 | 版本号策略 | 本项目保持**自己的发布线**，额外记录「对齐到的上游版本」 | README 顶部基线行 + ROADMAP「Upstream alignment」表 |
 | `/router on\|off` 持久性 | 保持**会话级**（DSH 语义自洽）+ 文档写明 | SPEC §10 末段、README 命令表 |
-| SDK 升级（E5） | 本轮不做；**由 e2e 证据升级为 P2** | ROADMAP Planned 表（附 `prepareCall` 证据） |
+| SDK 升级（E5） | 上一轮不做；**由 e2e 证据升级为 P2**，P2 轮已完成 | 见 R4.1 |
 | skill 0.4.0 回灌远端 | 未执行（推远端属发布动作，需显式批准） | 已安装副本 0.3.0 与远端一致，API 内容无差异；0.4.0 仅为自更新流程 |
 
 ---

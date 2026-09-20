@@ -100,6 +100,22 @@ baseline, permanently:
 | `ux.promptSectionOrder` replaces a hardcoded platform-ordering literal | ✅ |
 | SPEC §1.4 "Cordis plugin invariants" made normative; SPEC §13 states the log-visibility limit | ✅ |
 
+## P2 round (delivered)
+
+The orchestration-depth work plus the promoted SDK catch-up. Definitions and
+acceptance criteria are in [ALIGNMENT.md](ALIGNMENT.md) §R4; the normative
+contract is SPEC §7, §9, §13.
+
+| Item | Upstream | Status |
+|---|---|---|
+| **SDK baseline catch-up** (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | — | ✅ build baseline = runtime baseline; three real breaks fixed (SPEC §1.5) |
+| **C3** per-worker cost attribution | v1.5.0 | 🚧 this round: bounded worker ledger + `orchestration $X (N workers)` |
+| **C5** budget guard | (our own promise) | 🚧 this round: `orchestration.maxSpendUsd` wired into `capHit` |
+| **C2** convergence protocol | v1.2.0 + v1.3.0 | 🚧 this round: structured `## Failure report` contract in the orchestrator prompt |
+| **C1** non-blocking acceptance audit | v1.3.0/v1.4.0/v1.4.2 | 🚧 this round: `src/audit.ts` + auditor prompt + `/router status` / card surfacing |
+| **C4(a)** GUI-assisted worker route authorisation | v1.0.0+ | 🚧 this round: card action writes the Fast chain into the host `subagent-model-selection` namespace |
+| **C6** cross-turn lifecycle / parallel workers | upstream Phase 3 | ⛔ not aligned — **upstream has not shipped it either** |
+
 ## Planned
 
 | Feature | Priority | Notes |
@@ -119,7 +135,7 @@ baseline, permanently:
 | Packaged-install verification gate (`pack` → `dsh plugin add` → import every dist module) | P3 | DSH analogue of upstream `pack:check` + `check:isolated`. **Half delivered** by the installation-verification round: loading now happens for real (`tests/plugin-load.test.ts`) and a scratch-profile boot covers the default config; the `npm pack`→install isolation half is still open |
 | Unit tests for `src/index.ts` **event-callback bodies** (sweep order, `agent/request-error` cooldown branches, `agent/request` rewrite) | P3 | the installation-verification round covered **load-time** wiring only; these run per turn |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
-| **SDK baseline catch-up** (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | **P2 — promoted** | Evidence, not speculation: the harness dispatches adapters through `LlmAdapter.prepareCall`, which does not exist in 0.1.0-rc.6 — a fixture that imports `LlmAdapter` from this package's own dependency tree failed with `registration.adapter.prepareCall is not a function` until the method was declared explicitly. The plugin's own runtime value-imports (`BlockAssembler`, `createUserMessage`, `settingsNamespace`) come from the pinned copy too, so this is a real dual-version hazard, not just a fixture problem. |
+
 
 ## Explicitly excluded (by design)
 
