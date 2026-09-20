@@ -69,38 +69,45 @@ export interface CardField {
    * a value.
    */
   legacy?: true
+  /**
+   * Tuning knobs a typical deployment never touches: they render inside the
+   * collapsed *Advanced* disclosure instead of the open card, so the settings
+   * that change routing behaviour are not buried (SPEC §12.3). The default
+   * visible set is pinned by test.
+   */
+  advanced?: true
 }
 
 export const CARD_FIELDS: readonly CardField[] = [
   { path: 'enabled', section: 'enabled', display: 'general', key: 'enabled', type: 'boolean', labelKey: 'f.enabled', hintKey: 'h.enabled' },
   { path: 'routing.mode', section: 'routing', display: 'routing', key: 'mode', type: 'enum', enum: ['auto', 'manual', 'off'], labelKey: 'f.routingMode', hintKey: 'h.routingMode' },
-  { path: 'routing.judgeTimeout', section: 'routing', display: 'routing', key: 'judgeTimeout', type: 'number', min: 1, max: 120000, unit: 'ms', group: 'g.judge', labelKey: 'f.judgeTimeout', hintKey: 'h.judgeTimeout' },
-  { path: 'routing.judgeMaxTokens', section: 'routing', display: 'routing', key: 'judgeMaxTokens', type: 'number', min: 1, max: 100000, unit: 'tokens', group: 'g.judge', labelKey: 'f.judgeMaxTokens', hintKey: 'h.judgeMaxTokens' },
-  { path: 'routing.judgePromptCap', section: 'routing', display: 'routing', key: 'judgePromptCap', type: 'number', min: 1, max: 1000000, unit: 'chars', group: 'g.judge', labelKey: 'f.judgePromptCap', hintKey: 'h.judgePromptCap' },
+  { path: 'routing.judgeTimeout', section: 'routing', display: 'routing', key: 'judgeTimeout', type: 'number', min: 1, max: 120000, unit: 'ms', group: 'g.judge', labelKey: 'f.judgeTimeout', hintKey: 'h.judgeTimeout' , advanced: true },
+  { path: 'routing.judgeMaxTokens', section: 'routing', display: 'routing', key: 'judgeMaxTokens', type: 'number', min: 1, max: 100000, unit: 'tokens', group: 'g.judge', labelKey: 'f.judgeMaxTokens', hintKey: 'h.judgeMaxTokens' , advanced: true },
+  { path: 'routing.judgePromptCap', section: 'routing', display: 'routing', key: 'judgePromptCap', type: 'number', min: 1, max: 1000000, unit: 'chars', group: 'g.judge', labelKey: 'f.judgePromptCap', hintKey: 'h.judgePromptCap' , advanced: true },
   { path: 'routing.economics.reworkPenalty', section: 'routing', display: 'routing', key: 'economics.reworkPenalty', type: 'number', min: 1, step: 0.5, group: 'g.economics', labelKey: 'f.reworkPenalty', hintKey: 'h.reworkPenalty' },
-  { path: 'routing.economics.downgradeMemory', section: 'routing', display: 'routing', key: 'economics.downgradeMemory', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.economics', labelKey: 'f.downgradeMemory', hintKey: 'h.downgradeMemory' },
+  { path: 'routing.economics.downgradeMemory', section: 'routing', display: 'routing', key: 'economics.downgradeMemory', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.economics', labelKey: 'f.downgradeMemory', hintKey: 'h.downgradeMemory' , advanced: true },
   { path: 'routing.economics.mode', section: 'routing', display: 'routing', key: 'economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], group: 'g.economics', optional: true, labelKey: 'f.economicsMode', hintKey: 'h.economicsMode' },
-  { path: 'routing.window.size', section: 'routing', display: 'routing', key: 'window.size', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.window', labelKey: 'f.windowSize', hintKey: 'h.windowSize' },
-  { path: 'routing.window.threshold', section: 'routing', display: 'routing', key: 'window.threshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', optional: true, legacy: true, labelKey: 'f.windowThreshold', hintKey: 'h.windowThreshold' },
-  { path: 'routing.window.minConfidence', section: 'routing', display: 'routing', key: 'window.minConfidence', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', labelKey: 'f.windowMinConfidence', hintKey: 'h.windowMinConfidence' },
-  { path: 'routing.cacheAware.enabled', section: 'routing', display: 'routing', key: 'cacheAware.enabled', type: 'boolean', group: 'g.cache', labelKey: 'f.cacheAwareEnabled', hintKey: 'h.cacheAwareEnabled' },
-  { path: 'routing.cacheAware.sameFamilyPenalty', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyPenalty', type: 'number', min: 1, step: 0.5, group: 'g.cache', labelKey: 'f.sameFamilyPenalty', hintKey: 'h.sameFamilyPenalty' },
-  { path: 'routing.cacheAware.sameFamilyThreshold', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyThreshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.cache', optional: true, legacy: true, labelKey: 'f.sameFamilyThreshold', hintKey: 'h.sameFamilyThreshold' },
-  { path: 'routing.cacheAware.idleBoundaryMs', section: 'routing', display: 'routing', key: 'cacheAware.idleBoundaryMs', type: 'number', min: 0, step: 1000, unit: 'ms', group: 'g.cache', labelKey: 'f.idleBoundaryMs', hintKey: 'h.idleBoundaryMs' },
+  { path: 'routing.window.size', section: 'routing', display: 'routing', key: 'window.size', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.window', labelKey: 'f.windowSize', hintKey: 'h.windowSize' , advanced: true },
+  { path: 'routing.window.threshold', section: 'routing', display: 'routing', key: 'window.threshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', optional: true, legacy: true, labelKey: 'f.windowThreshold', hintKey: 'h.windowThreshold' , advanced: true },
+  { path: 'routing.window.minConfidence', section: 'routing', display: 'routing', key: 'window.minConfidence', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', labelKey: 'f.windowMinConfidence', hintKey: 'h.windowMinConfidence' , advanced: true },
+  { path: 'routing.cacheAware.enabled', section: 'routing', display: 'routing', key: 'cacheAware.enabled', type: 'boolean', group: 'g.cache', labelKey: 'f.cacheAwareEnabled', hintKey: 'h.cacheAwareEnabled' , advanced: true },
+  { path: 'routing.cacheAware.sameFamilyPenalty', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyPenalty', type: 'number', min: 1, step: 0.5, group: 'g.cache', labelKey: 'f.sameFamilyPenalty', hintKey: 'h.sameFamilyPenalty' , advanced: true },
+  { path: 'routing.cacheAware.sameFamilyThreshold', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyThreshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.cache', optional: true, legacy: true, labelKey: 'f.sameFamilyThreshold', hintKey: 'h.sameFamilyThreshold' , advanced: true },
+  { path: 'routing.cacheAware.idleBoundaryMs', section: 'routing', display: 'routing', key: 'cacheAware.idleBoundaryMs', type: 'number', min: 0, step: 1000, unit: 'ms', group: 'g.cache', labelKey: 'f.idleBoundaryMs', hintKey: 'h.idleBoundaryMs' , advanced: true },
   { path: 'orchestration.mode', section: 'orchestration', display: 'orchestration', key: 'mode', type: 'enum', enum: ['auto', 'off'], labelKey: 'f.orchMode', hintKey: 'h.orchMode' },
   { path: 'orchestration.maxRounds', section: 'orchestration', display: 'orchestration', key: 'maxRounds', type: 'number', min: 0, max: 100, unit: 'rounds', labelKey: 'f.maxRounds', hintKey: 'h.maxRounds' },
-  { path: 'orchestration.escalationThreshold', section: 'orchestration', display: 'orchestration', key: 'escalationThreshold', type: 'number', min: 1, max: 100, unit: '×', labelKey: 'f.escalationThreshold', hintKey: 'h.escalationThreshold' },
+  { path: 'orchestration.escalationThreshold', section: 'orchestration', display: 'orchestration', key: 'escalationThreshold', type: 'number', min: 1, max: 100, unit: '×', labelKey: 'f.escalationThreshold', hintKey: 'h.escalationThreshold' , advanced: true },
   { path: 'orchestration.maxSpendUsd', section: 'orchestration', display: 'orchestration', key: 'maxSpendUsd', type: 'number', min: 0, step: 0.5, unit: 'USD', labelKey: 'f.maxSpendUsd', hintKey: 'h.maxSpendUsd' },
-  { path: 'orchestration.workerLedgerCap', section: 'orchestration', display: 'orchestration', key: 'workerLedgerCap', type: 'number', min: 1, max: 1000, unit: 'rows', labelKey: 'f.workerLedgerCap', hintKey: 'h.workerLedgerCap' },
+  { path: 'orchestration.workerLedgerCap', section: 'orchestration', display: 'orchestration', key: 'workerLedgerCap', type: 'number', min: 1, max: 1000, unit: 'rows', labelKey: 'f.workerLedgerCap', hintKey: 'h.workerLedgerCap' , advanced: true },
   { path: 'orchestration.audit.enabled', section: 'orchestration', display: 'orchestration', key: 'audit.enabled', type: 'boolean', labelKey: 'f.auditEnabled', hintKey: 'h.auditEnabled' },
-  { path: 'orchestration.audit.timeoutMs', section: 'orchestration', display: 'orchestration', key: 'audit.timeoutMs', type: 'number', min: 1, max: 120000, unit: 'ms', labelKey: 'f.auditTimeoutMs', hintKey: 'h.auditTimeoutMs' },
-  { path: 'orchestration.audit.promptCap', section: 'orchestration', display: 'orchestration', key: 'audit.promptCap', type: 'number', min: 200, max: 1000000, unit: 'chars', labelKey: 'f.auditPromptCap', hintKey: 'h.auditPromptCap' },
-  { path: 'failover.baseMs', section: 'failover', display: 'failover', key: 'baseMs', type: 'number', min: 100, step: 100, unit: 'ms', labelKey: 'f.failoverBaseMs', hintKey: 'h.failoverBaseMs' },
-  { path: 'failover.maxMs', section: 'failover', display: 'failover', key: 'maxMs', type: 'number', min: 1000, step: 1000, unit: 'ms', labelKey: 'f.failoverMaxMs', hintKey: 'h.failoverMaxMs' },
-  { path: 'failover.startAttempts4xx', section: 'failover', display: 'failover', key: 'startAttempts4xx', type: 'number', min: 1, max: 20, unit: '×', labelKey: 'f.startAttempts4xx', hintKey: 'h.startAttempts4xx' },
-  { path: 'telemetry.callLogCap', section: 'telemetry', display: 'telemetry', key: 'callLogCap', type: 'number', min: 10, max: 1000000, unit: 'calls', labelKey: 'f.callLogCap', hintKey: 'h.callLogCap' },
-  { path: 'ux.routerLogVerbose', section: 'ux', display: 'ux', key: 'routerLogVerbose', type: 'boolean', labelKey: 'f.routerLogVerbose', hintKey: 'h.routerLogVerbose' },
-  { path: 'ux.promptSectionOrder', section: 'ux', display: 'ux', key: 'promptSectionOrder', type: 'number', labelKey: 'f.promptSectionOrder', hintKey: 'h.promptSectionOrder' },
+  { path: 'orchestration.audit.timeoutMs', section: 'orchestration', display: 'orchestration', key: 'audit.timeoutMs', type: 'number', min: 1, max: 120000, unit: 'ms', labelKey: 'f.auditTimeoutMs', hintKey: 'h.auditTimeoutMs' , advanced: true },
+  { path: 'orchestration.audit.promptCap', section: 'orchestration', display: 'orchestration', key: 'audit.promptCap', type: 'number', min: 200, max: 1000000, unit: 'chars', labelKey: 'f.auditPromptCap', hintKey: 'h.auditPromptCap' , advanced: true },
+  { path: 'failover.baseMs', section: 'failover', display: 'failover', key: 'baseMs', type: 'number', min: 100, step: 100, unit: 'ms', labelKey: 'f.failoverBaseMs', hintKey: 'h.failoverBaseMs' , advanced: true },
+  { path: 'failover.maxMs', section: 'failover', display: 'failover', key: 'maxMs', type: 'number', min: 1000, step: 1000, unit: 'ms', labelKey: 'f.failoverMaxMs', hintKey: 'h.failoverMaxMs' , advanced: true },
+  { path: 'failover.startAttempts4xx', section: 'failover', display: 'failover', key: 'startAttempts4xx', type: 'number', min: 1, max: 20, unit: '×', labelKey: 'f.startAttempts4xx', hintKey: 'h.startAttempts4xx' , advanced: true },
+  { path: 'telemetry.callLogCap', section: 'telemetry', display: 'telemetry', key: 'callLogCap', type: 'number', min: 10, max: 1000000, unit: 'calls', labelKey: 'f.callLogCap', hintKey: 'h.callLogCap' , advanced: true },
+  { path: 'ux.routerLogVerbose', section: 'ux', display: 'ux', key: 'routerLogVerbose', type: 'boolean', labelKey: 'f.routerLogVerbose', hintKey: 'h.routerLogVerbose' , advanced: true },
+  { path: 'ux.promptSectionOrder', section: 'ux', display: 'ux', key: 'promptSectionOrder', type: 'number', labelKey: 'f.promptSectionOrder', hintKey: 'h.promptSectionOrder' , advanced: true },
   { path: 'tiers.fast.models', section: 'tiers', display: 'models', key: 'fast.models', type: 'models', labelKey: 'f.fastModels', hintKey: 'h.fastModels' },
   { path: 'tiers.smart.models', section: 'tiers', display: 'models', key: 'smart.models', type: 'models', labelKey: 'f.smartModels', hintKey: 'h.smartModels' },
 ]
@@ -123,6 +130,30 @@ export const CARD_SECTIONS: readonly CardSection[] = [
   { id: 'telemetry', labelKey: 's.telemetry', summaryKey: 's.telemetrySummary' },
   { id: 'ux', labelKey: 's.ux', summaryKey: 's.uxSummary' },
 ]
+
+/**
+ * The collapsed disclosure the {@link CardField.advanced} fields render into.
+ *
+ * It is not part of {@link CARD_SECTIONS}: the card renders it after them, closed
+ * on open, with its own sub-headings.
+ */
+export const ADVANCED_SECTION: CardSection = {
+  id: 'advanced',
+  labelKey: 's.advanced',
+  summaryKey: 's.advancedSummary',
+}
+
+/**
+ * The sub-heading an advanced field renders under: its own sub-group when it has
+ * one, otherwise the section it belongs to, so the disclosure reuses existing
+ * vocabulary instead of inventing a second taxonomy (ALIGNMENT §R8.2).
+ * @param field - the advanced field.
+ * @returns the locale key of its heading.
+ */
+export function advancedGroupKey(field: CardField): string {
+  if (field.group !== undefined) return field.group
+  return CARD_SECTIONS.find((section) => section.id === field.display)?.labelKey ?? ADVANCED_SECTION.labelKey
+}
 
 /** A staged edit: the control's raw text or model rows, plus whether it means "re-inherit". */
 export interface StagedDraft {

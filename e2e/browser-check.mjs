@@ -18,7 +18,11 @@
  *   2. NO two of its innermost visible elements overlap (bounding boxes), and no
  *      text element's content spills out of its own box;
  *   3. the deployment's providers reach the provider dropdown (the catalog is
- *      really loaded, not just typed in).
+ *      really loaded, not just typed in);
+ *   4. the Advanced section starts collapsed and reveals its controls when opened;
+ *   5. the structure reads as a form: controls share each row's centre line and
+ *      stay wide enough to use, every label lines up with its own hint, and the
+ *      open view stays short (the point of the basic/advanced split).
  *
  * Deliberately NOT part of `npm test` / `npm run test:e2e`: those must run
  * without a browser. Run it when you touch ShiftRouterCard.tsx.
@@ -209,6 +213,56 @@ const DETECT_OVERLAPS = () => {
   return { boxes: boxes.length, overlaps, clipped }
 }
 
+/**
+ * Structural facts a screenshot would show: row alignment, control widths, and
+ * how much is on screen at once. Cheap to measure, and they encode the intent of
+ * the layout rules rather than one arbitrary pixel value.
+ */
+const DETECT_STRUCTURE = () => {
+  const rect = (el) => el.getBoundingClientRect()
+  const centre = (el) => {
+    const r = rect(el)
+    return r.y + r.height / 2
+  }
+  // A "line" is any element that directly holds two or more controls: that is
+  // one visual row (a model row, or a label-plus-control row), so comparing
+  // centres across a whole multi-row field would be meaningless.
+  const lines = [...document.querySelectorAll('.sr-card div, .sr-card span')]
+    .map((el) => [...el.children].filter((child) => child.matches('select, input')))
+    .filter((controls) => controls.length > 1)
+
+  const rows = [...document.querySelectorAll('.sr-card .sr-field')].map((field) => {
+    const label = field.querySelector('span, label')
+    const hints = [...field.querySelectorAll('p')]
+    const controls = [...field.querySelectorAll('select, input')]
+    return {
+      labelLeft: label === null ? null : Math.round(rect(label).x),
+      hintLefts: hints.map((h) => Math.round(rect(h).x)),
+      controlCentres: controls.map((c) => Math.round(centre(c))),
+      controlWidths: controls.map((c) => Math.round(rect(c).width)),
+      emptyHints: hints.filter((h) => (h.textContent ?? '').trim().length < 8).length,
+    }
+  })
+  const badges = [...document.querySelectorAll('.sr-card .sr-field span')].filter((s) => /主选|备选|Primary|Fallback/.test(s.textContent ?? ''))
+  const badgeCentres = badges.map((b) => Math.round(centre(b)))
+  return {
+    fields: rows.length,
+    misalignedHints: rows.filter((row) => row.hintLefts.some((left) => left !== row.labelLeft)).length,
+    emptyHints: rows.reduce((sum, row) => sum + row.emptyHints, 0),
+    narrowControls: rows.flatMap((row) => row.controlWidths).filter((w) => w < 100).length,
+    raggedyLines: lines.filter((controls) => {
+      const centres = controls.map((control) => Math.round(centre(control)))
+      return Math.max(...centres) - Math.min(...centres) > 2
+    }).length,
+    // A model row's badge must share the line's centre with its controls.
+    unalignedBadges: badgeCentres.length === 0 ? 0 : badgeCentres.filter((c, i) => {
+      const line = badges[i].parentElement
+      const controls = [...line.querySelectorAll('select, input')]
+      return controls.length > 0 && Math.abs(c - Math.round(centre(controls[0]))) > 2
+    }).length,
+  }
+}
+
 const results = []
 function check(ok, message) {
   results.push(ok)
@@ -272,9 +326,37 @@ async function main() {
     check(options.filter((text) => !/自定义|Custom/.test(text)).length > 0,
       `the provider dropdown lists the deployment's providers (${options.length} options)`)
 
+
+
+    const structure = await page.evaluate(DETECT_STRUCTURE)
+    check(structure.unalignedBadges === 0, 'every model-row badge sits on its controls’ centre line')
+    check(structure.raggedyLines === 0, 'controls on one line share a centre line')
+    check(structure.narrowControls === 0, 'no control is squeezed below a usable width')
+    check(structure.misalignedHints === 0, 'every hint starts in the same column as its label')
+    check(structure.emptyHints === 0, 'every visible field carries a description')
+    check(structure.fields <= 12, `the open view stays short (${structure.fields} fields before Advanced)`)
+
+    const advanced = page.locator('button[aria-label^="展开高级设置"], button[aria-label^="Show advanced settings"]').first()
+    check((await advanced.count()) > 0, 'the Advanced section exists')
+    if ((await advanced.count()) > 0) {
+      check((await advanced.getAttribute('aria-expanded')) === 'false', 'Advanced starts collapsed')
+      const before = await page.locator('.sr-card .sr-field').count()
+      await advanced.click()
+      await page.waitForTimeout(600)
+      const after = await page.locator('.sr-card .sr-field').count()
+      check(after > before + 10, `Advanced reveals its controls (${before} → ${after} fields)`)
+    }
+
     const layout2 = await page.evaluate(DETECT_OVERLAPS)
-    check(layout2.overlaps.length === 0, `no overlapping elements after re-measuring (${layout2.boxes} boxes)`)
-    check(layout2.clipped.length === 0, 'no text spills out of its own box after re-measuring')
+    if (layout2.error === undefined) {
+      check(layout2.overlaps.length === 0, `no overlapping elements with Advanced open (${layout2.boxes} boxes)`)
+      for (const line of layout2.overlaps.slice(0, 12)) console.log(`      ${line}`)
+      check(layout2.clipped.length === 0, 'no text spills out of its own box with Advanced open')
+      for (const line of layout2.clipped.slice(0, 12)) console.log(`      ${line}`)
+      const structure2 = await page.evaluate(DETECT_STRUCTURE)
+      check(structure2.raggedyLines === 0 && structure2.misalignedHints === 0,
+        `the advanced controls obey the same alignment (${structure2.fields} fields)`)
+    }
 
     const shots = args.shots
     await page.screenshot({ path: join(shots, 'card-collapsed-light.png'), fullPage: true })

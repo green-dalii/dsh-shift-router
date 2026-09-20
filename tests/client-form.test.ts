@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CARD_FIELDS,
+  advancedGroupKey,
   buildPlan,
   deepEqual,
   deletePath,
@@ -29,6 +30,7 @@ import {
 } from '../src/client/form-model.js'
 import { CONFIG_FIELDS } from '../src/commands.js'
 import { Config } from '../src/config.js'
+import { en, zh } from '../src/client/locales.js'
 
 // ─── path helpers ────────────────────────────────────────────────────
 
@@ -529,6 +531,47 @@ describe('numeric control bounds mirror the config schema', () => {
   it('uses a positive step so the browser control can reach each other value', () => {
     for (const field of numeric) {
       expect(field.step ?? 1, `${field.path} step`).toBeGreaterThan(0)
+    }
+  })
+})
+
+// ─── default-visible set (information architecture) ───────────────────
+
+describe('the open card holds only the routing decisions', () => {
+  /**
+   * The panel was measured at 30 controls in one open card, which buried the
+   * three questions a user actually opens it for. The visible set is therefore
+   * pinned here — adding a field to the open view must be a deliberate edit to
+   * this list, not a side effect of adding a field (SPEC §12.3, ALIGNMENT §R8.2).
+   */
+  const visible = CARD_FIELDS.filter((field) => field.advanced !== true)
+  const advanced = CARD_FIELDS.filter((field) => field.advanced === true)
+
+  it('shows exactly these paths by default', () => {
+    expect(visible.map((field) => field.path)).toEqual([
+      'enabled',
+      'routing.mode',
+      'routing.economics.reworkPenalty',
+      'routing.economics.mode',
+      'orchestration.mode',
+      'orchestration.maxRounds',
+      'orchestration.maxSpendUsd',
+      'orchestration.audit.enabled',
+      'tiers.fast.models',
+      'tiers.smart.models',
+    ])
+  })
+
+  it('keeps every other field reachable behind the disclosure', () => {
+    expect(advanced.length).toBe(CARD_FIELDS.length - visible.length)
+    expect(advanced.length).toBeGreaterThanOrEqual(15)
+  })
+
+  it('renders every advanced field under a heading that already exists in both dictionaries', () => {
+    for (const field of advanced) {
+      const key = advancedGroupKey(field)
+      expect(en[key as keyof typeof en], `${field.path} heading ${key} (en)`).toBeDefined()
+      expect(zh[key as keyof typeof zh], `${field.path} heading ${key} (zh)`).toBeDefined()
     }
   })
 })

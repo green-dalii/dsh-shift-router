@@ -21,7 +21,14 @@
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, Translate } from '@deepseek-ai/dsh-client-ui-slots'
-import { CARD_FIELDS, CARD_SECTIONS, type CardField, type ModelRow } from './form-model.js'
+import {
+  ADVANCED_SECTION,
+  CARD_FIELDS,
+  CARD_SECTIONS,
+  advancedGroupKey,
+  type CardField,
+  type ModelRow,
+} from './form-model.js'
 import type { FieldState, ShiftRouterCardFace } from './controller.js'
 import { CATALOG_UNAVAILABLE, type CatalogEntry, type ModelCatalog } from './model-catalog.js'
 import {
@@ -107,6 +114,20 @@ const name: CSSProperties = {
   fontSize: 15,
   fontWeight: 600,
   lineHeight: 1.35,
+}
+const advancedHeader: CSSProperties = {
+  appearance: 'none',
+  width: '100%',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+  background: 'transparent',
+  border: 0,
+  padding: 0,
+  alignItems: 'center',
+  gap: 8,
+  display: 'flex',
 }
 const summary: CSSProperties = {
   alignItems: 'center',
@@ -354,7 +375,7 @@ const modelList: CSSProperties = {
 }
 // One row's controls share a flex line whose first cell is sized by its CONTENT:
 // the role badge is text (Primary / Fallback 1), so a fixed track lets it spill
-// onto the provider select (ALIGNMENT §R8.1). Notices stack under the line.
+// onto the provider select (ALIGNMENT §R8.1). Notices stack underneath the line.
 const modelRow: CSSProperties = {
   flexDirection: 'column',
   gap: 6,
@@ -531,12 +552,18 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
   const { t, edit, editRows, resetField, save, discard } = props
   const state = props.useShiftRouterCard((snapshot) => snapshot)
   const [open, setOpen] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   if (!state.available) return null
 
   const stateByPath = new Map(state.fields.map((field) => [field.path, field]))
   const blocked = !state.dirty || state.invalid || state.saving
   const facts = summaryFacts(stateByPath)
   const problems = chainProblems(chainView(stateByPath))
+  // The open card carries only the decisions that change how requests are
+  // routed; the tuning knobs live behind one collapsed disclosure (SPEC §12.3).
+  const basicFields = CARD_FIELDS.filter((field) => field.advanced !== true)
+  const advancedFields = CARD_FIELDS.filter((field) => field.advanced === true)
+  const advancedChanged = advancedFields.filter((field) => stateByPath.get(field.path)?.overridden === true).length
 
   return (
     <li style={card} className={open ? 'sr-card sr-cardOpen' : 'sr-card'}>
@@ -570,7 +597,7 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
             <p style={readOnly} role="status">{t('readOnly')}</p>
           ) : null}
           {CARD_SECTIONS.map((section) => {
-            const sectionFields = CARD_FIELDS.filter((field) => field.display === section.id)
+            const sectionFields = basicFields.filter((field) => field.display === section.id)
             if (sectionFields.length === 0) return null
             return (
               <section key={section.id} style={sectionBlock}>
@@ -598,6 +625,42 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
               </section>
             )
           })}
+          {advancedFields.length > 0 ? (
+            <section style={sectionBlock}>
+              <button
+                type="button"
+                className="sr-advanced"
+                style={advancedHeader}
+                aria-expanded={showAdvanced}
+                aria-label={`${t(showAdvanced ? 'collapseAdvanced' : 'expandAdvanced')}: ${t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}`}
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                <span style={sectionTitle}>{t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}</span>
+                <span style={badge}>{t('advancedCount', { n: advancedFields.length })}</span>
+                {advancedChanged > 0 ? (
+                  <span style={badge}>{t('advancedChanged', { n: advancedChanged })}</span>
+                ) : null}
+                <span style={{ ...chevron, transform: showAdvanced ? 'rotate(180deg)' : undefined }}>
+                  <ChevronIcon />
+                </span>
+              </button>
+              <p style={sectionSummary}>{t(ADVANCED_SECTION.summaryKey as ShiftRouterCardKey)}</p>
+              {showAdvanced ? (
+                <div style={sectionBody}>
+                  <AdvancedFields
+                    fields={advancedFields}
+                    stateByPath={stateByPath}
+                    catalog={state.catalog}
+                    t={t}
+                    disabled={!state.writable}
+                    edit={edit}
+                    editRows={editRows}
+                    resetField={resetField}
+                  />
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <div style={footer}>
             {state.failed ? <p style={failed} role="status">{t('saveFailed')}</p> : null}
             <button type="button" className="sr-discard" style={btnDiscard} disabled={!state.dirty || state.saving} onClick={discard}>
@@ -679,6 +742,32 @@ function SectionFields(props: SectionFieldsProps): ReactNode {
         <div key={group}>
           <h4 style={groupHeading}>{rest.t(group as ShiftRouterCardKey)}</h4>
           {fields.filter((field) => field.group === group).map((field) => (
+            <FieldRow key={field.path} field={field} {...rest} />
+          ))}
+        </div>
+      ))}
+    </>
+  )
+}
+
+/**
+ * The advanced controls, sub-grouped by the setting they belong to (judge,
+ * window, cache, failover, …) so the disclosure reuses the card's own vocabulary
+ * rather than inventing a second taxonomy.
+ */
+function AdvancedFields(props: SectionFieldsProps): ReactNode {
+  const { fields, ...rest } = props
+  const headings: string[] = []
+  for (const field of fields) {
+    const heading = advancedGroupKey(field)
+    if (!headings.includes(heading)) headings.push(heading)
+  }
+  return (
+    <>
+      {headings.map((heading) => (
+        <div key={heading}>
+          <h4 style={groupHeading}>{rest.t(heading as ShiftRouterCardKey)}</h4>
+          {fields.filter((field) => advancedGroupKey(field) === heading).map((field) => (
             <FieldRow key={field.path} field={field} {...rest} />
           ))}
         </div>
