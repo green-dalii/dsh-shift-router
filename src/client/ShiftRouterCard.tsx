@@ -63,7 +63,6 @@ const CARD_CSS = `
 .sr-addModel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .sr-iconBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .sr-iconBtnDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}
-.sr-hint{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 `
 
 if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${STYLE_ID}"]`) === null) {
@@ -282,16 +281,17 @@ const inputInvalid: CSSProperties = {
   borderColor: 'var(--dsw-alias-label-error)',
 }
 const inputWrap: CSSProperties = {
-  position: 'relative',
   display: 'flex',
   alignItems: 'center',
+  gap: 6,
 }
+// The unit is a SIBLING of the control, never an overlay: a number input draws
+// its own spin buttons at the right edge, so an absolutely-positioned suffix and
+// the spinner land on top of each other (ALIGNMENT §R8.1).
 const unitSuffix: CSSProperties = {
-  position: 'absolute',
-  right: 12,
   color: 'var(--dsw-alias-label-tertiary)',
+  whiteSpace: 'nowrap',
   fontSize: 12,
-  pointerEvents: 'none',
 }
 
 // ── Toggle switch (contrast-safe in light and dark themes) ────────────
@@ -352,16 +352,24 @@ const modelList: CSSProperties = {
   gap: 6,
   display: 'flex',
 }
+// One row's controls share a flex line whose first cell is sized by its CONTENT:
+// the role badge is text (Primary / Fallback 1), so a fixed track lets it spill
+// onto the provider select (ALIGNMENT §R8.1). Notices stack under the line.
 const modelRow: CSSProperties = {
-  gridTemplateColumns: '20px minmax(0,1fr) minmax(0,1fr) auto',
+  flexDirection: 'column',
+  gap: 6,
+  display: 'flex',
+}
+const modelRowLine: CSSProperties = {
   alignItems: 'center',
   gap: 8,
-  display: 'grid',
+  display: 'flex',
 }
 const rowInput: CSSProperties = {
   ...input,
-  width: '100%',
   height: 32,
+  flex: '1 1 0',
+  minWidth: 0,
 }
 const rowInputInvalid: CSSProperties = {
   ...rowInput,
@@ -409,10 +417,11 @@ const modelEmpty: CSSProperties = {
 }
 const roleBadge: CSSProperties = {
   ...badge,
-  justifySelf: 'start',
+  flex: 'none',
 }
 const rowActions: CSSProperties = {
   alignItems: 'center',
+  flex: 'none',
   gap: 2,
   display: 'inline-flex',
 }
@@ -446,7 +455,7 @@ const noticeLine: CSSProperties = {
 }
 const rowNotice: CSSProperties = {
   ...noticeLine,
-  gridColumn: '2 / -1',
+  paddingLeft: 2,
   color: 'var(--dsw-alias-label-tertiary)',
 }
 const duplicateNotice: CSSProperties = {
@@ -752,9 +761,7 @@ function FieldRow(props: FieldRowProps): ReactNode {
   } else {
     const text = fieldState?.text ?? ''
     const width = field.unit ? 150 : 180
-    const controlStyle: CSSProperties = field.unit
-      ? { ...(invalid ? inputInvalid : input), width, paddingRight: 54 }
-      : { ...(invalid ? inputInvalid : input), width }
+    const controlStyle: CSSProperties = { ...(invalid ? inputInvalid : input), width }
     control = (
       <div style={inputWrap}>
         <input
@@ -928,6 +935,7 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
             const rowLabel = `${t(field.labelKey as ShiftRouterCardKey)} ${index + 1}`
             return (
               <div key={index} style={modelRow}>
+                <div style={modelRowLine}>
                 <span style={roleBadge}>
                   {index === 0 ? t('modelPrimary') : t('modelFallback', { n: index })}
                 </span>
@@ -1024,6 +1032,7 @@ function ModelEditor(props: ModelEditorProps): ReactNode {
                     </svg>
                   </button>
                 </span>
+                </div>
                 {failure !== undefined ? (
                   <p style={rowNotice} role="status">
                     {t('modelProviderUnavailable', { provider: failure.name, message: failure.message })}
