@@ -22,7 +22,10 @@
  *   7. pack the package and boot the PACKED artifact in a second scratch
  *      profile (`web`, so the card's composition is exercised) — devDependencies
  *      are absent there, so a runtime import that is not a declared dependency
- *      fails here instead of in a user's install
+ *      fails here instead of in a user's install — then read the boot payload
+ *      back from the running server and assert the browser half is actually
+ *      OFFERED to the client module loader (a `dsh.client.platform` or id
+ *      mistake is otherwise silent: the card simply never loads)
  *   8. assert the `shift-router` settings namespace round-trips a write
  *
  * Usage:
@@ -77,8 +80,13 @@ function run(args, { allowFailure = false, env = {} } = {}) {
  * Run a command that is expected to SERVE (not exit), and return once it either
  * printed its listening URL or the budget expired. Always kills the child: a
  * gate that can hang is not a gate.
+ * @param args - CLI arguments.
+ * @param options - extra environment, budget, settle pattern, and an optional
+ *   hook awaited while the server is still up (the child is killed on settle, so
+ *   anything that must talk to the running server has to happen there).
+ * @returns the process output.
  */
-function runBounded(args, { env = {}, budgetMs = 40_000, settleOn = /dsh web: http/ } = {}) {
+function runBounded(args, { env = {}, budgetMs = 40_000, settleOn = /dsh web: http/, whileServing } = {}) {
   return new Promise((done) => {
     const child = spawn(DSH, args, {
       cwd: REPO,
@@ -87,27 +95,57 @@ function runBounded(args, { env = {}, budgetMs = 40_000, settleOn = /dsh web: ht
     })
     let output = ''
     let settled = false
-    const finish = () => {
+    const finish = async (timedOut = false) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       clearInterval(poll)
+      if (!timedOut && whileServing !== undefined) {
+        // Failures surface through the caller's assertions, not as a hang.
+        try {
+          await whileServing(output)
+        } catch {
+          /* the assertion that consumes the result reports the failure */
+        }
+      }
       child.kill('SIGTERM')
       setTimeout(() => child.kill('SIGKILL'), 2000).unref()
       done(output)
     }
-    const timer = setTimeout(finish, budgetMs)
+    const timer = setTimeout(() => void finish(true), budgetMs)
     const poll = setInterval(() => {
-      if (settleOn.test(output)) finish()
+      if (settleOn.test(output)) void finish()
     }, 200)
     child.stdout.on('data', (chunk) => { output += chunk })
     child.stderr.on('data', (chunk) => { output += chunk })
-    child.on('error', (error) => { output += `\n${error.message}`; finish() })
-    child.on('close', finish)
+    child.on('error', (error) => { output += `\n${error.message}`; void finish(true) })
+    child.on('close', () => void finish(true))
   })
 }
 
 const step = (message) => console.log(`\n▸ ${message}`)
+
+/**
+ * Read the boot payload the browser would receive: the printed URL carries a
+ * one-shot token that sets the auth cookie and redirects, so the cookie is
+ * carried to the second request by hand.
+ * @param bootOutput - the serving process's stdout/stderr.
+ * @returns the index HTML, or '' when it could not be read.
+ */
+async function readBootPayload(bootOutput) {
+  const url = bootOutput.match(/dsh web: (http:\/\/127\.0\.0\.1:\d+\/\?token=\S+)/)?.[1]
+  if (url === undefined) return ''
+  try {
+    const handshake = await fetch(url, { redirect: 'manual' })
+    const cookie = handshake.headers.getSetCookie?.()[0]?.split(';')[0]
+    const index = await fetch(new URL('/', url), {
+      headers: cookie === undefined ? {} : { cookie },
+    })
+    return index.ok ? await index.text() : ''
+  } catch {
+    return ''
+  }
+}
 
 function assert(condition, message) {
   if (condition) {
@@ -198,13 +236,24 @@ try {
   await run(['--profile', PACK_PROFILE, '--from-default-profile', 'web'], { allowFailure: true })
   const packedAdd = await run(['plugin', '--profile', PACK_PROFILE, 'add', tarballPath])
   assert(packedAdd.code === 0, 'the packed artifact installs as a bundle')
-  const packedBoot = await runBounded(['--profile', PACK_PROFILE, '--port', '0', '--no-open'])
+  // The payload must be read while the server is up: `runBounded` kills it on
+  // settle, and these two assertions are about what the BROWSER would be given.
+  let payload = ''
+  const packedBoot = await runBounded(['--profile', PACK_PROFILE, '--port', '0', '--no-open'], {
+    whileServing: async (output) => {
+      payload = await readBootPayload(output)
+    },
+  })
   assert(!packedBoot.includes('plugin tree failed to load'),
     'the packed install does not abort the plugin tree')
   assert(!packedBoot.includes('without inject'),
     'the packed install does not read an undeclared service')
   assert(/dsh web: http:\/\/127\.0\.0\.1:\d+/.test(packedBoot),
     'the packed install reaches the serving state with the plugin loaded')
+  assert(payload.includes('"id":"dsh-shift-router"'),
+    'the packed install offers its browser half to the client module loader')
+  assert(payload.includes('@deepseek-ai/dsh-client-ui-settings-plugins/client.js'),
+    'the deployment ships the package that declares the card slot')
   rmSync(packDir, { recursive: true, force: true })
 
   step('checking the settings namespace round-trip')
