@@ -8,12 +8,20 @@
  * `dsh-settings` — so a value edited here is the value `/router config`
  * reports and the running router uses.
  *
- * Slot/locale contracts are declared here (see the module augmentation
- * below): the section host declares `settings.plugin.item` at runtime, and
- * this package's bundle must not value-import from the host package, so the
- * contract is spelled locally and checked against the host only by behavior.
+ * The slot is **keyed**, and its cell key IS the settings namespace: the tab
+ * enumerates the namespaces the Host serves and dispatches one key per
+ * namespace, so `key: NS` is what pairs this card with the `shift-router`
+ * namespace (an `id` is a list-slot option and `SlotCore` rejects it outright).
+ *
+ * The slot contract is therefore taken from the package that DECLARES it —
+ * `@deepseek-ai/dsh-client-ui-settings-plugins/client`, type-only, so nothing
+ * enters the bundle — instead of being spelled here. A local copy does not
+ * merely age badly: the compiler then enforces a contract that does not exist
+ * (this file once declared the slot as a `list` and so blessed an `id`-keyed
+ * registration that never rendered — see ALIGNMENT.md §R6).
  */
 
+import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -24,21 +32,22 @@ import { ShiftRouterCard } from './ShiftRouterCard.js'
 import { en, zh, type ShiftRouterCardKey } from './locales.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    /** One plugin's card inside the plugin configuration section (see the host package's slot-contract). */
-    'settings.plugin.item': {
-      kind: 'list'
-      scope: 'root'
-      owner: { children?: never }
-    }
-  }
+  // `SlotMap['settings.plugin.item']` is NOT declared here: it belongs to the
+  // declarer (imported above), and re-declaring it is how the card silently
+  // stopped rendering. Only the dictionary namespace, which this package owns,
+  // is augmented locally.
   interface LocaleNamespaceMap {
     /** Dictionary namespace owned by the shift-router card. */
     'shift-router': ShiftRouterCardKey
   }
 }
 
-/** Settings namespace owned by the host plugin (`src/index.ts`). */
+/**
+ * Settings namespace owned by the host plugin (`src/index.ts`,
+ * `ROUTER_SETTINGS_NAMESPACE`) — and the card's cell key in the keyed slot.
+ * The two halves cannot import one another across the browser boundary, so the
+ * pairing is pinned by `tests/client-card-slot.test.ts` instead.
+ */
 const NS = 'shift-router'
 
 /** Required services (cordis fiber inject). */
@@ -59,10 +68,12 @@ export function apply(ctx: Context): void {
     ctx.settingsScope.bind({ namespace: NS }),
     connection?.api as LlmCatalogApi | undefined,
   )
+  // Keyed slot: `key` (the settings namespace) is the cell key the tab
+  // dispatches on. A keyed cell has no `id`/`order` — registration order is the
+  // ledger's, and the tab renders in the served-namespace order.
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
     name: 'settings.plugin.item',
-    id: 'shift-router',
-    order: 30,
+    key: NS,
     locale: NS,
     inject: () => controller.inject(),
   }, ShiftRouterCard))
