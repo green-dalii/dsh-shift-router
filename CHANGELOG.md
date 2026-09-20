@@ -14,11 +14,16 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
 
 > **Status: implemented, not yet released.** This section was authored
 > docs-first and every item has since landed, with the gates in SPEC §14 green
-> (tsc host + client, 216 tests across 12 files, tsdown build, and
+> (tsc host + client, 228 tests across 13 files, tsdown build, and
 > `npm run test:e2e` against a scratch profile). The delivery audit — including
 > what was deliberately *not* ported and the residual gaps — is in
 > [`ALIGNMENT.md`](ALIGNMENT.md). A version bump and the release itself are the
 > maintainer's call.
+>
+> **A boot-aborting defect shipped in this section and was fixed before any
+> release** (see "Fixed — installation verification round" below and
+> [`ALIGNMENT.md`](ALIGNMENT.md) §R3). The install had been verified only at the
+> composition layer, which never instantiates a plugin.
 
 > ⚠ **Routing behaviour changes immediately, with no config edit.** The
 > decision rule is replaced (vote counting → expected cost) and two legacy
@@ -52,6 +57,15 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   orchestration request is a certainty and must be reported with
   `confidence ≥ 0.9`, evaluated before torn-task signals; document handling and
   tedious bulk batches classify as `fast` unless they set direction.
+- **`ux.promptSectionOrder`** (default `150`): sort position of the orchestrator
+  system-prompt section. DSH allocates section order centrally (`SECTION_ORDERS`)
+  and reserves no slot for a third-party section, so this is configuration rather
+  than a platform constant — and it must not be resolved through
+  `getSectionOrder()`, which returns `undefined` for non-platform names while
+  `section()` throws on a non-finite order (the same boot-abort class as an
+  undeclared service read).
+- **`Worker delegation:` line in `/router status`**: whether subagent delegation
+  can be pinned to the Fast tier, and the consequence when it cannot (§7.4).
 - **`lastDecision`** state (verdict, confidence, reason, action,
   `decisionTier`, held) for the "why did it route this way" section of
   `/router status`.
@@ -125,6 +139,36 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   intent (upstream v1.4.2 Bug B).
 - Orchestration no longer prompts for delegation that the router cannot honour.
 
+### Fixed — installation verification round
+
+- **DSH failed to start with the plugin installed.** The worker-model self-check
+  read `ctx.subagentModelSelection` as an undeclared service. A Cordis context is
+  a proxy whose `get` trap throws `cannot get property "…" without inject` for any
+  service the plugin did not declare *while that service is absent* — including
+  the ordinary window in which a sibling row is still mounting. Because the read
+  ran inside `apply`, the throw failed the plugin fiber and aborted the whole
+  plugin tree (`dsh: plugin tree failed to load … cannot get property
+  "subagentModelSelection" without inject`), on the plugin's **default**
+  configuration (`orchestration.mode: auto`). The service is now read through
+  `ctx.get('subagentModelSelection')` — the documented way to probe an optional
+  dependency — and the self-check subscribes reactively via `ctx.inject`, with a
+  race-free re-check at orchestration entry. Regression:
+  `tests/plugin-load.test.ts`, which loads the plugin through `ctx.plugin()`
+  against a real Cordis context.
+- **The self-check's warning was unreachable.** Cordis's logger only fills an
+  in-memory ring unless an exporter is registered, and the shipped DSH
+  compositions register none — so the warning (and every other `ctx.logger` line)
+  reaches neither the terminal nor the UI. The same fact is now rendered by
+  `/router status` as a `Worker delegation:` line, and the visibility limit is
+  stated in SPEC §13 and both READMEs.
+- **`orchestration.mode: auto` was never exercised by the test suite.** Both E2E
+  fixtures pinned `mode: off`, which is exactly how the boot regression escaped;
+  `--dump-config` cannot substitute, because it composes configuration without
+  instantiating a plugin. The upgrade-path fixture now mirrors a real
+  pre-alignment profile (`mode: auto`), and a new
+  `e2e/orchestration-overlay.yml` boots the default configuration with the
+  web-only `subagent-model-selection-settings` row mounted.
+
 ### Fixed in review
 
 An independent adversarial review (with mutation testing) audited this round
@@ -189,7 +233,13 @@ leave `routing.window.threshold` unset.
   rule, decision memory, cache-aware routing, Judge contract, failover
   signatures, orchestration, config reference, commands, gates).
 - Added [`ALIGNMENT.md`](ALIGNMENT.md) — the upstream alignment audit and
-  prioritised work list.
+  prioritised work list, including §R3 (the installation-verification round).
+- `SPEC.md` §1.4 ("Cordis plugin invariants") states the four rules this plugin's
+  code must satisfy — declare what you need, probe what is optional, never guess a
+  platform constant, and never let an optional capability change loadability —
+  each with a regression in the suite. §13 records that the stock compositions
+  export no `ctx.logger` sink, so anything a user must be able to read has to be
+  surfaced by a command.
 - `ROADMAP.md`: retired the "v0.x maps one-to-one" note, recorded the port
   baseline (upstream v1.0.0) and the alignment target (v1.6.0), and added an
   upstream-version alignment table.

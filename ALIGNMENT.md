@@ -7,6 +7,20 @@
 
 ## 修订记录
 
+**R3（安装验证轮：一次真实的 P0 热修，已交付）** — 维护者按推荐路径把本插件装进真实
+`web` profile 后，**DSH 无法启动**：
+
+```
+Error: dsh: plugin tree failed to load: failed to apply loader entry shift-router
+  (dsh-shift-router): cannot get property "subagentModelSelection" without inject
+```
+
+上一轮声明「已安装并验证」是**不成立的**：那条结论只验证到组合层（`dsh plugin add`
++ `--dump-config`），而 `--dump-config` **只组合配置、从不实例化插件**；真正的启动
+从未被验证，而 E2E 恰好把 `orchestration.mode` 钉成 `off`，绕过出事的那条分支。
+R3 记录根因、修复、新增闸门与合规审计结果，并**修正上一轮关于 C4(b) 与日志可见性的
+错误结论**。详见「R3：安装验证轮（P0 热修）」一节。
+
 **R2（维护者校正，已采纳）** — 「上游 TPS 指示器不要照搬：DSH 有原生 TPS 指示器」。
 核实结论：DSH 的 `dsh-client-ui-chat` / `dsh-client-ui-trajectory` 原生渲染
 `{tps} tok/s`，且口径为 `outputTokens / (decodeMs / 1000)`（**解码时间**），
@@ -202,7 +216,7 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 | B5 `decisionTier` | `RouteDecision` 新字段，唯一消费信号 | `router.test.ts` 各 action 分支的 `decisionTier` 断言 + `recordLastDecision` |
 | B6 `orchestrate` 信号 | `shouldOrchestrate` 第 4 参 + 提示词键 | `orchestrate.test.ts` "lets the Judge veto orchestration explicitly"；`judge.test.ts` "carries the orchestrate signal through a successful call" |
 | B2 gear presets | `commands.ts` `/router eco\|default\|sport`，**持久化** | `commands-handler.test.ts` "persists the chosen gear instead of only mutating memory"、"reports R and theta"、"surfaces a persistence failure" |
-| C4(b) worker 模型注入 | 启动自检告警 + 提示词如实描述 + SPEC §7.4 | `orchestrate.test.ts` 提示词断言（含 `subagent-model-selection`、不含 `agentOptions`）；自检接线本身无单测 |
+| C4(b) worker 模型注入 | 自检（可选服务探测 + 响应式订阅 + 编排入口的免竞态复核）+ 提示词如实描述 + `/router status` 的 `Worker delegation:` 行 + SPEC §7.4 | `orchestrate.test.ts`（提示词、告警文本、状态行格式）；`plugin-load.test.ts`（真实 Cordis 上下文下的四条接线）；`commands-handler.test.ts`（状态行） |
 | 移除 `requireSmartModel` | `types.ts` / `config.ts` 删除；老文档静默加载 | `config.test.ts` "no longer carries the removed orchestration knob"、"loads a pre-alignment config document without failing" |
 
 ### Gate 结果
@@ -226,13 +240,166 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 
 ### 残余缺口（如实记录，未在轮内解决）
 
-1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、启动自检告警的接线、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。变异测试证实了这一点：把 `state.lastActivityAt = now` 整行删除，**测试全绿**——说明该修复只由代码保证。（自检告警的**判定**已提取为纯函数并单测，缺口只剩接线。）
+1. **`src/index.ts` 的 DSH 接线仍无单测**（P4-E3 的一半）：编排清扫、实际模型同步、`agent/request-error` 冷却路径、`agent/request` 覆写路径。这是**既有**缺口，本轮未扩大；e2e 覆盖了其中一条端到端路径（裁判 → EV 升级 → 上线模型切换 → 设置往返），但不能替代单测。变异测试证实了这一点：把 `state.lastActivityAt = now` 整行删除，**测试全绿**——说明该修复只由代码保证。
+   **R3 部分收口**：`tests/plugin-load.test.ts` 现在用**真实 Cordis 上下文**加载插件（`ctx.plugin()`，真实 `inject` 闸门），覆盖了启动自检的接线（服务缺失 / 先到 / 后到 / 已授权）以及 prompt section 的顺序与变量注册。它抓不住的仍是**事件回调内部**的逻辑（`agent/pre-step` 的清扫顺序、`agent/request-error` 分支），那部分仍只有 e2e 与纯函数单测。
 2. **SDK 漂移（E5）已由证据升级为 P2**：harness 通过 `LlmAdapter.prepareCall` 派发，而该 API 在 0.1.0-rc.6 不存在——本轮 e2e 的 fake adapter 就因此失败。插件自身的运行时值导入（`BlockAssembler`、`createUserMessage`、`settingsNamespace`）同样来自被钉住的旧版本，属真实的双版本风险，而非仅 fixture 问题。
-3. **C4(a) GUI 代写 `subagent-model-selection` 白名单**未实现（需跨命名空间写权限的可行性调查），作为 P2 保留；本轮交付的是 (b)：文档化 + 启动自检 + 提示词如实描述。
+3. **C4(a) GUI 代写 `subagent-model-selection` 白名单**未实现（需跨命名空间写权限的可行性调查），作为 P2 保留；本轮交付的是 (b)：文档化 + 自检 + 提示词如实描述 + `/router status` 行。R3 修正：**(b) 原本用 `ctx.logger.warn` 交付，而自带组合不挂载任何日志导出器，告警实际无人可见**（见 R3 一节），因此补了状态行；自检的"能看到"这一半是 R3 才补上的。
 4. **P2 编排深度**（验收审计、收敛协议、每 worker 成本归因）与 **P3** 项（模型目录单一事实来源、配置层权威展示、GUI pricing 编辑器/目录热刷新、覆盖率门槛、打包隔离闸）按约定未在轮内实施，已在 ROADMAP 的 Planned 表登记。
 5. **worker（子代理）用量不进遥测**：worker 没有路由器状态，其 usage 被跳过，因此编排花费对 `/router status` 不可见。SPEC §9 已如实收窄为"被路由的顶层 Agent 的消息"，并把 worker 归因留给 P2 的每 worker 成本工作——**宁可不记，也不记错**。
 6. **`manualOverride` 的泄漏没有清扫**（与编排泄漏同源，但机制不同）：`/route-force` 在**轮次之间**设置覆盖，所以不能在 `agent/pre-step` 里无脑清除。影响被限制在一轮之内（下一个正常收尾的轮次会在 `agent/turn-stopping` 清掉），因此本轮**记录而不修**；若要做，正确形态是给覆盖打上"已生效轮次"标记并在跨轮时清除。
 7. **`stats.ts` 的 confidence 高/中分界 `0.7` 仍是硬编码**：纯展示分桶，不影响任何决策；按 CONTRIBUTING「两个部署可能取值不同即须进 Config」的字面标准应当可配，但收益极低，本轮**接受现状**并记录在此。
+
+---
+
+## R3：安装验证轮（P0 热修）
+
+### R3.1 现象
+
+维护者按 README 的推荐路径把插件装进真实 `~/.dsh` 的 `web` profile，重启后 DSH 直接
+退出（`dsh: plugin tree failed to load`），必须卸载插件才能启动：
+
+```
+failed to apply loader entry shift-router (dsh-shift-router):
+cannot get property "subagentModelSelection" without inject
+    at workerModelSelection (dist/index.js:631:32)
+    at new apply (dist/index.js:659:57)
+```
+
+### R3.2 根因
+
+上一轮 C4(b) 的自检代码这样读宿主服务：
+
+```ts
+const holder = ctx as unknown as { subagentModelSelection?: { current?: () => unknown } }
+const service = holder.subagentModelSelection
+```
+
+`as unknown as` 只让 **TypeScript** 闭嘴；Cordis 的 context 是 Proxy，其 `get` trap
+对**未在 `inject` 中声明**、且**当下没有 provider** 的属性一律抛
+`cannot get property "X" without inject`。三个决定性事实：
+
+1. **抛点在 `apply` 内部** ⇒ fiber FAILED ⇒ 整个 plugin tree 加载失败，DSH 起不来。
+   —— 这不是"路由不工作"，是"宿主不可用"，插件缺陷里最严重的一档。
+2. **触发条件正好是默认配置**：`orchestration.mode` 默认 `auto`、Fast 链非空 ⇒ 每个
+   用户都命中。
+3. **"服务缺失"包含"还没挂载"**：`subagent-model-selection-settings` 这一行只由
+   `dsh-web-app` 组合挂载，且与插件行同属一个 include group、由 `Promise.allSettled`
+   **并发加载**。本插件的 `apply` 先跑完时该服务尚不存在 ⇒ 抛错。所以它同时是
+   **web 专属**与**启动顺序竞态**两个条件的叠加；headless 组合则因该行根本不存在而
+   必然命中"缺失"分支。
+
+### R3.3 为什么每一道既有闸门都漏了
+
+| 闸门 | 为什么没抓到 |
+|---|---|
+| `tsc` | `as unknown as` 是显式类型逃逸，编译器无从判断；类型正确性与运行时合法性在这里本来就分叉 |
+| `--dump-config`（上一轮"安装验证"用的就是这个） | **只组合配置层，从不实例化任何插件**，`apply` 根本不会执行 |
+| `vitest` 单测 | 全部用**手写对象**当 ctx 调纯函数，没有 Proxy，没有 trap，永远不抛 |
+| `npm run test:e2e` | 两个 overlay 都写了 `orchestration.mode: off`（当时是为了让断言只盯着模型切换），**恰好绕开出事的唯一分支**；而"旧配置升级路径"fixture 本意是复刻真实 profile，却在最关键的这一个键上背离了真实值 |
+| 人工审查 / mutation testing | 变异的是纯函数与触发条件，未变异"服务访问方式"这一类 |
+
+一句话：**没有任何一道闸门真正启动过一次 DSH**。这正是上一轮把"组合层验证"当成
+"安装验证"的后果。
+
+### R3.4 修复
+
+1. **可选依赖必须探测**（skill §6/§12 的明确规范）：新增
+   `readWorkerModelSelection(ctx)`，用 `ctx.get('subagentModelSelection')` 读取
+   （无 provider 时返回 `undefined`，不抛）。同一文件里 `ctx.inject(['settings'], …)`
+   早就是这么写的——本轮是**没有沿用项目自身既有范式**。
+2. **响应式订阅**：自检挂在 `ctx.inject(['subagentModelSelection'], cb)` 上，服务
+   何时挂载何时触发，被替换时重触发，随插件卸载而销毁；这同时消掉了竞态。
+3. **免竞态的缺失判定**：`enterOrchestration()` 处再复核一次。此刻树早已稳定，"缺失"
+   已是关于**部署**的事实，而不是挂载时序的假象。两条路径共用一个"只说一次"的闸。
+4. **让结论真正可见**（见 R3.5）。
+5. 顺带修正告警文案：`mount or enable`（headless 组合压根没挂载该设置面板，只说
+   "enable" 是误导）。
+
+### R3.5 附带发现：C4(b) 的告警发到了没有人看得见的地方
+
+排查过程中确认：Cordis 的 logger 默认只写**内存环形缓冲（1000 条）**并投递给已注册的
+exporter；而**自带组合一个 exporter 都没注册**（`@deepseek-ai/dsh-base`、`dsh-web-app`
+及 `dsh` CLI 全无 `ctx.logger.exporter(...)`）。也就是说：
+
+- 插件的 `ctx.logger.*` 输出在 `web` / `headless` / `sdk` 下**都不出现在终端，也不出现
+  在 UI**；
+- 上一轮告诉维护者"启动日志会显示 `[shift-router] loaded …`"是**错的**，`ux.routerLogVerbose`
+  的实际可见性也被 README 高估了。
+
+这不是插件 bug（`ctx.logger` 仍是正确通道，挂了 sink 的部署就能看到），但它推翻了
+C4(b) 的交付形态：**"启动自检告警"若无人可见，等于没交付**。因此：
+
+- 启动自检保留（挂 sink 的部署受益）；
+- 同一事实补到用户真正会看的界面：`/router status` 新增 `Worker delegation:` 行
+  （未编排时显示 `— (orchestration off)`）；
+- SPEC §13 增加一条规范性结论：**自带 profile 下"用户必须能读到"的信息只能走命令，
+  不能走日志**；README/README.zh-CN 与 GUI 提示同步更正。
+
+### R3.6 新增闸门（并验证闸门真的会拦）
+
+| 闸门 | 内容 | 拦住了吗 |
+|---|---|---|
+| `tests/plugin-load.test.ts` (5+3 tests) | 用**真实 Cordis 上下文**经 `ctx.plugin()` 加载插件：服务缺失 / 先到 / **后到（竞态）** / 已授权；外加 prompt section 顺序与变量注册 | 把修复变异回原缺陷后：**3/5 失败**（`cannot get property … without inject`） |
+| `e2e/orchestration-overlay.yml` | 用**默认** `orchestration.mode: auto`，并插入 `web` 组合那一行真实服务行 | 变异后该场景**失败** |
+| `e2e/legacy-config-overlay.yml`（改造） | 恢复为真实 pre-alignment 配置：`orchestration.mode: auto`（原来被钉成 `off`，正是漏检原因） | 变异后该场景**失败** ⇒ 现在它是这个 boot bug 的**确定性**回归闸 |
+| `e2e` 断言 | 断言输出不含 `without inject` / `failed to apply loader entry` | 同上 |
+
+变异方法：把 R3.2 的原始直读代码加回 `apply`，重跑 → 单测 3 红、e2e 两场景红；还原后
+全绿。**闸门本身被验证过会拦，而不是"看起来在跑"。**
+
+### R3.7 合规审计（对照 `dsh-plugin-dev-skill` 0.5.0）
+
+| 铁律 / 规范 | 结论 |
+|---|---|
+| 依赖必须声明（`inject`），可选依赖用 `ctx.get()` 探测 | ❌→✅ R3 修（唯一一处违规，即本次 P0） |
+| 所有 `ctx.<name>` 读取必须合法 | ✅ 全量枚举 `src/**`（宿主 11 个属性名、客户端 5 个）逐一核对：`llm/tools/commands/agents/systemPrompt` 已声明，`settingsScope/slots/locale` 已声明，`settings` 经 `sctx`，`connection` 为可选探测，`logger/on/effect/inject` 为 Context 原生 |
+| 资源必须走 `ctx.effect` 或经 `ctx` 注册 | ✅ settings 的 `watch` 作为 effect 注册（`watch` 返回 disposer，已核对类型）；judge 的 `setTimeout` 在 `try/finally` 内 `clearTimeout`，非长期资源；无手写 `removeListener/clearInterval` |
+| waterfall 监听器必须 `next()` | ✅ 五个 waterfall 监听器逐条核对：观察/放行分支全部 `return next()`；`tools/pre-execute` 的 `deny`、`agent/request-error` 的 `retry` 属**有意短路** |
+| 配置必须可配置（无硬编码） | ⚠→✅ 发现 `systemPrompt.section` 的 `order: 150` 是硬编码 ⇒ 新增 `ux.promptSectionOrder`（见 R3.8） |
+| 回调纯函数 / 无 I-O | ✅ 本插件不注册工具；`/router` 命令不写文件；客户端无 `fetch/console/计时器` |
+| 类型安全 | ✅ 无 `as any` / `@ts-ignore` / `eslint-disable`（修复前的 `as unknown as` 已删除） |
+| 剩余可接受项（记录不修） | `stats.ts` 的 0.7 置信度分桶（纯展示，非部署可变参数）；`/router models` 的 `slice(0,12)`、judge reason 的 120 字符截断（均纯展示） |
+
+### R3.8 顺带修掉的第二类隐患：平台常量不能猜
+
+`order: 150` 看似无害，但把平台的 `getSectionOrder()` 当成"正确做法"会直接踩雷：
+
+- `ctx.systemPrompt.getSectionOrder(name)` 对**不在平台 `SECTION_ORDERS` 表内**的名字
+  返回 `undefined`；
+- `section()` 对非有限 `order` 会 `throw new TypeError(...)` ⇒ fiber FAILED ⇒
+  **同一种 boot abort**。
+
+且 `SECTION_ORDERS` 是平台集中分配的（含 `DEPLOYMENT_PERSONA_PREFIX: 0`、
+`PLAN_POLICY: 500`、`TOOL_*: 1000..2900`、`TOOLS_SDK: 5000` …），第三方段落没有槽位。
+因此正确形态是**配置项**：`ux.promptSectionOrder`（默认 150，仍是"persona 前缀之后、
+plan 策略之前"），并写进 SPEC §1.4 第 3 条作为规范。
+
+### R3.9 关于「是否需要连 P2 一起做」
+
+**不需要，也不应该。** 本次不是一个"未完成的迁移"，而是**上一轮新引入的 P0 缺陷**：
+
+- 根因是服务访问方式（1 处代码），不是 SDK 版本差异。把 `@deepseek-ai/*` 从
+  `0.1.0-rc.6` 升到 `0.1.5-rc.2` **不会**修掉它——`inject` 语义两版一致；
+- P2 的"SDK 基线补齐"因此仍是**独立**的下一轮工作，且 R3 为它增加了新证据（见下）。
+
+**同时必须承认 P2 里确实有一项与本轮相邻**：SDK 基线漂移。R3 复核的证据：
+
+| 证据 | 含义 |
+|---|---|
+| 运行时 cordis **4.0.2** vs 项目 pin **4.0.1** | 已实际运行在 4.0.2；本轮 `ctx.get`/`ctx.inject` 用法两版都支持，但类型基线落后 |
+| `subagentModelSelection` 服务由 `@deepseek-ai/dsh-tool-subagent/model-selection-settings` 提供，且**只被 `dsh-web-app` 组合挂载** | 本插件不依赖该包（故只能结构化探测），这也是当初想"绕过类型"的诱因；P2 若把该包纳入类型依赖，可以有正式类型 |
+| `SECTION_ORDERS` / `getSectionOrder` / `Context` 混入方法等均来自运行时版本 | 升级后需按 skill 提示复查 API |
+
+### R3.10 R3 后的 Gate 结果
+
+| Gate | 结果 |
+|---|---|
+| `npx tsc --noEmit`（宿主） | ✅ |
+| `npx tsc -p tsconfig.client.json --noEmit`（客户端） | ✅ |
+| `npx vitest run` | ✅ **228 tests / 13 files**（R3 新增 `plugin-load.test.ts` 8 项与状态行等 4 项） |
+| `npm run build` | ✅ |
+| `npm run test:e2e` | ✅ 三个场景（新装 / pre-alignment / **默认 auto + web 服务行**）+ 设置往返 |
+| 闸门自检（变异回原缺陷） | ✅ 单测 3 红、e2e 2 场景红；还原后全绿 |
 
 ---
 
@@ -265,8 +432,20 @@ README / ROADMAP 目前只说「the original's **v0.x** feature line maps onto o
 
 ---
 
-## 下一轮建议顺序
+## 下一轮建议顺序（R3 更新）
 
-1. **SDK 基线补齐**（E5）——先做，否则后续新代码要改两遍，且双版本风险仍在。
+1. **SDK 基线补齐**（E5）——先做，否则后续新代码要改两遍，且双版本风险仍在。R3 新增
+   证据：运行时是 cordis 4.0.2 + `@deepseek-ai/*` 0.1.5-rc.2，项目 pin 仍是 4.0.1 +
+   0.1.0-rc.6；把 `@deepseek-ai/dsh-tool-subagent` 纳入类型依赖后，
+   `subagentModelSelection` 就不必再靠结构化探测。
 2. **P2 编排深度**：验收审计 → 收敛协议 → 每 worker 成本归因 → C4(a) 白名单写入。
-3. **P3**：模型目录单一事实来源、配置层权威展示、`src/index.ts` 接线单测、覆盖率门槛、打包隔离闸。
+3. **P3**：模型目录单一事实来源、配置层权威展示、覆盖率门槛、打包隔离闸（R3 已用
+   `plugin-load.test.ts` + 默认配置 e2e 覆盖了其中一半：**加载期接线**）。
+4. **R3 遗留（新增）**：
+   - `src/index.ts` **事件回调内部**仍无单测（`agent/pre-step` 清扫顺序、
+     `agent/request-error` 冷却分支）——`plugin-load.test.ts` 只覆盖加载期；
+   - `stats.ts` 置信度分桶 0.7 与若干展示截断（已按"纯展示、非部署可变"记录为可接受，
+     若追求零硬编码可改成配置或直接显示原值）；
+   - `ux.routerLogVerbose` 的实际可见性受部署是否挂日志 sink 影响，README 已如实标注；
+     若要"自带 profile 就能看到路由日志"，需要另找用户可见面（如把最近决策放进
+     `/router status`——`Last decision` 行已经承担了一部分）。

@@ -47,6 +47,7 @@ a transport layer.
 | Judge LLM call | `ctx.llm.stream()` |
 | Configuration | `shift-router` settings namespace + `cordis.patch.yml` |
 | Commands / GUI | `ctx.commands.register()`, client card in `settings.plugin.item` |
+| Optional capabilities | `ctx.get()` probe / `ctx.inject()` subscription — **never** a bare `ctx.<name>` read (§1.4, §7.4) |
 
 ### 1.2 Routable agents
 
@@ -62,6 +63,29 @@ assigned them; the router must never re-route a worker.
 - **decisive** — a Judge verdict whose confidence passes `minConfidence` and
   whose source is the LLM (not a fallback).
 - **hold** — the router keeps the current tier because it has no usable signal.
+
+### 1.4 Cordis plugin invariants
+
+Non-negotiable rules for this plugin's code. Each one has a regression in the
+suite, because each one has already been violated once in a way that cost a real
+user a boot.
+
+1. **Declare what you need.** Every service read as `ctx.<name>` must appear in
+   `export const inject`. A Cordis context is a proxy whose `get` trap throws
+   `cannot get property "<name>" without inject` for anything undeclared that is
+   not provided *at that moment*.
+2. **Probe what is optional.** An optional service is read with
+   `ctx.get('<name>')` (returns `undefined` when no provider is ACTIVE) or
+   subscribed to with `ctx.inject([...], cb)` (fires when it attaches, disposes
+   when it leaves). A structural cast (`ctx as unknown as {…}`) silences
+   TypeScript but not the proxy trap — and because the read happens inside
+   `apply`, the throw fails the plugin fiber and aborts the whole plugin tree.
+3. **Never guess a platform constant.** `ctx.systemPrompt.getSectionOrder(name)`
+   returns `undefined` for any name outside the platform's `SECTION_ORDERS`, and
+   `section()` throws on a non-finite order — the same boot-abort class. A value
+   the platform does not own is configuration, not a literal.
+4. **Loadability is not optional.** An optional capability may change behaviour;
+   it must never change whether the plugin loads.
 
 ---
 
@@ -309,6 +333,12 @@ worker-model guidance (§7.4), the task-contract rules, the review rules with th
 blocking-issues-only rule, the hard caps, the cooldown-filtered tier chains, and
 the CTO summary output contract.
 
+The section's sort position is `ux.promptSectionOrder` (default `150`, i.e.
+after `DEPLOYMENT_PERSONA_PREFIX` = 0 and before `PLAN_POLICY` = 500). DSH
+allocates section order centrally in `SECTION_ORDERS` and reserves no slot for a
+third-party section, so the value is configuration rather than a platform
+constant (§1.4).
+
 The chains are additionally exposed as prompt variables
 `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` for deployment
 personas.
@@ -336,15 +366,28 @@ collapse.
 DSH exposes the same capability under a **host-owned allowlist**: the `subagent`
 tool's per-call `provider` / `model` / `reasoning_effort` fields are honoured
 only when the deployment enables the harness's own `subagent-model-selection`
-setting (default **off**) and lists the exact routes in `allowedModels`.
-Therefore:
+setting (default **off**) and lists the exact routes in `allowedModels`. That
+settings owner is mounted by the `web` composition only, so on `headless` the
+capability is **absent** rather than disabled. Therefore:
 
 - The plugin **must not promise** that workers run on the Fast tier unless that
   allowlist authorises it.
-- At startup, when orchestration is enabled and the Fast chain is non-empty, the
-  plugin performs a self-check and **warns** when model-selectable delegation is
-  not available, naming the setting to enable. The message must state the
-  consequence (workers would otherwise inherit the Smart model).
+- `subagentModelSelection` is an **optional service**: probe it with
+  `ctx.get('subagentModelSelection')` (§1.4). Reading `ctx.subagentModelSelection`
+  aborts the boot whenever the service is missing — including the ordinary window
+  in which a sibling row is still mounting.
+- The plugin **warns** when model-selectable delegation is not usable, naming the
+  setting and stating the consequence (workers would otherwise inherit the Smart
+  model). One once-only guard, two call sites:
+  - a reactive `ctx.inject(['subagentModelSelection'], …)` callback — fires when
+    the service attaches, whenever that is, and again if the preference is
+    replaced; this absorbs boot-order races; and
+  - the orchestration entry point (`enterOrchestration`) — race-free, because by
+    then the tree has long settled and an absent service is a fact about the
+    deployment rather than a mount-ordering artefact.
+- The stock compositions export no `ctx.logger` sink (§13), so the same fact is
+  also rendered by `/router status` as a `Worker delegation:` line (§11). That
+  is the surface a user can actually read.
 - The orchestrator prompt states this condition factually instead of asserting a
   guarantee.
 
@@ -471,7 +514,8 @@ silently coerce.
 | `routing.cacheAware.sameFamilyPenalty` | number ≥ 1 | `1.5` | θ divisor on same-family tiers |
 | `routing.cacheAware.idleBoundaryMs` | int ≥ 0 | `300000` | warm-cache suppression window |
 | `routing.cacheAware.sameFamilyThreshold` | 0..1 | *(unset)* | **legacy**; ships unset, and a non-default value implies penalty 3.0 |
-| `ux.routerLogVerbose` | boolean | `false` | diagnostics via `ctx.logger` |
+| `ux.routerLogVerbose` | boolean | `false` | diagnostics via `ctx.logger`; visible only where a log exporter is mounted (§13) |
+| `ux.promptSectionOrder` | number (finite) | `150` | sort position of the orchestrator prompt section (§7.2) |
 | `orchestration.mode` | `auto` \| `off` | `auto` | |
 | `orchestration.maxRounds` | int 0..100 | `3` | hard cap |
 | `orchestration.escalationThreshold` | int 1..100 | `2` | consecutive worker failures → 1 escalation |
@@ -507,7 +551,9 @@ presets which are persisted.
 
 `/router status` must surface: routing state and gear (R → θ → θ_eff in plain
 language), the decision window, the last decision (verdict, confidence, action,
-reason) when available, model health/cooldowns, the actual running model,
+reason) when available, model health/cooldowns, the actual running model, the
+worker-delegation situation (§7.4, `— (orchestration off)` while orchestration
+is off),
 per-tier spend + savings baseline, and any legacy-override **or capped-knob**
 warning (an inert legacy default is silent; only a non-default legacy value, or
 a `downgradeMemory` larger than the window, is reported). It must not render a
@@ -531,9 +577,17 @@ must expose the same set of editable paths (enforced by test).
   There is no file sink: DSH does not hand the terminal to a plugin, so the
   upstream reason for one (interleaved writes corrupting TUI frames) does not
   apply.
-- Startup always logs: enabled state, orchestration mode; and warns on
-  identical tiers, an empty fast tier, and un-authorised worker model selection
-  (§7.4).
+- **Where they are visible.** Cordis's logger fills a 1000-entry in-memory ring
+  and hands messages to registered exporters. The shipped DSH compositions
+  (`web`, `headless`, `sdk`) register **no exporter**, so a plugin's log lines
+  reach neither the terminal nor the UI. That is a property of the deployment,
+  not of the plugin: `ctx.logger` remains the correct channel and any deployment
+  that mounts a sink sees everything. The consequence for this plugin is a rule,
+  not a workaround — **anything a user must be able to read in a stock profile
+  has to be surfaced by a command (§11), not by a log line.**
+- Startup logs (where a sink exists): enabled state, orchestration mode; and
+  warns on identical tiers, an empty fast tier, and un-authorised worker model
+  selection (§7.4).
 
 ---
 
@@ -544,8 +598,20 @@ must expose the same set of editable paths (enforced by test).
   TDD'd.
 - Contract changes may update existing assertions only as a documented part of
   the same change.
-- Gates, in order: `npm run typecheck` → `npm run build` → `npm test`. A red gate
-  is never merged or released.
+- **Wiring is tested against a real Cordis context.** `tests/plugin-load.test.ts`
+  loads the plugin through `ctx.plugin()` with the real `inject` gate armed, so an
+  undeclared service read or a non-finite prompt-section order fails in
+  milliseconds instead of aborting a user's boot. Hand-written context stubs
+  cannot catch that class of bug: they have no proxy trap to violate.
+- **The E2E must cover the default configuration.** `npm run test:e2e` boots a
+  scratch profile and covers a fresh install, a pre-alignment config, and the
+  plugin's DEFAULT orchestration mode with the web-only
+  `subagent-model-selection-settings` row mounted. A suite that only ever runs
+  `orchestration.mode: off` cannot see the default path — which is how the boot
+  regression shipped, and `--dump-config` cannot substitute because it composes
+  configuration without instantiating a single plugin.
+- Gates, in order: `npm run typecheck` → `npm run build` → `npm test` →
+  `npm run test:e2e`. A red gate is never merged or released.
 
 ---
 

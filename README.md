@@ -128,7 +128,8 @@ Configuration lives in the **`shift-router` settings namespace**: edit it in the
 | `failover.maxMs` | `21600000` | Hard cap on the backoff ladder (6h) |
 | `failover.startAttempts4xx` | `3` | 4xx (429/402/quota) failures start at this attempt (16m), client limits usually outlive server blips |
 | `telemetry.callLogCap` | `1000` | Max per-message attribution records kept for baseline cost computation |
-| `ux.routerLogVerbose` | `false` | Print router decisions to the harness log |
+| `ux.routerLogVerbose` | `false` | Print router decisions to the plugin's `ctx.logger`. Note: the stock DSH profiles register **no log exporter**, so these lines are visible only where a deployment mounts one — `/router status` is the surface that always works |
+| `ux.promptSectionOrder` | `150` | Sort position of the orchestrator system-prompt section. DSH allocates prompt order centrally (`SECTION_ORDERS`) and reserves no slot for third-party sections, so this is a setting, not a constant |
 | `pricing` | `[]` | Optional `{provider, model, input, output, cacheRead?, cacheWrite?}` USD-per-1M-token table for cost telemetry |
 
 > All numeric fields are range-validated by the schema (e.g. `window.minConfidence` must be in [0,1], `window.size` a positive integer); invalid values are rejected at load / on `set`, never silently accepted.
@@ -168,7 +169,7 @@ node scripts/expose-gui-settings.mjs --profile web   # legacy harnesses only —
 | Command | Effect |
 |---------|--------|
 | `/router` | Compact status |
-| `/router status` / `/router stats` | Full status: gear (R → θ), tiers, decision window (holds shown as `h`), the last decision and *why*, the model that actually ran vs the router's intent, transitions, cooldowns, tokens, cost telemetry |
+| `/router status` / `/router stats` | Full status: gear (R → θ), tiers, decision window (holds shown as `h`), the last decision and *why*, the model that actually ran vs the router's intent, worker delegation (`Worker delegation:`), transitions, cooldowns, tokens, cost telemetry |
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
 | `/router verbose` / `/router log` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
@@ -215,7 +216,7 @@ The original pi plugin delegated through pi-subagents with `agent: "worker"`, `c
 
 So the router does two things instead of asserting a guarantee it cannot keep:
 
-1. **Startup self-check** — when orchestration is enabled and the Fast chain is non-empty, it warns if model-selectable delegation is unavailable, naming the setting to enable and stating the consequence.
+1. **Self-check** — when orchestration is enabled and the Fast chain is non-empty, it reports that model-selectable delegation is unavailable, naming the setting to enable and stating the consequence. Two surfaces, because the first one is not always reachable: a `ctx.logger` warning (visible wherever a log exporter is mounted), and a `Worker delegation:` line in `/router status`, which always works. The allowlist service is mounted by the `web` composition only, so on `headless` the line reads `unavailable on this harness`.
 2. **Factual prompt** — the orchestrator prompt tells the CTO that a worker's model comes from the harness allowlist, and that the Fast chain listed below is what the deployment should have authorised.
 
 The caps are enforced by the router, not just described: every `subagent` tool call while an orchestration turn is active increments `orchestration.rounds`; **consecutive** failed (`isError`) subagent results advance a streak, and reaching `orchestration.escalationThreshold` increments `orchestration.escalations` and resets the streak (a successful worker result also resets it, so isolated failures do not burn the cap). Once `capHit()` is true the `subagent` tool is **denied** at `tools/pre-execute` and the orchestrator prompt section is replaced by a "wrap up now" notice. `/router status` shows the live counters (`round x/max, esc y/threshold`).
@@ -244,6 +245,10 @@ That builds a throwaway `DSH_HOME`, installs **this checkout** as a bundle into 
 - the same outcome under `e2e/legacy-config-overlay.yml`, a profile patched with the
   **pre-alignment** config (the legacy knobs at their old defaults plus the removed
   `requireSmartModel` key) — i.e. the upgrade path, not just a fresh install;
+- the same outcome under `e2e/orchestration-overlay.yml`, which uses the plugin's
+  **default** orchestration mode (`auto`) and mounts the web-only
+  `subagent-model-selection-settings` row beside it — the composition that once aborted
+  the boot;
 - the `shift-router` settings namespace round-trips a write (`e2e/settings-probe.mjs`).
 
 It never touches your real `DSH_HOME` and cleans up after itself (`--keep` to inspect). To run
@@ -276,7 +281,7 @@ src/
     └── locales.ts      # zh/en dictionaries
 ```
 
-Pure logic (router / failover / judge parsing / orchestration) is unit-tested in isolation; DSH wiring is exercised by the headless e2e.
+Pure logic (router / failover / judge parsing / orchestration) is unit-tested in isolation. Wiring is tested in two layers: `tests/plugin-load.test.ts` loads the plugin through a **real Cordis context** (so an undeclared service read or an invalid prompt-section order fails fast), and the headless e2e boots a scratch profile — including the plugin's default orchestration mode.
 
 ## License
 

@@ -14,7 +14,22 @@ npm install
 npm run typecheck      # both programs: host (tsconfig.json) + client (tsconfig.client.json)
 npm test               # vitest
 npm run build          # host tsc → client tsc → tsdown client bundle
+npm run test:e2e       # scratch DSH_HOME → install → boot → route (no credentials)
 ```
+
+Two rules that exist because breaking them once shipped a plugin that could not load:
+
+- **A service is read either through `inject` or through a probe.** `ctx.<name>` for an
+  undeclared service throws `cannot get property "…" without inject` while that service is
+  absent — including the window in which a sibling row is still mounting — and because the
+  read is inside `apply`, the throw aborts the whole DSH boot. Optional services go through
+  `ctx.get('<name>')` or `ctx.inject([...], cb)`. A cast (`ctx as unknown as {…}`) does not
+  make it legal; `tests/plugin-load.test.ts` loads the plugin against a real context
+  precisely so this fails in milliseconds instead of in a user's terminal.
+- **Platform constants are not guessed.** `ctx.systemPrompt.getSectionOrder(name)` returns
+  `undefined` for names outside the platform's `SECTION_ORDERS`, and `section()` throws on a
+  non-finite order — the same boot-abort class. Deployment-varying values are config
+  (`ux.promptSectionOrder`).
 
 The package is **dual-face**:
 
@@ -86,10 +101,17 @@ dsh --profile web-e2e web --port 3199
 
 `e2e/fake-adapter.mjs` is the credential-free LLM adapter used by the headless router
 e2e. Run it with `npm run test:e2e` (`e2e/run-e2e.mjs`): it creates a scratch `DSH_HOME`,
-installs this checkout as a bundle, runs one turn on the current config and one on
-`e2e/legacy-config-overlay.yml` (the pre-alignment shape, i.e. the upgrade path), and asserts
-the model switch and the settings round-trip in both. Treat a red e2e as a release blocker — it is the only check that proves
-the *packaged* plugin loads and routes on a real harness. For the GUI card, the model dropdowns only show providers that currently advertise
+installs this checkout as a bundle, and runs three turns — the current config, the
+pre-alignment shape (`e2e/legacy-config-overlay.yml`, i.e. the upgrade path), and the
+**default** orchestration mode with the web-only `subagent-model-selection-settings` row
+mounted (`e2e/orchestration-overlay.yml`) — asserting the model switch, that no row failed to
+apply, and the settings round-trip. Treat a red e2e as a release blocker — it is the only check that proves
+the *packaged* plugin loads and routes on a real harness.
+
+Never pin `orchestration.mode: off` in a fixture to make an assertion simpler: the default is
+`auto`, and a suite that only ever runs `off` cannot see the default path. That is exactly how
+a boot-aborting defect shipped once. `--dump-config` is not a substitute either — it composes
+configuration without instantiating a single plugin. For the GUI card, the model dropdowns only show providers that currently advertise
 models (`llm.models`), so a scratch profile with no registered adapter falls back to
 free-text rows — that is expected, not a bug. To exercise the dropdowns, mount a small
 adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
@@ -111,8 +133,8 @@ adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
    `lineHeight: 17` means `17 × font-size` (React does not append `px` to `lineHeight`) — a
    ported `17px` from native CSS balloons to ~187px. Always write unitless multipliers
    (`1.2`/`1.3`) or explicit `px` strings.
-6. Run `npm run typecheck && npm test && npm run build` before opening a PR; verify the card
-   in the browser e2e above for layout regressions (light and dark themes).
+6. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
+   PR; verify the card in the browser e2e above for layout regressions (light and dark themes).
 
 ## Releasing
 

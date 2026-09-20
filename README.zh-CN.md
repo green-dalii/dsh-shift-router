@@ -127,7 +127,8 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 | `failover.maxMs` | `21600000` | 退避阶梯硬上限（6 小时） |
 | `failover.startAttempts4xx` | `3` | 4xx（429/402/配额）失败从该尝试次数起步（16 分钟），客户端限流通常比服务端抖动更持久 |
 | `telemetry.callLogCap` | `1000` | 基线成本计算保留的最大逐条消息归属记录数 |
-| `ux.routerLogVerbose` | `false` | 把路由决策打印到 harness 日志 |
+| `ux.routerLogVerbose` | `false` | 把路由决策打印到本插件的 `ctx.logger`。注意：DSH 自带 profile **未挂载任何日志导出器**，因此只有额外挂载导出器的部署才看得到；`/router status` 才是始终可用的界面 |
+| `ux.promptSectionOrder` | `150` | 编排器系统提示词段落的排序位置。DSH 集中分配提示词顺序（`SECTION_ORDERS`），未给第三方段落预留槽位，因此这是配置项而非常量 |
 | `pricing` | `[]` | 可选 `{provider, model, input, output, cacheRead?, cacheWrite?}` 每百万 token 的 USD 计价表，用于成本遥测 |
 
 > 所有数字字段都经 schema 范围校验（如 `window.minConfidence` 必须在 [0,1]、`window.size` 必须是正整数）；非法值在加载 / `set` 时被拒绝，绝不静默接受。
@@ -211,7 +212,7 @@ node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要�
 
 因此路由器不去断言一个它无法保证的事，而是做两件事：
 
-1. **启动自检** —— 当编排开启且 Fast 链非空时，若模型可选委派不可用则发出警告，指明需要启用的设置并说明后果。
+1. **自检** —— 当编排开启且 Fast 链非空时，报告模型可选委派不可用，指明需要启用的设置并说明后果。有两个界面，因为第一个并非总是可达：`ctx.logger` 告警（仅挂载了日志导出器的部署可见），以及 `/router status` 的 `Worker delegation:` 行（始终可见）。该白名单服务只由 `web` 组合挂载，因此在 `headless` 下该行显示 `unavailable on this harness`。
 2. **如实描述** —— 编排提示词告知 CTO：工作代理的模型来自 harness 白名单，下方列出的 Fast 链是部署**应当**已授权的路由。
 
 硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；**连续**失败（`isError`）的 subagent 结果推进连击，达到 `orchestration.escalationThreshold` 时递增 `orchestration.escalations` 并清零连击（工作代理成功同样清零，因此偶发失败不会烧掉上限）。一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）。
@@ -234,6 +235,7 @@ npm run test:e2e
 
 - `ROUTER-E2E: turn ran on fake/fake-smart` —— 裁判确实跑了、EV 规则确实升级了、并且真的切换了上线模型到 Smart 层；
 - 在 `e2e/legacy-config-overlay.yml` 下（**对齐前**配置：遗留旋钮处于旧默认值 + 已被移除的 `requireSmartModel` 键）结果相同 —— 覆盖的是**升级路径**，不只是全新安装；
+- 在 `e2e/orchestration-overlay.yml` 下结果相同 —— 使用插件的**默认**编排模式（`auto`），并挂载 web 专属的 `subagent-model-selection-settings` 行，即曾经导致启动失败的那个组合；
 - `shift-router` settings 命名空间能完成一次写入并读回（`e2e/settings-probe.mjs`）。
 
 它不会碰你真实的 `DSH_HOME`，跑完自行清理（加 `--keep` 可保留现场）。手工复现：

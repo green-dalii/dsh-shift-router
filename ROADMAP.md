@@ -81,8 +81,24 @@ live here):
 | Cache-aware as a θ divisor (`sameFamilyPenalty`) + legacy migration | v1.4.0 | ✅ |
 | Judge prompt gains the 4th key `orchestrate`; explicit intent ≥0.9; doc-aware rules | v1.3.0–v1.4.2 | ✅ |
 | Judge `orchestrate` signal gates orchestration entry | v1.1.0 | ✅ |
-| **Worker model injection** (upstream calls tier injection mandatory) | v1.0.0+ | 🟡 documented + startup self-check this release; GUI-assisted authorisation of the host `subagent-model-selection` allowlist is next ([decision](ALIGNMENT.md): option (a)+(b)) |
+| **Worker model injection** (upstream calls tier injection mandatory) | v1.0.0+ | 🟡 documented + optional-service self-check + `/router status` line this release; GUI-assisted authorisation of the host `subagent-model-selection` allowlist is next ([decision](ALIGNMENT.md): option (a)+(b)). The self-check first shipped reading an undeclared service, which aborted the boot — corrected in the installation-verification round (ALIGNMENT §R3) |
 | Removed `orchestration.requireSmartModel` | — | ✅ (deliberate divergence: `decisionTier` makes it redundant, and the knob could only force the CTO prompt onto a Fast run) |
+
+## Installation verification round (delivered)
+
+A real install into a `web` profile failed to boot; the round that fixed it is
+recorded in [ALIGNMENT.md](ALIGNMENT.md) §R3. What it added to the engineering
+baseline, permanently:
+
+| Item | Status |
+|---|---|
+| Plugin loads against a **real Cordis context** with the real `inject` gate (`tests/plugin-load.test.ts`): service absent / early / late (mount race) / authorised, plus prompt-section order and variables | ✅ 8 tests |
+| E2E covers the plugin's **default** orchestration mode with the web-only `subagent-model-selection-settings` row mounted | ✅ `e2e/orchestration-overlay.yml` |
+| The upgrade-path fixture mirrors a **real** pre-alignment profile (it previously pinned `orchestration.mode: off`, which is how the boot bug escaped) | ✅ `e2e/legacy-config-overlay.yml` |
+| Gates were **mutation-verified**: reverting the fix makes 3 unit tests and 2 E2E scenarios fail | ✅ |
+| `/router status` reports the worker-delegation situation (the startup warning goes to a `ctx.logger` that stock compositions never export) | ✅ |
+| `ux.promptSectionOrder` replaces a hardcoded platform-ordering literal | ✅ |
+| SPEC §1.4 "Cordis plugin invariants" made normative; SPEC §13 states the log-visibility limit | ✅ |
 
 ## Planned
 
@@ -100,7 +116,9 @@ live here):
 | Config-layer authority display | P3 | upstream v1.4.2; DSH analogue = settings namespace + patch layers |
 | Examples directory (frontend / ML / cross-provider cost-saving configs) | ongoing | upstream line |
 | CI + coverage thresholds (≥90% lines/functions/statements, ≥85% branches on core modules) | P3 | upstream gate |
-| Packaged-install verification gate (`pack` → `dsh plugin add` → import every dist module) | P3 | DSH analogue of upstream `pack:check` + `check:isolated` |
+| Packaged-install verification gate (`pack` → `dsh plugin add` → import every dist module) | P3 | DSH analogue of upstream `pack:check` + `check:isolated`. **Half delivered** by the installation-verification round: loading now happens for real (`tests/plugin-load.test.ts`) and a scratch-profile boot covers the default config; the `npm pack`→install isolation half is still open |
+| Unit tests for `src/index.ts` **event-callback bodies** (sweep order, `agent/request-error` cooldown branches, `agent/request` rewrite) | P3 | the installation-verification round covered **load-time** wiring only; these run per turn |
+| Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
 | **SDK baseline catch-up** (`@deepseek-ai/*` 0.1.0-rc.6 → 0.1.5-rc.2, cordis 4.0.1 → 4.0.2) | **P2 — promoted** | Evidence, not speculation: the harness dispatches adapters through `LlmAdapter.prepareCall`, which does not exist in 0.1.0-rc.6 — a fixture that imports `LlmAdapter` from this package's own dependency tree failed with `registration.adapter.prepareCall is not a function` until the method was declared explicitly. The plugin's own runtime value-imports (`BlockAssembler`, `createUserMessage`, `settingsNamespace`) come from the pinned copy too, so this is a real dual-version hazard, not just a fixture problem. |
 
 ## Explicitly excluded (by design)
