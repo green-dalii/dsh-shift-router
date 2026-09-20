@@ -24,7 +24,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision, RequestErrorAction } from '@deepseek-ai/dsh-agent'
-import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
@@ -38,7 +38,8 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import { Config, deepMergeConfig } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
 import { DEFAULT_CONFIG, TIERS } from './types.js'
-import { findBestModelForTier } from './tier.js'
+import { findBestModelForTier, tierLabel } from './tier.js'
+import { formatRouteNotice, routeChanged, type RouteNoticeInput } from './notice.js'
 import {
   createRouterState,
   processRoute,
@@ -395,6 +396,13 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       }
     }
 
+    // Captured before the switch, so the notice can name both ends of the move.
+    const previous = {
+      tier: state.currentTier,
+      provider: state.currentProvider,
+      model: state.currentModelId,
+    }
+
     // Routing decision (upgrade is instant; downgrade waits for the window).
     await warmTier('fast')
     await warmTier('smart')
@@ -416,6 +424,26 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       vlog('decision: HOLD — Judge gave no usable signal, keeping the current tier')
     }
 
+    // SPEC §13.1 — decide what the session is told. The router overrides the wire
+    // model per request and never touches the session's selected model, so
+    // without this message a stock profile cannot see the router act at all.
+    const notice: RouteNoticeInput = {
+      action: result.action,
+      fromTier: previous.tier,
+      fromProvider: previous.provider,
+      fromModel: previous.model,
+      toTier: state.currentTier,
+      toProvider: state.currentProvider,
+      toModel: state.currentModelId,
+      judgeTier: judgeResult.tier,
+      judgeSource: judgeResult.source,
+      held: result.held,
+      elapsedMs: Date.now() - t0,
+      ...(judgeResult.confidence !== undefined ? { confidence: judgeResult.confidence } : {}),
+      ...(judgeResult.reason !== undefined ? { reason: judgeResult.reason } : {}),
+      ...(judgeResult.orchestrate !== undefined ? { orchestrate: judgeResult.orchestrate } : {}),
+    }
+
     // Task-level orchestration gates on the DECISION tier (post-EV, post-hold),
     // never the raw verdict: reading the verdict is what used to inject the CTO
     // prompt while a Fast model ran the turn.
@@ -435,7 +463,26 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       )
     }
 
-    return next()
+    const decision = await next()
+    if (decision.kind === 'reject') return decision
+    // A notice is news when the route moved. In verbose mode every judged turn
+    // reports, because that is what `ux.routerLogVerbose` promises — a promise a
+    // log ring no stock profile exports cannot keep (SPEC §13).
+    if (!routeChanged(notice) && !cfg.ux.routerLogVerbose) return decision
+    const { text, summary } = formatRouteNotice(notice, {
+      fast: tierLabel('fast', cfg),
+      smart: tierLabel('smart', cfg),
+    })
+    return {
+      ...decision,
+      messages: [
+        ...decision.messages,
+        createUserMessage({
+          content: [{ type: 'text', text }],
+          source: { kind: 'plugin', plugin: 'shift-router', form: 'notice', summary },
+        }),
+      ],
+    }
   })
 
   // ── Per-step model override (the actual "model switch") ─────────────
