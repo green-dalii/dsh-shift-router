@@ -161,3 +161,54 @@ describe('prompt-section placement is configuration, not a literal', () => {
     expect(prompt.variables).toContain('shift_router_smart_chain')
   })
 })
+
+describe('load safety across configurations', () => {
+  // The R3 boot abort lived in a config-gated branch that no gate ever ran. So
+  // every configuration that changes a LOAD-TIME branch is loaded for real here,
+  // not reasoned about: the plugin must load on all of them, because a load
+  // failure is not "a feature is off", it is DSH not starting.
+  const noRoutableConfig = { enabled: false, tiers: { fast: { models: [] }, smart: { models: [] } } }
+
+  it('loads on an empty config row (the documented no-op)', async () => {
+    const { ctx, prompt } = harnessContext()
+    // SPEC §10: "an empty config row is a working no-op" — every leaf defaults.
+    await expect(ctx.plugin(plugin, {})).resolves.toBeDefined()
+    expect(prompt.sections.find((entry) => entry.name === 'shift-router:orchestrator')?.order).toBe(150)
+  })
+
+  it('loads with routing disabled', async () => {
+    const { ctx } = harnessContext()
+    await expect(ctx.plugin(plugin, { ...noRoutableConfig, enabled: false })).resolves.toBeDefined()
+  })
+
+  it('loads in manual and off routing modes', async () => {
+    for (const mode of ['manual', 'off'] as const) {
+      const { ctx } = harnessContext()
+      await expect(ctx.plugin(plugin, { ...autoConfig(), routing: { mode } })).resolves.toBeDefined()
+    }
+  })
+
+  it('loads with orchestration off and with an empty Fast chain', async () => {
+    const off = harnessContext()
+    await expect(
+      ctxPlugin(off.ctx, { ...autoConfig(), orchestration: { mode: 'off' } }),
+    ).resolves.toBeDefined()
+    const empty = harnessContext()
+    await expect(
+      ctxPlugin(empty.ctx, { ...autoConfig(), tiers: { fast: { models: [] }, smart: { models: [] } } }),
+    ).resolves.toBeDefined()
+  })
+
+  it('loads with the whole costs/audit surface configured', async () => {
+    const { ctx } = harnessContext()
+    await expect(ctxPlugin(ctx, {
+      ...autoConfig(),
+      orchestration: { mode: 'auto', maxSpendUsd: 1.5, workerLedgerCap: 5, audit: { enabled: false, timeoutMs: 100, promptCap: 200 } },
+    })).resolves.toBeDefined()
+  })
+})
+
+/** `ctx.plugin` needs the plugin shape; kept local so the intent reads clearly. */
+function ctxPlugin(ctx: Context, config: unknown) {
+  return ctx.plugin(plugin, config as never)
+}

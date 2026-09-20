@@ -19,7 +19,11 @@
  *      `subagent-model-selection-settings` row beside it. That branch used to
  *      abort the whole boot, so this asserts the composition applies and the
  *      turn still routes.
- *   7. assert the `shift-router` settings namespace round-trips a write
+ *   7. pack the package and boot the PACKED artifact in a second scratch
+ *      profile (`web`, so the card's composition is exercised) — devDependencies
+ *      are absent there, so a runtime import that is not a declared dependency
+ *      fails here instead of in a user's install
+ *   8. assert the `shift-router` settings namespace round-trips a write
  *
  * Usage:
  *   node e2e/run-e2e.mjs            # scratch home under the OS temp dir
@@ -41,6 +45,8 @@ const REPO = resolve(HERE, '..')
 const DSH = process.env.DSH_BIN ?? 'dsh'
 const KEEP = process.argv.includes('--keep')
 const PROFILE = 'shift-router-e2e'
+/** Separate profile for the packed-artifact boot, in the same scratch home. */
+const PACK_PROFILE = 'shift-router-packed'
 
 const home = mkdtempSync(join(tmpdir(), 'shift-router-e2e-'))
 const probeOut = join(home, 'settings-probe.json')
@@ -64,6 +70,40 @@ function run(args, { allowFailure = false, env = {} } = {}) {
       }
       done({ code, output })
     })
+  })
+}
+
+/**
+ * Run a command that is expected to SERVE (not exit), and return once it either
+ * printed its listening URL or the budget expired. Always kills the child: a
+ * gate that can hang is not a gate.
+ */
+function runBounded(args, { env = {}, budgetMs = 40_000, settleOn = /dsh web: http/ } = {}) {
+  return new Promise((done) => {
+    const child = spawn(DSH, args, {
+      cwd: REPO,
+      env: { ...process.env, DSH_HOME: home, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let output = ''
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearInterval(poll)
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 2000).unref()
+      done(output)
+    }
+    const timer = setTimeout(finish, budgetMs)
+    const poll = setInterval(() => {
+      if (settleOn.test(output)) finish()
+    }, 200)
+    child.stdout.on('data', (chunk) => { output += chunk })
+    child.stderr.on('data', (chunk) => { output += chunk })
+    child.on('error', (error) => { output += `\n${error.message}`; finish() })
+    child.on('close', finish)
   })
 }
 
@@ -133,6 +173,39 @@ try {
   // wiring (present-early, present-late, absent, allowlisted) is pinned in
   // tests/plugin-load.test.ts against a real Cordis context instead, and its
   // user-visible form is pinned by the `/router status` tests.
+
+  step('packing the plugin and booting the PACKED artifact (install isolation)')
+  // `npm pack` installs only `dependencies`, so this step is the real
+  // install-time contract: if any runtime import were a devDependency, or a
+  // shipped path were missing from `files`, the boot below would fail here
+  // rather than in a user's DSH. Run from a temp cwd so the tarball never lands
+  // in the repo.
+  const packDir = mkdtempSync(join(tmpdir(), 'shift-router-pack-'))
+  const packed = await new Promise((done) => {
+    const child = spawn('npm', ['pack', REPO, '--silent'], { cwd: packDir, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    child.stdout.on('data', (chunk) => { out += chunk })
+    child.stderr.on('data', (chunk) => { out += chunk })
+    child.on('close', (code) => done({ code, out }))
+  })
+  const tarball = packed.out.split('\n').map((l) => l.trim()).filter((l) => l.endsWith('.tgz')).pop() ?? ''
+  assert(packed.code === 0 && tarball.length > 0, `npm pack produced a tarball (${tarball || 'none'})`)
+  const tarballPath = join(packDir, tarball)
+
+  // `web` on purpose: that is the composition the card targets, and the one the
+  // boot regression broke. `--port 0` lets the OS pick a free port, so this
+  // never collides with a running harness.
+  await run(['--profile', PACK_PROFILE, '--from-default-profile', 'web'], { allowFailure: true })
+  const packedAdd = await run(['plugin', '--profile', PACK_PROFILE, 'add', tarballPath])
+  assert(packedAdd.code === 0, 'the packed artifact installs as a bundle')
+  const packedBoot = await runBounded(['--profile', PACK_PROFILE, '--port', '0', '--no-open'])
+  assert(!packedBoot.includes('plugin tree failed to load'),
+    'the packed install does not abort the plugin tree')
+  assert(!packedBoot.includes('without inject'),
+    'the packed install does not read an undeclared service')
+  assert(/dsh web: http:\/\/127\.0\.0\.1:\d+/.test(packedBoot),
+    'the packed install reaches the serving state with the plugin loaded')
+  rmSync(packDir, { recursive: true, force: true })
 
   step('checking the settings namespace round-trip')
   let probe = null

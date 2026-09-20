@@ -132,7 +132,7 @@ contract is SPEC §7, §9, §13.
 | Config-layer authority display | P3 | upstream v1.4.2; DSH analogue = settings namespace + patch layers |
 | Examples directory (frontend / ML / cross-provider cost-saving configs) | ongoing | upstream line |
 | CI + coverage thresholds (≥90% lines/functions/statements, ≥85% branches on core modules) | P3 | upstream gate |
-| Packaged-install verification gate (`pack` → `dsh plugin add` → import every dist module) | P3 | DSH analogue of upstream `pack:check` + `check:isolated`. **Half delivered** by the installation-verification round: loading now happens for real (`tests/plugin-load.test.ts`) and a scratch-profile boot covers the default config; the `npm pack`→install isolation half is still open |
+| ~~Packaged-install verification gate~~ | ~~P3~~ | ✅ delivered: `tests/packaged-install.test.ts` (built-artifact imports ⊆ `dependencies`, browser requires ⊆ platform seed ∪ `dsh.client`, `files` completeness) + an `npm pack` → install → **boot** scenario in `npm run test:e2e` |
 | Unit tests for `src/index.ts` **event-callback bodies** (sweep order, `agent/request-error` cooldown branches, `agent/request` rewrite) | P3 | the installation-verification round covered **load-time** wiring only; these run per turn |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
 

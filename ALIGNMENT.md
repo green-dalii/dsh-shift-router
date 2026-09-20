@@ -458,6 +458,42 @@ R4 的新增接口（`OrchestrationState` 的 `spawned/done/spend/workerSpends/g
 
 ---
 
+## R5：安装前再验证（「还会不会再破坏 DSH 启动」）
+
+维护者在安装前提出的问题：**能否确认按推荐方式安装后不会再破坏 DSH 启动。**
+答案只能靠穷举「插件能怎样破坏启动」并逐条给出证据，而不是重跑同一批 gate。
+
+### R5.1 启动失败的全部途径（逐条核对）
+
+| 途径 | 核对方式 | 结论 |
+|---|---|---|
+| `apply()` 抛错 → fiber FAILED → plugin tree 加载失败 | 枚举 `apply` 内所有可能抛的调用：`ctx.systemPrompt.section`（非有限 order 会抛）、`ctx.commands.register`、两个 `ctx.inject`、以及**未声明服务读取** | 前两者分别由 `ux.promptSectionOrder`（默认 150，配置化）与类型检查保证；未声明读取由 `plugin-load.test.ts` 在真实 Cordis 上下文里钉住（变异 3 红） |
+| **导入期**抛错（模块加载失败，比 fiber FAILED 更早） | `grep` 全部 `src/**` 的导入期副作用（顶层 `throw` / `readFileSync` / `process.*` / 定时器） | 无（audit.ts 的提示词是纯字符串常量；orchestrate.ts 的提示词同理） |
+| 运行时 **值导入** 在目标 profile 解析不到 | 从**构建产物**反查：`dist/*.js` 的外部 specifier 只有 `@deepseek-ai/dsh-llm`、`@deepseek-ai/schemastery` —— 二者都在 `dependencies` | 新增 `packaged-install.test.ts` 把这条钉死（把 `dsh-llm` 移出 dependencies → 测试红） |
+| 浏览器半边解析不到模块 | 从 `dist/client.js` 反查 `require()`：`@deepseek-ai/dsh-client-store`、`react`、`react/jsx-runtime`；对照前端 boot 的 `staticModules`（seed 表：react / react-dom / cordis / **dsh-client-store** / dsh-client-ui-slots / -primitives / -dockkit） | 三者都是 **平台 seed word**，由 shell 恒定提供；另加 gate 断言「requires ⊆ seed ∪ dsh.client 声明」 |
+| 客户端 roster（`dsh.client.inject`）指向不存在的包 | 读 `dsh-client-modules` 的装载实现：未知 id **静默跳过**（`if (dependency !== void 0)`），不会抛 | **不是启动杀手**，但确实是错的：该字段仍写着基线已删除的 `@deepseek-ai/dsh-client-runtime`；已改为 `@deepseek-ai/dsh-client-ui-renderer`（`ctx.slots` 的声明方，卡片真正依赖它），并删掉无 `dsh.client` 声明的 `dsh-client-ui-slots`；gate 会拦「重新写回被删包名」 |
+| 配置差异导致只在该配置下抛错（R3 的教训） | `plugin-load.test.ts` 新增 5 组真实加载：空 config 行、`enabled:false`、`routing.mode: manual`、`off`、`orchestration.mode: off`、空 Fast 链、完整 costs/audit 配置 | 全部加载成功 |
+| 打包产物缺文件 / 依赖缺失 | 新增 `npm pack` → 装进第二个 scratch profile（`web`）→ **真实启动** 的 e2e 场景；tarball 安装**不含 devDependencies** | ✅ 进入 serving 状态，无 plugin tree 报错 |
+
+### R5.2 新增闸门与自检
+
+| Gate | 内容 | 变异自检 |
+|---|---|---|
+| `tests/packaged-install.test.ts`（6 项） | 宿主产物外部导入 ⊆ `dependencies`；浏览器 `require` ⊆ seed ∪ `dsh.client`；roster 不得再写回已删除包；`files` 完整性；双面 exports + bundle patch | 把 `dsh-llm` 移出 dependencies → **红**；roster 写回 `dsh-client-runtime` → **红**；给 `dist/client.js` 注入未声明 `require` → **红** |
+| `tests/plugin-load.test.ts`（13 项，+5） | 上述 5 组配置的真实加载 | 把未声明服务读取放回 `apply` → **红**；把 section order 改成非有限值 → **红** |
+| `e2e` 第 7 步 | packed 安装 + 真实启动 | 见上（同一机制） |
+
+### R5.3 结论与残余不确定性
+
+**已确认**：两条真正导致过启动失败的机制——「未声明服务读取」与「非有限 prompt section order」——现在各自被**真实上下文加载测试**钉住；此外新增了导入期副作用、依赖/产物解析、打包安装三类闸门。**打包安装（最强形态）已实机启动成功。**
+
+**仍无法承诺的部分（如实说明）**：
+- 闸门覆盖的是「本插件自身」的启动失败面。若 harness 未来再次 **移除/重命名** 我们使用的 API（例如下一次 SDK 基线跃迁），仍可能出现运行时断裂——这正是 SPEC §1.5 要求「harness 移动则基线必须跟随」的原因，也是 e2e 用真实 harness 跑一遍的价值所在。
+- 卡片在**浏览器**里的渲染只有类型检查 + 单测覆盖（无 CI 浏览器闸门）；`dsh.client` 契约已按 seed 表核对，但真机渲染仍建议人工看一眼（CONTRIBUTING 的手工 e2e 步骤）。
+- `orchestration.audit` 默认开启 ⇒ 编排轮次会多一次小的 Fast 档审计调用（分离执行，不阻塞）；不想要可置 `false`。
+
+---
+
 ## 明确不对齐（附理由）
 
 | 上游特性 | 不对齐的理由 |

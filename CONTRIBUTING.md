@@ -108,6 +108,12 @@ mounted (`e2e/orchestration-overlay.yml`) — asserting the model switch, that n
 apply, and the settings round-trip. Treat a red e2e as a release blocker — it is the only check that proves
 the *packaged* plugin loads and routes on a real harness.
 
+`npm run test:e2e` also packs the package and boots the PACKED artifact in a
+second scratch profile. That step is the install-time contract: the tarball
+carries only `dependencies`, so a runtime import that is a devDependency — or a
+shipped path missing from `files` — fails there rather than in a user's install.
+`tests/packaged-install.test.ts` is the fast half of the same gate.
+
 Never pin `orchestration.mode: off` in a fixture to make an assertion simpler: the default is
 `auto`, and a suite that only ever runs `off` cannot see the default path. That is exactly how
 a boot-aborting defect shipped once. `--dump-config` is not a substitute either — it composes

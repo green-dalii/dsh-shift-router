@@ -197,6 +197,24 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   intent (upstream v1.4.2 Bug B).
 - Orchestration no longer prompts for delegation that the router cannot honour.
 
+### Fixed — pre-install re-verification
+
+- **The client roster named a package that no longer exists.** `dsh.client.inject`
+  still listed `@deepseek-ai/dsh-client-runtime`, which the current baseline does
+  not ship, and it did not list `@deepseek-ai/dsh-client-ui-renderer` — the
+  package that declares the `slots` service the card injects. The stale id is
+  inert (the module loader silently skips unknown inject ids), so this was a
+  correctness fix, not an outage; a test now forbids writing it back.
+- **Install-time contract is now a gate.** `tests/packaged-install.test.ts`
+  asserts, against the BUILT artifacts, that the host half imports only declared
+  `dependencies`, that the browser half `require()`s only platform seed words or
+  `dsh.client`-declared packages, and that `files` ships what the artifacts and
+  READMEs need; `npm run test:e2e` now also packs the tarball, installs it into a
+  second scratch profile and boots it, where devDependencies are absent.
+- Load safety is now tested per configuration: the empty row, routing disabled,
+  `manual`, `off`, orchestration off, an empty Fast chain and the full
+  costs/audit surface each load for real.
+
 ### Fixed — installation verification round
 
 - **DSH failed to start with the plugin installed.** The worker-model self-check

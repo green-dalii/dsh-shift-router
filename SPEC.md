@@ -716,6 +716,20 @@ must expose the same set of editable paths (enforced by test).
   `orchestration.mode: off` cannot see the default path — which is how the boot
   regression shipped, and `--dump-config` cannot substitute because it composes
   configuration without instantiating a single plugin.
+- **Load safety is tested per configuration.** `tests/plugin-load.test.ts` loads
+  the plugin for every configuration that changes a LOAD-TIME branch — empty row,
+  routing disabled, `manual`, `off`, orchestration off, empty Fast chain, and the
+  full costs/audit surface. A load failure is not "a feature is off", it is DSH
+  not starting, so these are loaded for real rather than reasoned about.
+- **Install isolation is a gate.** `tests/packaged-install.test.ts` reads the
+  BUILT artifacts and asserts the install-time contract: every external
+  specifier the host half imports is a declared `dependencies` entry (never
+  dev-only); every specifier the browser half `require()`s is a platform seed
+  word or declared in `dsh.client`; and `files` ships what the artifacts and
+  READMEs need. `npm run test:e2e` additionally packs the tarball, installs it
+  into a second scratch profile and **boots it** — where devDependencies are
+  absent, so a runtime import that is not a declared dependency fails there
+  instead of in a user's install.
 - Gates, in order: `npm run typecheck` → `npm run build` → `npm test` →
   `npm run test:e2e`. A red gate is never merged or released.
 
