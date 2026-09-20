@@ -656,7 +656,10 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // ── Orchestrator prompt (rendered only while orchestration is active) ──
   ctx.systemPrompt.section({
     name: 'shift-router:orchestrator',
-    order: 150,
+    // Configurable placement: DSH allocates section order centrally
+    // (`SECTION_ORDERS` in dsh-system-prompt) and has no slot for a
+    // third-party section, so this is a deployment decision, not a literal.
+    order: getConfig().ux.promptSectionOrder,
     text: (context) => {
       const agent = context.agent
       if (!agent) return ''

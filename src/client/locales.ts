@@ -64,6 +64,7 @@ export type ShiftRouterCardKey =
   | 'f.startAttempts4xx'
   | 'f.callLogCap'
   | 'f.routerLogVerbose'
+  | 'f.promptSectionOrder'
   | 'h.enabled'
   | 'h.fastModels'
   | 'h.smartModels'
@@ -89,6 +90,7 @@ export type ShiftRouterCardKey =
   | 'h.startAttempts4xx'
   | 'h.callLogCap'
   | 'h.routerLogVerbose'
+  | 'h.promptSectionOrder'
   | 'modelProvider'
   | 'modelName'
   | 'addModel'
@@ -159,6 +161,7 @@ export const en: ShiftRouterCardDict = {
   'f.startAttempts4xx': '4xx start level',
   'f.callLogCap': 'Call log capacity',
   'f.routerLogVerbose': 'Verbose routing logs',
+  'f.promptSectionOrder': 'Prompt section order',
   'h.enabled': 'Master switch: when off, every request passes through unchanged.',
   'h.fastModels': 'Model chain for routine work, in fallback order — the first available model wins. The dropdowns list the models DSH currently has configured; use Custom to add others.',
   'h.smartModels': 'Model chain for complex work, in fallback order — the first available model wins. The dropdowns list the models DSH currently has configured; use Custom to add others.',
@@ -183,7 +186,8 @@ export const en: ShiftRouterCardDict = {
   'h.failoverMaxMs': 'Ceiling of the exponential backoff.',
   'h.startAttempts4xx': '429/quota failures start the backoff ladder at this level instead of level 1.',
   'h.callLogCap': 'Telemetry keeps this many routed calls in its ring buffer.',
-  'h.routerLogVerbose': 'Log every routing decision instead of a summary.',
+  'h.routerLogVerbose': 'Log every routing decision instead of a summary. Messages go to this plugin\'s logger; the stock DSH profiles mount no log exporter, so only a deployment that adds one can see them.',
+  'h.promptSectionOrder': 'Sort position of the orchestrator system-prompt section. DSH allocates prompt ordering centrally and reserves no slot for third-party sections, so set it here: 150 puts the orchestrator block after the persona prefix (0) and before the plan policy (500).',
   modelProvider: 'Provider',
   modelName: 'Model',
   addModel: 'Add model',
@@ -252,6 +256,7 @@ export const zh: ShiftRouterCardDict = {
   'f.failoverMaxMs': '退避上限',
   'f.startAttempts4xx': '4xx 起始等级',
   'f.callLogCap': '调用日志容量',
+  'f.promptSectionOrder': '提示词段落顺序',
   'f.routerLogVerbose': '详细路由日志',
   'h.enabled': '总开关：关闭后所有请求原样通过，不做任何路由。',
   'h.fastModels': '日常事务模型链，按回退顺序排列——优先使用第一个可用模型。下拉选项来自 DSH 当前配置的模型；可选「自定义」手动填写。',
@@ -277,7 +282,8 @@ export const zh: ShiftRouterCardDict = {
   'h.failoverMaxMs': '指数退避的上限。',
   'h.startAttempts4xx': '429/配额类故障从该等级开始计退避，而非从第 1 级开始。',
   'h.callLogCap': '遥测环形缓冲保留的路由调用数。',
-  'h.routerLogVerbose': '记录每条路由决策，而非只记摘要。',
+  'h.routerLogVerbose': '记录每条路由决策，而非只记摘要。日志写入本插件的 logger；DSH 自带 profile 未挂载日志导出器，只有额外挂载导出器的部署才看得到。',
+  'h.promptSectionOrder': '编排器系统提示词段落的排序位置。DSH 集中分配提示词顺序，未给第三方段落预留槽位，因此在此设置：150 表示位于 persona 前缀（0）之后、plan 策略（500）之前。',
   modelProvider: 'Provider',
   modelName: 'Model',
   addModel: '添加模型',

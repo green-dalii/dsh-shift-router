@@ -61,6 +61,11 @@ const RoutingSchema = z.object({
 
 const UXSchema = z.object({
   routerLogVerbose: z.boolean().default(false),
+  // Any finite number: DSH's own section slots live in SECTION_ORDERS
+  // (dsh-system-prompt) and third-party sections are not in it, so there is no
+  // platform constant to default to. 150 = after the persona prefix (0),
+  // before PLAN_POLICY (500).
+  promptSectionOrder: z.number().default(150),
 })
 
 const OrchestrationSchema = z.object({

@@ -84,6 +84,7 @@ export const CARD_FIELDS: readonly CardField[] = [
   { path: 'failover.startAttempts4xx', section: 'failover', display: 'failover', key: 'startAttempts4xx', type: 'number', unit: '×', labelKey: 'f.startAttempts4xx', hintKey: 'h.startAttempts4xx' },
   { path: 'telemetry.callLogCap', section: 'telemetry', display: 'telemetry', key: 'callLogCap', type: 'number', unit: 'calls', labelKey: 'f.callLogCap', hintKey: 'h.callLogCap' },
   { path: 'ux.routerLogVerbose', section: 'ux', display: 'ux', key: 'routerLogVerbose', type: 'boolean', labelKey: 'f.routerLogVerbose', hintKey: 'h.routerLogVerbose' },
+  { path: 'ux.promptSectionOrder', section: 'ux', display: 'ux', key: 'promptSectionOrder', type: 'number', labelKey: 'f.promptSectionOrder', hintKey: 'h.promptSectionOrder' },
   { path: 'tiers.fast.models', section: 'tiers', display: 'models', key: 'fast.models', type: 'models', labelKey: 'f.fastModels', hintKey: 'h.fastModels' },
   { path: 'tiers.smart.models', section: 'tiers', display: 'models', key: 'smart.models', type: 'models', labelKey: 'f.smartModels', hintKey: 'h.smartModels' },
 ]

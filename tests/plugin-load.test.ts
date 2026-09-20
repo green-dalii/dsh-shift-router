@@ -131,3 +131,33 @@ describe('plugin load against a real Cordis context', () => {
     warn.mockRestore()
   })
 })
+
+describe('prompt-section placement is configuration, not a literal', () => {
+  // Iron rule: can the value be changed in cordis.yml without editing code?
+  // DSH allocates prompt order centrally (`SECTION_ORDERS` in dsh-system-prompt)
+  // and reserves no slot for a third-party section, so this one has to be
+  // settable — and it must NOT be resolved via `getSectionOrder()`, which
+  // returns `undefined` for non-platform names and would make `section()` throw
+  // (the same boot-abort class as an undeclared service read).
+  it('registers the orchestrator section at the configured order', async () => {
+    const { ctx, prompt } = harnessContext()
+    const config = { ...autoConfig(), ux: { promptSectionOrder: 4321 } }
+    await ctx.plugin(plugin, config)
+    const section = prompt.sections.find((entry) => entry.name === 'shift-router:orchestrator')
+    expect(section?.order).toBe(4321)
+  })
+
+  it('uses the documented default when the config leaves it alone', async () => {
+    const { ctx, prompt } = harnessContext()
+    await ctx.plugin(plugin, autoConfig())
+    const section = prompt.sections.find((entry) => entry.name === 'shift-router:orchestrator')
+    expect(section?.order).toBe(150)
+  })
+
+  it('exposes both tier chains as prompt variables', async () => {
+    const { ctx, prompt } = harnessContext()
+    await ctx.plugin(plugin, autoConfig())
+    expect(prompt.variables).toContain('shift_router_fast_chain')
+    expect(prompt.variables).toContain('shift_router_smart_chain')
+  })
+})

@@ -64,6 +64,21 @@ export interface TierConfig {
 export interface UXConfig {
   /** Verbose logging: print router decisions, judge calls, window state. */
   routerLogVerbose: boolean
+  /**
+   * Sort order of the orchestrator system-prompt section.
+   *
+   * A config field rather than a literal because prompt-section placement is a
+   * deployment concern: DSH allocates it centrally in `SECTION_ORDERS`
+   * (`dsh-system-prompt`) and third-party sections are not in that table, so
+   * the value has to be settable without editing this plugin. The default 150
+   * sits between `DEPLOYMENT_PERSONA_PREFIX` (0) and `PLAN_POLICY` (500).
+   *
+   * Do NOT pass a non-platform name to `ctx.systemPrompt.getSectionOrder()`:
+   * it returns `undefined` for names outside `SECTION_ORDERS`, and
+   * `section()` throws on a non-finite order — which fails the plugin fiber and
+   * aborts the boot, the same way an undeclared service read does.
+   */
+  promptSectionOrder: number
 }
 
 /**
@@ -259,6 +274,7 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   },
   ux: {
     routerLogVerbose: false,
+    promptSectionOrder: 150,
   },
   orchestration: {
     mode: 'auto',

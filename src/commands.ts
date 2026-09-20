@@ -134,6 +134,7 @@ export const CONFIG_FIELDS: ConfigField[] = [
   { path: 'failover.startAttempts4xx', type: 'number' },
   { path: 'telemetry.callLogCap', type: 'number' },
   { path: 'ux.routerLogVerbose', type: 'boolean' },
+  { path: 'ux.promptSectionOrder', type: 'number' },
   { path: 'tiers.fast.models', type: 'modelList' },
   { path: 'tiers.smart.models', type: 'modelList' },
   { path: 'pricing', type: 'pricing' },
