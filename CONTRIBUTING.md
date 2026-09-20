@@ -91,13 +91,20 @@ profile. Recipe used for every review round:
 # 1. scratch home + profile (link this project + @deepseek-ai/dsh-base + dsh-web-app)
 export DSH_HOME=/tmp/scratch-home
 dsh plugin --profile web-e2e add /path/to/dsh-shift-router
-# 2. whitelist the namespace in the scratch profile
+# 2. (harness ≤ 0.1.0-rc.6 only) whitelist the namespace in the scratch profile;
+#    on 0.1.5-rc.2+ there is no dsh-host-apiproxy whitelist and this is a no-op.
 node scripts/expose-gui-settings.mjs --profile web-e2e --home /tmp/scratch-home
 # 3. boot it
 dsh --profile web-e2e web --port 3199
 # 4. drive Chrome (playwright-core): Settings → Plugins → Plugin configuration →
-#    expand the Shift-Router card → screenshot / edit / save → assert settings.yaml
+#    open the Shift-Router card → screenshot / edit / save → assert settings.yaml
 ```
+
+Step 4 is the only check that the card actually renders — the slot registration is unit-tested
+against the real `SlotCore`, but nothing here proves the rendered tree. A missing card usually
+means a rejected registration, so read the browser console first: `SlotCore` throws at
+registration time, and since the slot is declared only when the Plugin configuration tab mounts,
+that error lands long after boot (ALIGNMENT §R6).
 
 `e2e/fake-adapter.mjs` is the credential-free LLM adapter used by the headless router
 e2e. Run it with `npm run test:e2e` (`e2e/run-e2e.mjs`): it creates a scratch `DSH_HOME`,
@@ -139,7 +146,12 @@ adapter that calls `ctx.llm.registerAdapter(['some-provider'], adapter)` with
    `lineHeight: 17` means `17 × font-size` (React does not append `px` to `lineHeight`) — a
    ported `17px` from native CSS balloons to ~187px. Always write unitless multipliers
    (`1.2`/`1.3`) or explicit `px` strings.
-6. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
+6. **Never re-spell a host contract.** Import it type-only from its declarer (SPEC §12.1) — for the
+   card that means `SlotMap['settings.plugin.item']` comes from
+   `@deepseek-ai/dsh-client-ui-settings-plugins`, and the registration passes `key: 'shift-router'`
+   (the settings namespace), never `id`. `tests/client-card-slot.test.ts` guards it against the real
+   `SlotCore`.
+7. Run `npm run typecheck && npm test && npm run build && npm run test:e2e` before opening a
    PR; verify the card in the browser e2e above for layout regressions (light and dark themes).
 
 ## Releasing

@@ -98,6 +98,7 @@ contract, not a convenience:
 | `@deepseek-ai/dsh-{agent,commands,llm,session,settings,system-prompt,tools}` | `0.1.5-rc.2` | 0.1.5-rc.2 |
 | `@deepseek-ai/schemastery` | `^3.18.2` | 3.18.2 |
 | `@deepseek-ai/dsh-client-{locale,store,ui-settings,ui-slots,ui-renderer}` | `^0.1.5-rc.2` | browser roster |
+| `@deepseek-ai/dsh-client-ui-settings-plugins` | `^0.1.5-rc.2` | type-only (declares the card's slot contract) |
 | `@deepseek-ai/dsh-tool-subagent` | `^0.1.5-rc.2` | type-only |
 
 A plugin is type-checked against its own dependency tree but **executes against
@@ -108,10 +109,12 @@ the target harness moves. Two consequences worth stating:
 - Runtime **value** imports from these packages are load-bearing
   (`settingsNamespace` used to be one); a rename upstream breaks the plugin at
   boot, not at compile time.
-- The client half's service augmentations are versioned with the client
-  packages: `ctx.slots` is declared by `dsh-client-ui-renderer/client`, and the
-  browser `SettingsScope` by `dsh-client-ui-settings/client`. `dsh-client-runtime`
-  does **not** exist at this baseline.
+- The client half's contracts are imported from the package that declares them —
+  `ctx.slots` from `dsh-client-ui-renderer/client`, the browser `SettingsScope`
+  from `dsh-client-ui-settings/client`, the card's slot from
+  `dsh-client-ui-settings-plugins/client` — **type-only** where only types are
+  needed, and never re-spelled locally (§12.1). `dsh-client-runtime` does **not**
+  exist at this baseline.
 
 ---
 
@@ -675,6 +678,22 @@ sections, with the model dropdowns sourced from the **harness's runtime catalog*
 is the only CLI/patch-only surface. The GUI registry and the command registry
 must expose the same set of editable paths (enforced by test).
 
+### 12.1 The card's slot (normative)
+
+The card contributes to `settings.plugin.item`, a **`keyed`** slot declared by
+`@deepseek-ai/dsh-client-ui-settings-plugins`. Its *Plugin configuration* tab
+dispatches one key per settings namespace the Host serves, so the cell key IS
+the namespace, and it must be the same literal the host half registers through
+`ctx.settings.register()` (§11): `key: 'shift-router'`. An `id` is not a near
+miss — `SlotCore` throws (`keyed slot "settings.plugin.item" requires
+options.key`), and the tab's projection (`entry.options.key !== undefined &&
+served.has(entry.options.key)`) would drop the entry anyway.
+
+The `SlotMap` entry is imported **type-only** from that declarer rather than
+re-declared here (§1.5): a local copy is enforced by the compiler instead of the
+host, so a slot re-spelled as `kind: 'list'` passes every gate while rendering
+nowhere (ALIGNMENT §R6).
+
 ---
 
 ## 13. Diagnostics
@@ -730,6 +749,12 @@ must expose the same set of editable paths (enforced by test).
   into a second scratch profile and **boots it** — where devDependencies are
   absent, so a runtime import that is not a declared dependency fails there
   instead of in a user's install.
+- **The card's slot wiring is tested against the real registry.**
+  `tests/client-card-slot.test.ts` declares `settings.plugin.item` as `keyed`
+  through the harness's own `SlotCore` and runs the card's real `apply()`, in
+  both load orders — the card plugin is loaded long before the Settings panel
+  declares the slot, and a stub registry has no kind rule to violate. The
+  type-only contract (§12.1) makes `key` vs `id` a compile error as well.
 - Gates, in order: `npm run typecheck` → `npm run build` → `npm test` →
   `npm run test:e2e`. A red gate is never merged or released.
 

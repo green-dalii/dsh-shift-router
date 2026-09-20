@@ -116,6 +116,19 @@ contract is SPEC §7, §9, §13.
 | **C4(a)** assisted worker route authorisation | v1.0.0+ | ✅ `/router allow-workers [on\|off]` writes/revokes the Fast chain in the host `subagent-model-selection` allowlist (delivered as a command rather than a card button: it works in every profile and is unit-testable; the card edits the Fast chain, which is the input) |
 | **C6** cross-turn lifecycle / parallel workers | upstream Phase 3 | ⛔ not aligned — **upstream has not shipped it either** |
 
+## Post-install GUI card round (delivered)
+
+The install succeeded and DSH booted, but the settings card never appeared in
+Settings → Plugins → Plugin configuration. Root cause, evidence and the residual
+uncertainty are in [ALIGNMENT.md](ALIGNMENT.md) §R6; the contract is SPEC §12.1.
+
+| Item | Status |
+|---|---|
+| Card registered with `key` (the settings namespace) instead of `id` — `settings.plugin.item` is a **keyed** slot and `SlotCore` throws on anything else | ✅ |
+| The slot contract is imported type-only from its declarer instead of re-spelled locally (the local copy said `list`, so `tsc` blessed the wrong call) | ✅ |
+| `tests/client-card-slot.test.ts` runs the card's real `apply()` against the harness's real `SlotCore`, in both load orders; the e2e additionally reads the boot payload back from a packed install and asserts the browser half is offered to the client module loader | ✅ 4 tests |
+| Mutation-verified: reverting `key` → `id` fails both that test and `npm run typecheck` | ✅ |
+
 ## Planned
 
 | Feature | Priority | Notes |

@@ -494,6 +494,67 @@ R4 的新增接口（`OrchestrationState` 的 `spawned/done/spend/workerSpends/g
 
 ---
 
+## R6：安装后实测——GUI 配置卡片不可见（热修）
+
+R5 证明了「启动不会再坏」。维护者随后按推荐方式安装并重启：**DSH 正常加载、插件正常挂载**，
+但 **Settings → Plugins → Plugin configuration 里没有本插件的卡片**——插件可用，却少了唯一的图形配置面。
+
+### R6.1 定位
+
+| 检查 | 结果 |
+|---|---|
+| 插件宿主半边是否加载 | ✅ `/router config`、`/router status` 可用（R5 已证） |
+| 浏览器半边是否被 offer 给前端 | ✅ `dsh-client-modules` 从 loader 行解析包清单 → `exports["./client"]` → `dist/client.js`；`dsh.client.platform: "web"` 成立 |
+| settings namespace 是否被「服务」给浏览器 | ✅ 0.1.5-rc.2 **已无** `dsh-host-apiproxy` 的 `WEB_SETTINGS_NAMESPACES` 白名单；`settings.describe()` 返回全部已注册命名空间（`scripts/expose-gui-settings.mjs` 在此基线上正确地成为 no-op） |
+| 卡片是否注册进了 `settings.plugin.item` | ❌ **没有**（R6.2） |
+
+### R6.2 根因：keyed 槽用 `id` 注册，且契约被本地重抄成 list
+
+`settings.plugin.item` 是 **`keyed`** 槽（声明方 `dsh-client-ui-settings-plugins` 在注册自己的
+*Plugin configuration* tab 时声明 `children: { 'settings.plugin.item': { kind: 'keyed', scope: 'root' } }`）。
+keyed 槽唯一的寻址字段是 `key`，而注册写的是 `id`：
+
+```ts
+ctx.slots.register({ name: 'settings.plugin.item', id: NS, order: 30, … })   // ❌
+```
+
+两层后果各自都足以让卡片消失：`SlotCore.register()` 的第一条 keyed 校验直接抛
+`keyed slot "settings.plugin.item" requires options.key`；而 tab 的投影规则
+（`entry.options.key !== undefined && served.has(entry.options.key)`）也不会认任何没有 `key` 的条目。
+抛错发生得**很晚**——插件启动时 `slots.inject(...)` 只是订阅声明，回调要等用户打开
+*Plugin configuration*、tab 声明该槽时才执行，于是它被 `slots.inject` 的 `changed()` 捕获后
+`queueMicrotask` 重抛：**注册从未成功，只在浏览器控制台留下一条无人看见的未捕获错误**。
+
+**类型检查为什么没拦住**：本项目自己 `declare module` 把该槽抄成了 `kind: 'list'`，
+于是 TypeScript 认为它要的是 `id`，闸门反而认证了错误写法。与 §R3 同源——**契约的单一事实来源在声明方**。
+
+### R6.3 修复
+
+| 项 | 修复 |
+|---|---|
+| 槽寻址 | 改为 `key: NS`（= 宿主注册的 settings namespace）；删掉 keyed 槽没有语义的 `id` / `order` |
+| 契约来源 | 删除本地 `SlotMap` 重复声明，改为 **type-only** 引用声明方 `@deepseek-ai/dsh-client-ui-settings-plugins/client`（新增 devDependency，仅类型，不进运行时/产物/`files`）；`LocaleNamespaceMap` 仍由本包声明——那本来就是本包的字典命名空间 |
+
+规范落点：SPEC §1.5（契约依赖纪律）、§12.1（keyed 槽与 namespace 字面量）、§14（闸门）。
+
+### R6.4 新增闸门与变异自检
+
+| Gate | 内容 | 变异自检 |
+|---|---|---|
+| `tests/client-card-slot.test.ts` | 用**真实 `SlotCore`** 声明 keyed 子槽（镜像宿主 tab 的 `children`），跑真实 `apply()`，断言条目落在 `shift-router` cell；覆盖两种加载顺序（槽先声明 / 面板后挂载——后者是真实顺序） | `key`→`id` → **红**（真实抛 `requires options.key`） |
+| `npm run typecheck` | 契约来自声明方后，`id` 成为编译错误 | `key`→`id` → **红** |
+| e2e（packed 安装） | 从运行中的服务器把 **boot payload** 读回来，断言浏览器半边确实被 offer 给 client module loader（`dsh.client.platform` 写错时它会被**静默跳过**，卡片永不加载），且部署确实 ship 了声明该槽的 `dsh-client-ui-settings-plugins` | `platform: "headless"` → **红**（payload 里没有该 id） |
+
+### R6.5 残余不确定性
+
+- 本轮修的是「注册从未发生」。卡片在浏览器里的**最终渲染**仍只有类型检查、单测与人工浏览器步骤
+  （CONTRIBUTING「Manual browser E2E」）覆盖：渲染期崩溃是下一层，需要真机打开面板才能确认。
+- `key` 与宿主 namespace 的**一致性**由两处字面量共同钉住（客户端 `NS` 与 `ROUTER_SETTINGS_NAMESPACE`，
+  由 `tests/client-card-slot.test.ts` 断言相等），但这仍是断言而非类型——浏览器半边无法从宿主半边导入字面量，
+  要做成机械约束需要一条插件并不具备的浏览器↔宿主通道（与 §R4 的卡片运行期展示同一约束）。
+
+---
+
 ## 明确不对齐（附理由）
 
 | 上游特性 | 不对齐的理由 |

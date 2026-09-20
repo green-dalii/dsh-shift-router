@@ -215,6 +215,24 @@ deliberately **not** ported and why — is [`ALIGNMENT.md`](ALIGNMENT.md).
   `manual`, `off`, orchestration off, an empty Fast chain and the full
   costs/audit surface each load for real.
 
+### Fixed — GUI settings card never registered
+
+- **The settings card did not appear in Settings → Plugins → Plugin
+  configuration.** `settings.plugin.item` is a **`keyed`** slot whose cell key is
+  the settings namespace, and the card registered with `id` instead of `key`, so
+  the registry threw (`keyed slot "settings.plugin.item" requires options.key`)
+  and the tab's `entry.options.key` projection never matched it. The card plugin
+  loads before the Settings panel declares the slot, so the throw surfaced only
+  as an uncaught browser error. It now registers `key: 'shift-router'` — the
+  literal the host half registers through `ctx.settings.register()`.
+- **The slot contract is no longer re-spelled locally.** The client half used to
+  declare `settings.plugin.item` itself, as a `list` slot, so the compiler
+  enforced a contract that does not exist and approved the `id` form above. It
+  now imports the `SlotMap` entry type-only from the package that declares it
+  (`@deepseek-ai/dsh-client-ui-settings-plugins`), turning a drift upstream into
+  a compile error. Regression: `tests/client-card-slot.test.ts` drives the card's
+  real `apply()` against the harness's real `SlotCore`, in both load orders.
+
 ### Fixed — installation verification round
 
 - **DSH failed to start with the plugin installed.** The worker-model self-check
