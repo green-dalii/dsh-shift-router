@@ -157,7 +157,7 @@ So the card needs `shift-router` added to the whitelist (one-time, idempotent):
 ```sh
 npm run build
 dsh plugin --profile web add /path/to/dsh-shift-router
-node scripts/expose-gui-settings.mjs --profile web   # adds shift-router to the whitelist
+node scripts/expose-gui-settings.mjs --profile web   # legacy harnesses only — see below
 # restart the profile (client package metadata and the apiproxy are cached in-process)
 ```
 

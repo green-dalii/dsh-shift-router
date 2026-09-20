@@ -152,11 +152,15 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 ```sh
 npm run build
 dsh plugin --profile web add /path/to/dsh-shift-router
-node scripts/expose-gui-settings.mjs --profile web   # 把 shift-router 加入白名单
+node scripts/expose-gui-settings.mjs --profile web   # 仅旧版 harness 需要，见下
 # 重启 profile（client 包元数据与 apiproxy 都在进程内缓存）
 ```
 
-`scripts/expose-gui-settings.mjs` 修改 profile 安装的 `dsh-host-apiproxy/lib/index.js`（幂等；升级/重装依赖后重跑即可）。
+**最后一步仅旧版 harness 需要。** 在 DeepSeek Harness **≤ 0.1.0-rc.x** 上，Web API 代理用白名单
+（`WEB_SETTINGS_NAMESPACES`）限制浏览器可读的 settings 命名空间，第三方卡片需要
+`scripts/expose-gui-settings.mjs` 把自己加入名单。从 **0.1.5-rc.2** 起该包与白名单均已移除——命名空间
+原生暴露，脚本会输出「不需要」并以 0 退出。在旧版 harness 上它会修改 profile 安装的
+`dsh-host-apiproxy/lib/index.js`（幂等；升级/重装依赖后重跑即可）。
 
 ## 命令
 

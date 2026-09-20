@@ -66,6 +66,11 @@ function findApiProxy(profileDir) {
   return candidates.find((path) => existsSync(path))
 }
 
+/** Does the profile exist at all (vs. the upstream package having gone away)? */
+function profileExists(profileDir) {
+  return existsSync(join(profileDir, 'package.json')) || existsSync(profileDir)
+}
+
 function parseArgs(argv) {
   const args = { profile: 'web', dryRun: false }
   for (let i = 0; i < argv.length; i += 1) {
@@ -84,9 +89,21 @@ function main() {
   const target = findApiProxy(profileDir)
 
   if (!target) {
-    console.error(`expose-gui-settings: no dsh-host-apiproxy found under ${profileDir}`)
-    console.error('  (is the profile installed? run `dsh plugin --profile <name> add ./dsh-shift-router` first)')
-    process.exit(1)
+    if (!profileExists(profileDir)) {
+      console.error(`expose-gui-settings: no profile "${args.profile}" under ${join(home, 'profiles')}`)
+      console.error('  (run `dsh --profile <name> --from-default-profile web` first)')
+      process.exit(1)
+    }
+    // The profile exists but the package does not. On harness versions that
+    // still shipped the whitelist this was an anomaly; from 0.1.5-rc.2 the
+    // package is gone entirely, so there is nothing to patch and the card is
+    // exposed natively. Report that as success — a fresh user following the
+    // install docs must not see a failure for a step that no longer applies.
+    console.log(`expose-gui-settings: no dsh-host-apiproxy in profile "${args.profile}".`)
+    console.log('  This harness version has no WEB_SETTINGS_NAMESPACES whitelist, so the')
+    console.log('  settings namespace is exposed natively and this workaround is not needed.')
+    console.log('  Nothing to do.')
+    process.exit(0)
   }
 
   let source
