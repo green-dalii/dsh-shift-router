@@ -146,7 +146,7 @@ this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13
 | Cross-turn orchestration lifecycle / parallel specialised workers | P3 | upstream is still Phase 3 (not implemented there either) |
 | Tool-result classification as a Judge input signal | P3 | upstream: TBD |
 | GUI: `pricing` list-of-record editor | P3 | needs list-of-record form support |
-| GUI: catalog live refresh on owner events | P3 | card dropdowns currently load once |
+| ~~GUI: catalog live refresh on owner events~~ | ~~P3~~ | ✅ delivered (R7): the card re-reads `ctx.remote.session.modelCatalog()` on `llm/adapters-updated`, `settings/document-updated`, `credentials/reference-updated` and `connection/reset` — the row claiming "loads once" was stale |
 | Model catalog as the single source of truth for price/availability | P3 | adopts the v1.6.0 principle for DSH (`ctx.llm` instead of the hand-maintained `pricing` table) |
 | Config-layer authority display | P3 | upstream v1.4.2; DSH analogue = settings namespace + patch layers |
 | Examples directory (frontend / ML / cross-provider cost-saving configs) | ongoing | upstream line |
