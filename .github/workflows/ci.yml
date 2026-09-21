@@ -53,5 +53,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm i -g pnpm @deepseek-ai/dsh@0.1.5-rc.2
-      - run: npm run test:e2e
+      # Resolve the `dsh` bin through npx into a per-step cache (no system write),
+      # then export it for the e2e (run-e2e.mjs honours $DSH_BIN). The earlier
+      # `npm i -g ...` form hung on a fresh runner with no log output for 30+
+      # minutes — the npx path is what the maintainer's laptop actually uses, so
+      # it is the safer CI choice.
+      - name: resolve dsh via npx
+        id: dsh
+        run: |
+          echo "DSH_BIN=$(npx -y -p @deepseek-ai/dsh@0.1.5-rc.2 -- which dsh)" >> "$GITHUB_OUTPUT"
+          echo "DSH_BIN=$(npx -y -p @deepseek-ai/dsh@0.1.5-rc.2 -- which dsh)"
+      - name: run e2e
+        run: DSH_BIN="${{ steps.dsh.outputs.DSH_BIN }}" npm run test:e2e
