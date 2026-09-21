@@ -165,7 +165,7 @@ to be re-proposed: a **plugin-side throughput indicator** — DSH renders `tok/s
 natively from decode time, so porting it would duplicate the harness with a worse
 number.
 
-## See also
+## Documentation index
 
 - [SPEC.md](SPEC.md) — the normative contract for this project
 - [ALIGNMENT.md](ALIGNMENT.md) — the upstream alignment audit and work list

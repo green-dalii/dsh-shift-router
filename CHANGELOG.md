@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **Document ownership is written down** (`CONTRIBUTING.md` § Documentation ownership): seven
+  documents, seven jobs, one home per fact — the rule the previous two rounds applied by hand is now
+  a contributor-visible table, so "where does this belong?" has an answer that is not folklore.
+- **The repository map moved to its owner.** The architecture tree lived in both READMEs and drifted;
+  it now lives in `CONTRIBUTING.md` § Repository layout and the READMEs keep a pointer, as does the
+  test-layering paragraph.
+- **READMEs gained an npm badge, the DSH version this plugin is built against (0.1.5-rc.2), and a
+  *See also* section** — upstream `pi-shift-router`, `dsh-plugin-dev-skill`, and the author's
+  `obsidian-llm-wiki`. Descriptions come from each repository's own metadata, and the
+  obsidian-llm-wiki link points at its current home (`GD4AI/obsidian-llm-wiki`; upstream's README
+  still carries the pre-migration URL, which 404s).
+- **The worked example named the previous DeepSeek generation.** It now uses ids verified in the
+  harness's own `deepseek-official` catalog: `deepseek-flash` (displayed as *DeepSeek-V41-Flash*, the
+  current default and image-capable) as Fast, `deepseek-v4-pro` as Smart, `deepseek-v4-flash` as the
+  failover example.
+- **Added `docs/MODELS.md` + `docs/MODELS.zh-CN.md`** — how to choose Fast and Smart models in DSH,
+  migrated in structure from upstream's equivalent but with pi-specific mechanics (`models.json`,
+  `expandEnv`, the pi registry) replaced by DSH's. Every model fact carries its source and retrieval
+  date, and each file opens by stating that the runtime catalog — not this page — is the authority on
+  what a deployment can call.
+
 ## [0.6.0] - 2026-09-20
 
 **Upstream alignment round: P0 (correctness) + P1 (decision core)** against

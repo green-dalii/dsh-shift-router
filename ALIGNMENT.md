@@ -712,6 +712,52 @@ Node 的解析语义不变。
 
 ---
 
+## R11：文档分工、结构，与模型文档
+
+维护者要求：① README 的架构目录移入 CONTRIBUTING 作为唯一权威；② README 徽章补 npm 页面与适配的
+DSH 版本；③ 学上游加 `See also`（dsh-plugin-dev-skill、obsidian-llm-wiki、pi-shift-router）；
+④ 通读全部文档后**先想分工再正交化**；⑤ 迁移并修订上游 `docs/MODELS.md`（中英），模型事实必须按
+来源调研、不能凭记忆。
+
+### R11.1 分工：本轮的第一性原理，已落成规范
+
+七份文档、七个职责，一个事实只有一个家，跨文档只能引用。整张表写进了
+`CONTRIBUTING.md` § Documentation ownership —— 成为贡献者可见的规则，而不是只活在本轮对话里：
+
+| 文档 | 拥有 | 不得包含 |
+|---|---|---|
+| README（中英） | 用户要做的事：安装、配置、命令、示例、徽章 | 规范规则、逐轮理由、仓库结构图 |
+| docs/MODELS（中英） | **如何选**档位模型的指导，附来源与日期 | 「你的部署能调用哪些模型」——那由运行时目录拥有 |
+| SPEC | 规范契约 | 历史、理由、测量数字、逐轮叙述 |
+| ALIGNMENT | 审计：证据、决定、刻意不对齐、残余不确定性 | 规范规则、状态表 |
+| ROADMAP | 状态与历史 | 理由细节、测量数字 |
+| CHANGELOG | 按版本的变更清单 | 叙述与设计论证 |
+| CONTRIBUTING | 贡献者流程：开发循环、仓库结构、闸门、分发、发布 | 面向用户的 how-to |
+
+### R11.2 据此做了什么
+
+- **仓库结构图**从 README（中英）移入 **CONTRIBUTING § Repository layout**，README 只留指针。
+- **README 徽章**补两项：npm 版本徽章（指向 npm 包页）与 **DSH 0.1.5-rc.2** 徽章 —— 后者是本项目
+  构建与验证所依据的 harness 版本，取自 `dsh --version` 与 npm 上 `@deepseek-ai/dsh` 的
+  `dist-tags`（`latest = 0.1.5-rc.2`）。
+- **`See also`**：学上游的章节结构，但**不照抄它的链接**。上游 README 指向
+  `green-dalii/obsidian-llm-wiki`，而该仓库已迁移到 **`GD4AI/obsidian-llm-wiki`**（维护者确认：新建
+  GD4AI org 后迁移），上游那条是 404。三条目的简介均取自各自 GitHub API 的仓库描述，不是回忆。
+- **示例模型过时**：README 演示块在用 `deepseek-v4-flash` / `deepseek-v4-pro`（V4 代）。按 harness
+  自己的 `@deepseek-ai/dsh-llm-deepseek` 的 `DEFAULT_MODELS` 核对，当前默认是
+  **`deepseek-flash`，显示名 `DeepSeek-V41-Flash`**（V4.1，且 `inputModalities: ["text","image"]`）。
+  示例已改用 harness 官方目录中的 id（Fast `deepseek-flash` → Smart `deepseek-v4-pro`，故障转移
+  落到 `deepseek-v4-flash`），不再出现任何私有 provider 名。
+
+### R11.3 `docs/MODELS.md` 的迁移原则
+
+上游同位置有 `docs/MODELS.md` + `docs/MODELS.zh-CN.md`（各约 10 KB，且与我们的 `.zh-CN.md` 命名
+一致）。迁移保留其**结构意图**（Fast/Smart 各自选什么、provider 家族、成本与延迟权衡、链的顺序、
+何时让两档共享 provider），替换掉 pi 专有机制（`models.json`、`expandEnv`、`pi.modelRegistry`、
+pi 向导语法），并执行维护者的硬要求：**每条模型事实都要有来源与取用日期** —— 取自 harness 自身
+adapter 的 `DEFAULT_MODELS`、真实部署的 `~/.dsh/settings.yaml`（标注为「某部署的示例」而非通用
+清单）、OpenRouter 公开模型 API 与官方 provider 指南；无法核实的一律不写。
+
 ## 明确不对齐（附理由）
 
 规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再

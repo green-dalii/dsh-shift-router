@@ -12,6 +12,8 @@ Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
 [SPEC.md](SPEC.md) for the contract.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
+[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
@@ -23,11 +25,11 @@ Routine turns shouldn't cost flagship money. The turns that matter shouldn't be 
 Before every turn of a top-level agent, a small **LLM Judge** (running on your Fast-tier model chain) classifies the user's message as `fast` (routine) or `smart` (consequential). The chosen tier then drives the whole turn — thinking, tool calls, code edits — through the harness's own `agent/request` pipeline. The Judge only classifies; it never does the work.
 
 ```text
-🦾 [deepseek-v4-flash] → fix the failing test
+🦾 [deepseek-flash]     → fix the failing test
 🧭 judging…
-🧠 [deepseek-v4-pro]   ← "design the auth flow" → upgraded instantly
-⚠️ deepseek-v4-flash 429 → cooldown, retrying on glm-5.2 — retry in 1m
-🦾 [glm-5.2]           ← same-tier failover
+🧠 [deepseek-v4-pro]    ← "design the auth flow" → upgraded instantly
+⚠️ deepseek-flash 429 → cooldown, same-tier failover — retry in 1m
+🦾 [deepseek-v4-flash]  ← next healthy model in the Fast chain
 ```
 
 ## Features
@@ -126,6 +128,10 @@ DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, b
 ## Configuration
 
 Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Shift-Router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
+
+Tier models are the only thing you must choose: **[docs/MODELS.md](docs/MODELS.md)** covers how
+to pick a Fast and a Smart model (the Fast chain also serves the Judge), what makes a good fallback,
+and which models can take images.
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -289,31 +295,25 @@ DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migrat
 
 ## Architecture
 
-```
-src/
-├── index.ts        # plugin entry: event wiring, per-agent state, judge, route notices
-├── config.ts       # Schemastery schema + deep-merge normalization
-├── types.ts        # shared types + defaults
-├── router.ts       # pure routing engine (upgrade/downgrade/window/cache-aware)
-├── judge.ts        # LLM Judge via ctx.llm.stream() + reply parsing
-├── failover.ts     # exponential-backoff cooldown state machine
-├── tier.ts         # tier model resolution + display
-├── notice.ts       # pure: route-notice text + summary (SPEC §13.1)
-├── orchestrate.ts  # orchestrator prompt + lifecycle + caps
-├── audit.ts        # non-blocking acceptance audit of delegated runs
-├── stats.ts        # telemetry snapshot (tokens / cost estimate / savings baseline)
-├── commands.ts     # /router and /route-force
-└── client/         # browser half (GUI settings card)
-    ├── index.tsx       # client entry: registers into the settings.plugin.item slot
-    ├── controller.ts   # staged form → settings-scope writes (one per section)
-    ├── form-model.ts   # pure logic: field registry / draft parsing / save plan
-    ├── card-ux.ts      # pure logic: thresholds, chain problems, header summary
-    ├── model-catalog.ts# Host model catalog → provider/model options
-    ├── ShiftRouterCard.tsx  # card component (DSW design tokens)
-    └── locales.ts      # zh/en dictionaries
-```
+Repository layout — the module-by-module map, the pure-logic/glue split and the test layering —
+lives in **[CONTRIBUTING.md § Repository layout](CONTRIBUTING.md#repository-layout)**, so there is
+one copy to keep accurate. In short: `src/` is the host half (pure decision modules plus DSH
+wiring in `index.ts`), `src/client/` is the browser half (the settings card), `tests/` covers both,
+and `e2e/` boots scratch profiles — including the packed artifact.
 
-Pure logic (router / failover / judge parsing / orchestration / audit / route notices / the form model, card UX and catalog loader) is unit-tested in isolation. Wiring is tested in two layers: `tests/plugin-load.test.ts` loads the plugin through a **real Cordis context** and drives the real `agent/pre-step` waterfall (so an undeclared service read, an invalid prompt-section order, or a missing route notice fails fast), and the e2e boots scratch profiles — including the packed artifact and the plugin's default orchestration mode.
+## See also
+
+- **[pi-shift-router](https://github.com/green-dalii/pi-shift-router)** — the upstream project this
+  plugin is adapted from: the same two-tier architecture (LLM Judge, fallback chains,
+  exponential-backoff failover, task-level orchestration) for `pi-coding-agent`. Behaviour parity
+  and the deliberate divergences are tracked in [ALIGNMENT.md](ALIGNMENT.md).
+- **[dsh-plugin-dev-skill](https://github.com/green-dalii/dsh-plugin-dev-skill)** — the agent skill
+  for building DSH plugins: tools (`defineTool`), LLM adapters, services, events, config and
+  packaging, with the Cordis mental model and a verification checklist. This project follows it;
+  install it in DSH, Claude Code or Codex.
+- **[obsidian-llm-wiki](https://github.com/GD4AI/obsidian-llm-wiki)** — an Obsidian plugin that
+  turns notes and PDFs into a linked, queryable knowledge base (entity and concept pages,
+  graph-powered Q&A, local-first, no backend). Same author's other line of work.
 
 ## License
 

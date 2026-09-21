@@ -45,6 +45,57 @@ Pure logic (router / failover / judge / orchestrate / audit / notices / stats, t
 the card-UX derivations, the catalog loader) lives in dependency-free modules with unit tests;
 only DSH-facing glue goes into `index.ts`.
 
+## Repository layout
+
+The authoritative map of the code (README keeps only a pointer here):
+
+```
+src/
+├── index.ts        # plugin entry: event wiring, per-agent state, judge, route notices
+├── config.ts       # Schemastery schema + deep-merge normalization
+├── types.ts        # shared types + defaults
+├── router.ts       # pure routing engine (upgrade/downgrade/window/cache-aware)
+├── judge.ts        # LLM Judge via ctx.llm.stream() + reply parsing
+├── failover.ts     # exponential-backoff cooldown state machine
+├── tier.ts         # tier model resolution + display
+├── notice.ts       # pure: route-notice text + summary (SPEC §13.1)
+├── orchestrate.ts  # orchestrator prompt + lifecycle + caps
+├── audit.ts        # non-blocking acceptance audit of delegated runs
+├── stats.ts        # telemetry snapshot (tokens / cost estimate / savings baseline)
+├── commands.ts     # /router and /route-force
+└── client/         # browser half (GUI settings card)
+    ├── index.tsx       # client entry: registers into the settings.plugin.item slot
+    ├── controller.ts   # staged form → settings-scope writes (one per section)
+    ├── form-model.ts   # pure logic: field registry / draft parsing / save plan
+    ├── card-ux.ts      # pure logic: thresholds, chain problems, header summary
+    ├── model-catalog.ts# Host model catalog → provider/model options
+    ├── ShiftRouterCard.tsx  # card component (DSW design tokens)
+    └── locales.ts      # zh/en dictionaries
+```
+
+Pure logic (router / failover / judge / orchestrate / audit / notices / stats, the form model,
+the card-UX derivations, the catalog loader) lives in dependency-free modules with unit tests;
+only DSH-facing glue goes into `index.ts`. `tests/` mirrors that split, and `e2e/` boots scratch
+profiles (see the browser check and the e2e notes below).
+
+## Documentation ownership
+
+Seven documents, seven jobs. A fact belongs to exactly one of them; the others link to it. This
+table IS the rule — if you are unsure where something goes, it goes where the table says.
+
+| Document | Owns | Must not contain |
+|---|---|---|
+| `README.md` / `README.zh-CN.md` | what a user does: install, configure, commands, examples, badges | normative rules; per-round rationale; the repository map |
+| `docs/MODELS.md` / `.zh-CN.md` | guidance for *choosing* tier models, with sources and dates | claims about which models your deployment can call (the runtime catalog owns that) |
+| `SPEC.md` | the normative contract: rules, mechanisms, gates | history, rationale, measurements, per-round narrative |
+| `ALIGNMENT.md` | the audit: evidence, decisions, deliberate divergences, residual uncertainty | normative rules; status tables |
+| `ROADMAP.md` | status and history: released versions, upstream alignment, what is planned | rationale detail; measurement numbers |
+| `CHANGELOG.md` | per-version change lists (Keep a Changelog) | narrative; design argument |
+| `CONTRIBUTING.md` | contributor workflow: dev loop, repository layout, gates, distribution, release | user-facing how-to |
+
+Both README languages are one document in two languages: a change to one is a change to the other
+in the same commit.
+
 ## The DSH dev loop
 
 Two different change kinds have two different apply times:

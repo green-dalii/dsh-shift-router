@@ -11,6 +11,8 @@
 [ROADMAP.md](ROADMAP.md#upstream-alignment)，契约见 [SPEC.md](SPEC.md)。
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
+[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#开发)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
@@ -22,11 +24,11 @@
 在每个顶层 Agent 的每一轮开始之前，一个轻量的 **LLM 裁判**（运行在你的 Fast 层模型链上）会把用户消息判定为 `fast`（日常）或 `smart`（重要）。被选中的层随后通过 harness 自身的 `agent/request` 管线驱动整轮——思考、工具调用、代码编辑。裁判只做判定，从不干活。
 
 ```text
-🦾 [deepseek-v4-flash] → fix the failing test
+🦾 [deepseek-flash]     → fix the failing test
 🧭 judging…
-🧠 [deepseek-v4-pro]   ← "design the auth flow" → 立即升级
-⚠️ deepseek-v4-flash 429 → 冷却中，改走 glm-5.2 — 1 分钟后重试
-🦾 [glm-5.2]           ← 同层故障转移
+🧠 [deepseek-v4-pro]    ← "design the auth flow" → 立即升级
+⚠️ deepseek-flash 429 → 冷却中，同层故障转移 — 1 分钟后重试
+🦾 [deepseek-v4-flash]  ← Fast 链中的下一个健康模型
 ```
 
 ## 特性
@@ -113,6 +115,9 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 ## 配置
 
 配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「Shift-Router」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
+
+唯一必须由你决定的是档位模型：**[docs/MODELS.zh-CN.md](docs/MODELS.zh-CN.md)** 说明如何挑选
+Fast 与 Smart 模型（Fast 链同时也是裁判链）、什么样的模型适合做回退、以及哪些模型能接收图片。
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
@@ -249,31 +254,22 @@ DSH_HOME=/tmp/scratch dsh --profile tmp --patch e2e/overlay.yml "design a migrat
 
 ## 架构
 
-```
-src/
-├── index.ts        # 插件入口：事件接线、按 Agent 状态、裁判、路由通知
-├── config.ts       # Schemastery schema + 深合并归一化
-├── types.ts        # 共享类型 + 默认值
-├── router.ts       # 纯路由引擎（升级/降级/窗口/缓存感知）
-├── judge.ts        # 基于 ctx.llm.stream() 的 LLM 裁判 + 回复解析
-├── failover.ts     # 指数退避冷却状态机
-├── tier.ts         # 分层模型解析 + 展示
-├── notice.ts       # 纯逻辑：路由通知正文与折叠行（SPEC §13.1）
-├── orchestrate.ts  # 编排 prompt + 生命周期 + 上限
-├── audit.ts        # 委派运行的验收审计（非阻塞，从不作为门禁）
-├── stats.ts        # 遥测快照（token / 成本估算 / 节省基线）
-├── commands.ts     # /router 与 /route-force
-└── client/         # 浏览器端（GUI 设置卡片）
-    ├── index.tsx       # client 入口：settings.plugin.item 槽位注册
-    ├── controller.ts   # 暂存表单 → settings 作用域写（每 section 一次）
-    ├── form-model.ts   # 纯逻辑：字段注册表 / 草稿解析 / 保存计划
-    ├── card-ux.ts      # 纯逻辑：阈值推导 / 链问题 / 折叠头摘要
-    ├── model-catalog.ts# Host 模型目录 → provider/model 选项
-    ├── ShiftRouterCard.tsx  # 卡片组件（DSW 设计令牌）
-    └── locales.ts      # zh/en 字典
-```
+仓库结构与模块地图（纯逻辑/接线分工、测试分层）以
+**[CONTRIBUTING.md 的 Repository layout 一节](CONTRIBUTING.md#repository-layout)** 为唯一权威，
+这里只留指针：`src/` 是 host 半边（纯决策模块 + `index.ts` 里的 DSH 接线），`src/client/` 是
+浏览器半边（设置卡片），`tests/` 覆盖两者，`e2e/` 启动 scratch profile——包括打包产物。
 
-纯逻辑（router / failover / 裁判解析 / 编排 / 审计 / 路由通知 / 表单模型、卡片 UX 与目录加载）在隔离环境中做单元测试。DSH 接线分两层验证：`tests/plugin-load.test.ts` 在**真实 Cordis 上下文**中加载插件并驱动真实的 `agent/pre-step` waterfall（未声明的服务读取、非法的提示词段顺序、缺失的路由通知都会立即失败），e2e 则启动 scratch profile —— 包括打包产物与插件的默认编排模式。
+## 另见
+
+- **[pi-shift-router](https://github.com/green-dalii/pi-shift-router)** —— 本插件所适配的上游项目：
+  同一套双层架构（LLM 裁判、回退链、指数退避故障转移、任务级编排），面向 `pi-coding-agent`。
+  行为对齐与刻意不对齐之处记录在 [ALIGNMENT.md](ALIGNMENT.md)。
+- **[dsh-plugin-dev-skill](https://github.com/green-dalii/dsh-plugin-dev-skill)** —— 开发 DSH 插件的
+  Agent 技能：工具（`defineTool`）、LLM 适配器、服务、事件、配置与打包，含 Cordis 心智模型与验证
+  清单。本项目遵循它；可在 DSH、Claude Code 或 Codex 中安装。
+- **[obsidian-llm-wiki](https://github.com/GD4AI/obsidian-llm-wiki)** —— 把笔记与 PDF 变成互链、
+  可查询知识库的 Obsidian 插件（实体页与概念页、图检索问答、本地优先、无后端）。同一作者的另一条
+  产品线。
 
 ## 许可证
 
