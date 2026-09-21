@@ -6,30 +6,25 @@ card's dropdowns read ([SPEC §12.2](../SPEC.md#122-where-the-model-lists-come-f
 This page is *guidance for choosing* among the models that catalog already offers. It can age,
 which is why every table below carries its source and retrieval date.
 
-Two consequences, before anything else:
-
-- **Nothing here overrides your deployment.** A model this page names but your catalog does not
-  advertise is a fact about this page, not about your deployment. The catalog wins.
-- **Numbers move.** Read the prices and context windows below as the *shape* of a trade-off;
-  read your provider's own catalog for what you will actually be billed.
+One consequence, before anything else: **nothing here overrides your deployment.** A model this page
+names but your catalog does not advertise is a fact about this page, not about your deployment.
 
 ## Availability comes from the runtime catalog
 
-DSH resolves every configured provider through its adapters, and the catalog is the projection of
-that. Two habits follow:
+DSH resolves every configured provider through its adapters, and the catalog is that resolution's
+projection. Two habits follow:
 
 - **Read the catalog, do not infer it.** The GUI card's provider/model dropdowns and `/model` both
-  render it ([SPEC §12.3](../SPEC.md#123-card-ux-rules-normative), [README §Commands](../README.md#commands)).
-  What a tier can use is what the dropdown offers.
+  render it ([SPEC §12.3](../SPEC.md#123-card-ux-rules-normative), [README §Commands](../README.md#commands))
+  — what a tier can use is what the dropdown offers.
 - **A provider row with no `models` list is not "no models".** Built-in providers are answered by
   the *installed* catalog, so a route can resolve models your own `settings.yaml` never lists —
   the explicit list is an override, not the inventory. This is also why the catalog is authoritative
   for availability rather than any hand-written table.
 
-As a concrete, labelled example: one real deployment (this project's development machine) configures
-four `llm-pi-ai` routes — `command-code` (71 explicit models over an OpenAI-completions endpoint),
-`openrouter` (15 free models), `or` (1 free model) and `minimax-cn` (no explicit models). Treat that
-as *one deployment's* shape, not a recommended list.
+A labelled example: this project's development machine has four `llm-pi-ai` routes — `command-code`
+(71 explicit models), `openrouter` (15 free), `or` (1 free), `minimax-cn` (none). One deployment's
+shape, not a recommendation.
 
 > Source: `llm-pi-ai.providers` in that deployment's `$DSH_HOME/settings.yaml`, read 2026-09-21; the
 > "built-in providers answer from the installed catalog" rule is the official DSH provider guide
@@ -37,13 +32,11 @@ as *one deployment's* shape, not a recommended list.
 
 ## What makes a good Fast model
 
-The Fast tier is the one that runs most turns, so it is judged on three things at once: **cheap,
-quick, and good enough on routine edits** — bug fixes, small refactors, doc updates, running tests.
-It is also the tier the Judge itself runs on, so its price and latency are paid on *every* turn
-whether or not the turn stays on Fast ([SPEC §6.4](../SPEC.md#64-judge-model)).
-
-Look for a small-context-cheap model with a large enough context window to hold your working set,
-and prefer one that also accepts images if anyone on your team pastes screenshots.
+The Fast tier runs most turns, so it is judged on three things at once: **cheap, quick, and good
+enough on routine edits** (bug fixes, small refactors, doc updates, tests). It is also the tier the
+**Judge** runs on, so its price and latency are paid on *every* turn whether or not the turn stays on
+Fast ([SPEC §6.4](../SPEC.md#64-judge-model)). Prefer a cheap model whose context window still holds
+your working set, and one that accepts images if anyone pastes screenshots.
 
 | Model (as advertised by OpenRouter) | Context | Input modalities | Price / 1M tokens (in → out) |
 |---|---|---|---|
@@ -56,14 +49,14 @@ and prefer one that also accepts images if anyone on your team pastes screenshot
 > per-token fields multiplied by 10⁶; they are OpenRouter's, not your provider's.
 
 **The Judge warning.** Because the Judge classifies on the Fast chain, an expensive Fast chain makes
-every turn expensive — including turns that end up running Smart. A Fast tier priced like a flagship
-turns the router into a cost *multiplier*. If you want a strong model available, put it in Smart.
+every turn expensive — including turns that end up on Smart. A Fast tier priced like a flagship turns
+the router into a cost *multiplier*; put strong models in Smart instead.
 
 ## What makes a good Smart model
 
 Smart is the escalation target: multi-step reasoning, large refactors, unfamiliar codebases, and the
-turns where being wrong is expensive. Here depth and context length dominate, and price matters less
-because the tier is used deliberately rather than constantly ([SPEC §3](../SPEC.md#3-ev-economics-normative)).
+turns where being wrong is expensive. Depth and context length dominate here, and price matters less
+because the tier is used deliberately ([SPEC §3](../SPEC.md#3-ev-economics-normative)).
 
 | Model (as advertised by OpenRouter) | Context | Input modalities | Price / 1M tokens (in → out) |
 |---|---|---|---|
@@ -72,7 +65,7 @@ because the tier is used deliberately rather than constantly ([SPEC §3](../SPEC
 | `moonshotai/kimi-k3` | 1,048,576 | text, image, video | $1.70 → $8.50 |
 | `deepseek-official/deepseek-v4-pro` | 1,000,000 | text | *(your provider's)* |
 
-> Sources: OpenRouter API as above (2026-09-21); the `deepseek-official` row is the DSH adapter's own
+> Source: `https://openrouter.ai/api/v1/models`, retrieved 2026-09-21; the `deepseek-official` row is the DSH adapter's own
 > `DEFAULT_MODELS` entry (`@deepseek-ai/dsh-llm-deepseek` 0.1.5-rc.2, `lib/index.js`), which declares
 > the id, the 1 M context window and `text` — no image — for that model.
 
@@ -95,7 +88,6 @@ switching costs whatever the models cost.
 | already pay one vendor | same provider | warm cache, one quota, no cross-vendor key juggling |
 | need best-of-breed per tier | two providers | each tier gets the strongest model available to you |
 | are near a rate limit | two providers | two independent limit pools |
-| route mostly short, cacheable turns | same provider | the cache discount compounds across turns |
 
 > Source: SPEC §5 (normative, this repository), read 2026-09-21; the "one bill / one quota" column is
 > planning guidance, not a DSH guarantee.
@@ -133,9 +125,9 @@ So a model that can genuinely accept images still fails until the *route* says i
 - The declaration is per model, in the provider's config. pi-ai providers use **`input`**;
   the direct DeepSeek adapter uses **`inputModalities`** (official guide, 2026-09-21).
 - An omitted or empty `input` inherits the installed catalog, then the route's `defaultInput`
-  (default `[text]`). `defaultInput` is a **fallback, not an override** — it never removes image
-  capability a catalog model already has. Built-in providers without an explicit `models` list take
-  per-model overrides under `modelOverrides`, keyed by model id.
+  (default `[text]`) — a **fallback, not an override**, so it never strips capability a catalog
+  model already has. Built-in providers without an explicit `models` list take per-model overrides
+  under `modelOverrides`, keyed by model id.
 - The direct DeepSeek adapter treats an omitted `inputModalities` as **text-only**, and rejects an
   empty list.
 - **The declaration is an assertion about your endpoint, not a check of it.** DSH will not catch a
@@ -170,36 +162,34 @@ the *newest-sounding* id (`deepseek-v4-pro`) is text-only while `deepseek-flash`
 Both surfaces write the same thing. Only `deepseek-official` ids appear here because that route's
 model list is the DSH adapter's own (source below) — swap in ids your catalog actually advertises.
 
-As a profile patch row (note that a patch row **replaces the whole `config` value**, so restate every
-key you need — [SPEC §10](../SPEC.md#10-configuration-reference)):
+As a profile patch row in `~/.dsh/profiles/web/cordis.patch.yml` (a patch row **replaces the whole
+`config` value**, so restate every key you need — [SPEC §10](../SPEC.md#10-configuration-reference)):
 
 ```yaml
-# ~/.dsh/profiles/web/cordis.patch.yml
 - id: shift-router
   config:
     tiers:
       fast:
         models:
-          - { provider: deepseek-official, model: deepseek-v4-flash, priority: 1 }
-          - { provider: deepseek-official, model: deepseek-flash, priority: 2 }   # image-capable
+          - { provider: deepseek-official, model: deepseek-flash, priority: 1 }
+          - { provider: deepseek-official, model: deepseek-v4-flash, priority: 2 }
       smart:
         models:
           - { provider: deepseek-official, model: deepseek-v4-pro, priority: 1 }
 ```
 
-The equivalent in the settings document (what the GUI card and `/router config` write):
+The equivalent in `$DSH_HOME/settings.yaml` — what the GUI card and `/router config` write:
 
 ```yaml
-# $DSH_HOME/settings.yaml
 shift-router:
   tiers:
     fast:
       models:
         - provider: deepseek-official
-          model: deepseek-v4-flash
+          model: deepseek-flash
           priority: 1
         - provider: deepseek-official
-          model: deepseek-flash
+          model: deepseek-v4-flash
           priority: 2
     smart:
       models:
@@ -208,26 +198,27 @@ shift-router:
           priority: 1
 ```
 
-Why this shape: the Fast primary is the cheap text model, the Fast fallback is the image-capable
-sibling so screenshot work survives on Fast, and Smart escalates to the reasoning model. If your
-Fast chain were instead a frontier model, every Judge call would bill at frontier prices — see
-"What makes a good Fast model" above.
+Why this shape: the Fast primary is the adapter's image-capable Fast model, so screenshot work stays
+on Fast; the fallback is a **different model id** (a text-only sibling, so the chain is not a no-op);
+Smart escalates to the reasoning model. This is the same Fast/Smart pair the
+[README](../README.md) illustrates. If your Fast chain were a frontier model instead, every Judge
+call would bill at frontier prices — see "What makes a good Fast model" above.
 
 > Source: the four `deepseek-official` ids and their declared modalities are `DEFAULT_MODELS` in
-> `@deepseek-ai/dsh-llm-deepseek` 0.1.5-rc.2 (`lib/index.js`), read 2026-09-21. Prices for that route
+> `@deepseek-ai/dsh-llm-deepseek` 0.1.5-rc.2 (`lib/index.js`), read 2026-09-21; the chain order
+> matches the worked example in [README](../README.md). Prices for that route
 > come from your own provider/credentials and are deliberately not asserted here.
 
 ## Verifying a tier resolves
 
-1. **The card.** Settings → Plugins → Plugin configuration → *Shift-Router*: the provider/model
-   dropdowns are the runtime catalog, and the card calls out an empty tier, duplicated routes and an
-   identical Fast/Smart primary ([SPEC §12.3](../SPEC.md#123-card-ux-rules-normative)).
+1. **The card.** Settings → Plugins → Plugin configuration → *Shift-Router*: the dropdowns *are* the
+   runtime catalog, and the card calls out an empty tier, duplicated routes and an identical
+   Fast/Smart primary ([SPEC §12.3](../SPEC.md#123-card-ux-rules-normative)).
 2. **`/router status`** — the configured chains, the current tier and the last decision
    ([SPEC §11](../SPEC.md#11-commands)).
-3. **A real turn.** A switch writes a `[shift-router] …` notice into the conversation; with
-   `ux.routerLogVerbose` every judged turn reports, including one that holds position
-   ([SPEC §13.1](../SPEC.md#131-route-notices-normative)). That is the only proof of which model
-   actually ran.
+3. **A real turn.** A switch writes a `[shift-router] …` notice into the conversation, and with
+   `ux.routerLogVerbose` every judged turn reports ([SPEC §13.1](../SPEC.md#131-route-notices-normative))
+   — the only proof of which model actually ran.
 4. **The composed row** — `dsh --profile <name> --dump-config` shows whether your patch row landed.
 
 If a tier stays empty, the router holds position instead of guessing; an empty or inert chain is
@@ -248,6 +239,5 @@ Everything above is traceable to one of these, all fetched or read on **2026-09-
 | 5 | `@deepseek-ai/dsh-tool-fs` 0.1.5-rc.2, `lib/index.js` (`assertImageCapableRoute`) | the exact image-capability refusal and the route it resolves |
 | 6 | this repository: [SPEC](../SPEC.md) §3, §5, §6.4, §8, §10, §11, §12.2, §12.3, §13.1 and [README](../README.md) | the router's own normative behaviour; linked rather than restated |
 
-Deliberately **not** stated here, because no fetched source supports it: per-model prices for the
-`deepseek-official` route, latency/throughput rankings, and any "best model" verdict. Check your own
-catalog — that is what it is for.
+Deliberately **not** stated, because no fetched source supports it: `deepseek-official` prices,
+latency/throughput rankings, and any "best model" verdict. Read your own catalog instead.
