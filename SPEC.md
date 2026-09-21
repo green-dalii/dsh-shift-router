@@ -429,48 +429,31 @@ re-delegation as a **contract**:
 
 ### 7.4 Worker model injection (DSH-specific)
 
-Upstream pi-spawned workers accept a per-run `model` override, and upstream
-declares tier injection **mandatory** — without it a worker inherits the parent
-session's current model, which is Smart mid-orchestration, so the economics
-collapse.
+Upstream declares tier injection **mandatory**: without it a worker inherits the parent's
+current model, which is Smart mid-orchestration, and the economics collapse. DSH exposes
+the same capability under a **host-owned allowlist** — the `subagent` tool's per-call
+`provider` / `model` / `reasoning_effort` are honoured only when the deployment enables
+the harness's own `subagent-model-selection` setting (default **off**) and lists the exact
+routes. That owner is mounted by the `web` composition only, so on `headless` the
+capability is **absent**, not disabled. Therefore:
 
-DSH exposes the same capability under a **host-owned allowlist**: the `subagent`
-tool's per-call `provider` / `model` / `reasoning_effort` fields are honoured
-only when the deployment enables the harness's own `subagent-model-selection`
-setting (default **off**) and lists the exact routes in `allowedModels`. That
-settings owner is mounted by the `web` composition only, so on `headless` the
-capability is **absent** rather than disabled. Therefore:
-
-- The plugin **must not promise** that workers run on the Fast tier unless that
-  allowlist authorises it.
-- `subagentModelSelection` is an **optional service**: probe it with
-  `ctx.get('subagentModelSelection')` (§1.4). Reading `ctx.subagentModelSelection`
-  aborts the boot whenever the service is missing — including the ordinary window
-  in which a sibling row is still mounting.
-- The plugin **warns** when model-selectable delegation is not usable, naming the
-  setting and stating the consequence (workers would otherwise inherit the Smart
-  model). One once-only guard, two call sites:
-  - a reactive `ctx.inject(['subagentModelSelection'], …)` callback — fires when
-    the service attaches, whenever that is, and again if the preference is
-    replaced; this absorbs boot-order races; and
-  - the orchestration entry point (`enterOrchestration`) — race-free, because by
-    then the tree has long settled and an absent service is a fact about the
-    deployment rather than a mount-ordering artefact.
-- The stock compositions export no `ctx.logger` sink (§13), so the same fact is
-  also rendered by `/router status` as a `Worker delegation:` line (§11). That
-  is the surface a user can actually read.
-- The orchestrator prompt states this condition factually instead of asserting a
-  guarantee.
-- **Assisted authorisation (`/router allow-workers [off]`).** The plugin writes
-  the Fast chain into the host namespace itself (`settings.update(
-  'subagent-model-selection', { enabled, allowedModels })`). The settings
-  provider is namespace-agnostic — `get`/`update` take the namespace — so this
-  needs no ownership transfer, and `enabled: false` revokes authorisation while
-  keeping the route list. The write is refused with a specific reason when the
-  composition mounts no such namespace (`headless`), when the settings service is
-  absent, or when the Fast chain is empty; the command reports exactly which
-  routes it wrote. This is the surface that works in every profile, including
-  the ones a GUI card cannot reach (§13).
+- The plugin **must not promise** that workers run on the Fast tier unless the allowlist
+  authorises it; the orchestrator prompt states the condition factually.
+- `subagentModelSelection` is an **optional service** (§1.4): probe it with `ctx.get`.
+  A direct read aborts the boot whenever it is missing — including the ordinary window in
+  which a sibling row is still mounting.
+- When model-selectable delegation is unusable the plugin warns, naming the setting and
+  the consequence, from exactly two call sites: a reactive
+  `ctx.inject(['subagentModelSelection'], …)` callback (fires whenever the service
+  attaches, absorbing boot-order races) and the orchestration entry point (race-free: by
+  then an absent service is a fact about the deployment, not a mount artefact).
+- Stock compositions export no `ctx.logger` sink (§13), so the same fact is also rendered
+  by `/router status` as a `Worker delegation:` line (§11) — the surface a user can read.
+- `/router allow-workers [off]` writes the Fast chain into the host namespace itself;
+  `enabled: false` revokes authorisation while keeping the route list. The write is refused
+  with a specific reason when that namespace or the settings service is absent, or when the
+  Fast chain is empty, and the command reports the routes it wrote (§11). C4 decision and
+  rationale: ALIGNMENT §R4.
 
 ### 7.4.1 Acceptance audit (safety net, never a gate)
 
@@ -588,16 +571,11 @@ back to the router's current model. No transcript archaeology.
   priority-1** model; `savings = baselineTotal − actualTotal`. When that model
   has no pricing entry the baseline is reported as unavailable rather than as
   zero.
-- **Throughput is deliberately NOT tracked here.** Upstream renders a `tok/s`
-  figure in its footer and derives it from wall-clock time between the first
-  stream chunk and the message end. DSH already renders `tok/s` natively in the
-  chat message footer and the trajectory panel, and derives it from **decode
-  time** (`outputTokens / (decodeMs / 1000)`) — a strictly better measurement,
-  because it excludes queueing and time-to-first-token. Duplicating it in this
-  plugin would mean two competing figures for the same thing, one of them
-  worse. The plugin therefore owns routing decisions and spend, and leaves
-  throughput to the harness. (Consequence: there is no `speedWindowSize`,
-  `minStreamElapsedMs`, `medianSpeed` or TPS state in this plugin.)
+- **Throughput is deliberately NOT tracked here.** DSH renders `tok/s` natively (chat
+  footer, trajectory panel) from **decode time**, which is a strictly better measurement
+  than upstream's wall-clock figure; a second, worse copy would be two competing numbers
+  for one fact. The plugin owns routing and spend and leaves throughput to the harness —
+  hence no `speedWindowSize`, `minStreamElapsedMs`, `medianSpeed` or TPS state (§16).
 - **Display vs authority**: `state.currentProvider/currentModelId` is the router's
   *intended* model; `state.actualProvider/actualModel` mirrors the model that
   actually produced the last assistant message. Display must use the actual
@@ -773,108 +751,73 @@ not have (§R4, §R6.5).
 
 ### 13.1 Route notices (normative)
 
-A decision that changes which model serves the conversation is a fact about the
-user's own session, so it is written **into** the session, not merely beside it.
-This is the answer to "the plugin is enabled and I cannot see it doing anything":
-the router never changes the session's selected model (it overrides the wire
-model per request, §1.1), so nothing in the stock UI would otherwise announce it.
+A decision that changes which model serves the conversation is written **into** the
+session. The router never changes the session's selected model (it overrides the wire
+model per request, §1.1), so nothing else would announce it.
 
-- **Channel.** The `agent/pre-step` waterfall. The listener awaits `next()`,
-  returns a `reject` decision untouched, and otherwise returns it with one extra
-  message from `createUserMessage` (`@deepseek-ai/dsh-llm`):
-  `source: { kind: 'plugin', plugin: 'shift-router', form: 'notice', summary }`.
-  The harness's own model-selection notice uses this exact channel
-  (`dsh-agent`'s `model-selection`), which is the evidence that a third-party
-  plugin may write one; a rejected or aborted step never carries one.
-- **The text must name the plugin.** `source.plugin` is durable, but the Chat
-  client renders a `notice` through `NoticeBody`, which draws only the message
-  content, and the collapsed row draws only `summary`. Nothing in the UI reads
-  the `plugin` field, so an unlabelled one-liner is indistinguishable from
-  harness output — the confusion this section exists to end. Every notice
-  therefore starts with a literal `[shift-router]`.
-- **When one is emitted.** (a) Whenever the decision moves the turn to a
-  different tier or model: the switch is the interruption-worthy fact. (b) On
-  every judged turn when `ux.routerLogVerbose` is set, including a turn that
-  holds position. Verbose already promises "tell me every decision"; before this
-  it wrote that promise into a log ring nobody reads (§13), so making it the
-  per-turn notice switch is what makes the promise true at all. No notice is
-  emitted for a non-routable agent, a rejected step, a disabled router or a
-  non-`auto` routing mode: there is no decision to report. Nor when no model
-  could be resolved at all (an empty chain, or every candidate in cooldown):
-  nothing reached the wire, `initial` would be a lie by the second turn, and that
-  condition is already stated once at startup and in `/router status`.
-- **What it says.** One line: the plugin prefix, the tier transition with the
-  configured tier labels, the model transition (`model` alone when the provider
-  is unchanged, `provider/model` otherwise — the abbreviation rule the harness's
-  own notice uses), the action (`upgrade`/`downgrade`/`stay`), the Judge's
-  `reason` when it gave one, its confidence, and the wall time the decision took.
-  Those are the fields that make a switch auditable; a notice that said only
-  "switched" would be decoration.
-- **`summary`.** The same transition, passed through `boundContextSummary` so it
-  obeys the platform's `CONTEXT_SUMMARY_MAX_CHARS` (120) bound and the row stays
-  readable while collapsed.
-- **English.** The message enters the next request, so it is model-facing as well
-  as user-facing; the Judge's `reason` is already an English phrase and the
-  harness's own notice is English. A locale switch would have to "translate"
-  model ids and Judge output, which it cannot.
-- **Not covered (deferred, recorded).** A mid-turn failover switch: it happens
-  inside a request attempt, where no message channel exists — the next turn's
-  notice reports the model it actually runs. `/route-force`: the command itself
-  is the user's own visible act, and its effect appears in the next notice.
+- **Channel.** The `agent/pre-step` waterfall: await `next()`, pass a `reject` decision
+  through untouched, and otherwise return it plus one `createUserMessage`
+  (`@deepseek-ai/dsh-llm`) carrying
+  `source: { kind: 'plugin', plugin: 'shift-router', form: 'notice', summary }` — the
+  channel the harness's own model-selection notice uses. A rejected or aborted step
+  carries none.
+- **The text names the plugin.** `source.plugin` is durable but never rendered (the Chat
+  client's `NoticeBody` draws the content only; the collapsed row draws `summary`), so
+  every notice starts with a literal `[shift-router]`. Rationale: ALIGNMENT §R9.
+- **Emitted** whenever the decision moves the turn to a different tier or model, and on
+  every judged turn when `ux.routerLogVerbose` is set — including one that holds
+  position, which is what that switch promises. Never for a non-routable agent, a
+  rejected step, a disabled router, a non-`auto` mode, or a turn where no model resolved
+  at all (nothing reached the wire; that condition is stated at startup and in
+  `/router status`).
+- **Content.** One line: the prefix, the tier transition with the configured labels, the
+  model transition (`model` alone while the provider is unchanged, `provider/model` once
+  it differs), the action (`upgrade`/`downgrade`/`stay`), the Judge's `reason` and
+  confidence when given, and the decision's wall time. `summary` carries the same
+  transition through `boundContextSummary` (the platform's 120-char bound).
+- **English**, because the message enters the next request and the Judge's `reason` is
+  already an English phrase.
+- **Not covered (deferred).** A mid-turn failover switch (no message channel inside a
+  request attempt; the next turn's notice reports the model it actually runs) and
+  `/route-force` (the command itself is the user's visible act).
 
 ---
 
 ## 14. Testing and release gates
 
-- Pure logic (`router.ts`, `failover.ts`, `judge.ts` parsing, `orchestrate.ts`,
-  `audit.ts`, `notice.ts`, `config.ts`, `tier.ts`, `stats.ts`, and the client's
-  `form-model.ts` / `card-ux.ts` / `model-catalog.ts`) is unit-tested; behaviour
-  changes are TDD'd.
-- Contract changes may update existing assertions only as a documented part of
-  the same change.
-- **Wiring is tested against a real Cordis context.** `tests/plugin-load.test.ts`
-  loads the plugin through `ctx.plugin()` with the real `inject` gate armed, so an
-  undeclared service read or a non-finite prompt-section order fails in
-  milliseconds instead of aborting a user's boot. Hand-written context stubs
-  cannot catch that class of bug: they have no proxy trap to violate.
-- **The E2E must cover the default configuration and the packaged artifact.**
-  `npm run test:e2e` boots scratch profiles for a fresh install, a pre-alignment
-  config, and the plugin's DEFAULT orchestration mode with the web-only
-  `subagent-model-selection-settings` row mounted; it also packs the tarball,
-  installs it into a second profile, boots it there (where devDependencies are
-  absent) and drives a real routed turn, whose request must carry the route notice
-  (§13.1). A suite that only ever runs `orchestration.mode: off` cannot see the
-  default path — which is how the boot regression shipped, and `--dump-config`
-  cannot substitute because it composes configuration without instantiating a
-  single plugin.
-- **Load safety is tested per configuration.** `tests/plugin-load.test.ts` loads
-  the plugin for every configuration that changes a LOAD-TIME branch — empty row,
-  routing disabled, `manual`, `off`, orchestration off, empty Fast chain, and the
-  full costs/audit surface. A load failure is not "a feature is off", it is DSH
-  not starting, so these are loaded for real rather than reasoned about.
-- **Install isolation is a gate.** `tests/packaged-install.test.ts` reads the
-  BUILT artifacts and asserts the install-time contract: every external
-  specifier the host half imports is declared for the consumer — in
-  `dependencies` or `peerDependencies` (§1.5), never dev-only; every specifier
-  the browser half `require()`s is a platform seed word or declared in
-  `dsh.client`; and `files` ships what the artifacts and READMEs need.
-  `npm run test:e2e` additionally packs the tarball, installs it into a second
-  scratch profile and **boots it** — where devDependencies are absent, so a
-  runtime import that is not declared for the consumer fails there instead of in
-  a user's install.
-- **The card's slot wiring is tested against the real registry.**
-  `tests/client-card-slot.test.ts` declares `settings.plugin.item` as `keyed`
-  through the harness's own `SlotCore` and runs the card's real `apply()`, in
-  both load orders — the card plugin is loaded long before the Settings panel
-  declares the slot, and a stub registry has no kind rule to violate. The
+- **Pure logic is unit-tested; behaviour changes are TDD'd.** `router.ts`,
+  `failover.ts`, `judge.ts` parsing, `orchestrate.ts`, `audit.ts`, `notice.ts`,
+  `config.ts`, `tier.ts`, `stats.ts`, and the client's `form-model.ts` / `card-ux.ts` /
+  `model-catalog.ts`. Contract changes may update existing assertions only as a documented
+  part of the same change.
+- **Wiring is tested against a real Cordis context.** `tests/plugin-load.test.ts` loads
+  the plugin through `ctx.plugin()` with the real `inject` gate armed, and drives the real
+  `agent/pre-step` waterfall, so an undeclared service read, a non-finite prompt-section
+  order or a missing route notice fails in milliseconds instead of aborting a boot.
+  Hand-written stubs cannot catch that class of bug: they have no proxy trap to violate.
+- **Load safety is tested per configuration** — the empty row, routing disabled, `manual`,
+  `off`, orchestration off, an empty Fast chain, and the full costs/audit surface. A load
+  failure is not "a feature is off", it is DSH not starting, so these are loaded for real.
+- **Install isolation is a gate.** `tests/packaged-install.test.ts` reads the BUILT
+  artifacts: every host-half external import is declared for the consumer (in
+  `dependencies` or `peerDependencies`, §1.5 — never dev-only); every browser-half
+  `require()` is a platform seed word or declared in `dsh.client`; and `files` ships what
+  the artifacts and READMEs need.
+- **The e2e covers the DEFAULT configuration, the upgrade path and the packaged
+  artifact.** It boots scratch profiles for a fresh install, a pre-alignment config and
+  the default orchestration mode with the web-only `subagent-model-selection-settings` row
+  mounted; it also packs the tarball, installs it into a second profile, **boots it there**
+  (where devDependencies are absent, so an undeclared runtime import fails) and drives a
+  real routed turn whose request must carry the route notice (§13.1). `--dump-config`
+  cannot substitute: it composes configuration without instantiating a single plugin.
+- **The card is tested against the real registry and the real catalog.**
+  `tests/client-card-slot.test.ts` declares `settings.plugin.item` as `keyed` through the
+  harness's own `SlotCore` and runs the card's real `apply()` in both load orders — the
   type-only contract (§12.1) makes `key` vs `id` a compile error as well.
-- **The card's data sources are gated by shape.** `tests/model-catalog.test.ts`
-  drives the mapping from the Host catalog — provider groups, provider failures,
-  the `ok:false` envelope and a thrown transport error — because the defect that
-  shipped was a wrong remote, and a test written against a hand-made success
-  object would have blessed it just as the typechecker did.
-- Gates, in order: `npm run typecheck` → `npm run build` → `npm test` →
-  `npm run test:e2e`. A red gate is never merged or released.
+  `tests/model-catalog.test.ts` drives the mapping from the Host catalog, including
+  provider failures, the `ok:false` envelope and a thrown transport error.
+- Gates, in order: `npm run typecheck` → `npm run build` → `npm test` → `npm run test:e2e`.
+  A red gate is never merged or released.
 
 ---
 

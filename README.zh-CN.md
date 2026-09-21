@@ -194,40 +194,29 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 ## 工作原理（DSH 集成）
 
-| 能力 | DSH 机制 |
-|------|----------|
-| 轮次开始判定 | `agent/pre-step` waterfall（仅 `step === 1` 的顶层 Agent） |
-| 模型切换 | `agent/request` waterfall（按步 provider/model 覆盖） |
-| 运行时故障转移 | `agent/request-error` waterfall（冷却 + `{kind:'retry'}` 同层重试） |
-| 裁判 LLM 调用 | `ctx.llm.stream()` —— 复用 harness 的适配器、凭证与 JSON 模式强制 |
-| 编排指令 | `ctx.systemPrompt.section()`，编排激活时按 Agent 渲染 |
-| 回合收尾 | `agent/turn-stopping`（serial）：释放一次性手动覆盖与编排状态 |
-| 配置（GUI + 命令） | `dsh-settings` 命名空间 `shift-router`；`/router config` 是基于它的带编号编辑器（`settings.update` / `settings.mutate` 路径 op）；GUI 卡片是 client 模块，经 `settingsScope.bind` + `settings.plugin.item` 槽位渲染同一命名空间 |
-| 用量遥测 / 冷却恢复 | `session/event` 的 `assistant/message`（TokenUsage；一次成功回复会清除该模型的冷却） |
-| 命令 | `ctx.commands.register()` |
-| 分层链提示词变量 | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |
+机制到机制的逐项映射是**规范**，只在 [SPEC.md §1.1](SPEC.md#11-dsh-integration-map)。这里有两点
+值得单独说明，因为它们**不在**那张表里：
 
-吞吐速率刻意**不在**这张表里：DSH 原生已在消息页脚与 trajectory 面板按解码时间显示 `tok/s`。路由器只负责路由决策与花费，不负责速率展示。
-
-**子代理永不参与路由。** 由 `subagent` 工具派生的工作代理带有 `session.header.origin === 'subagent'`，保持其固定的模型；路由器只驱动顶层 Agent。
+- **吞吐速率刻意不在此列。** DSH 原生渲染 `tok/s`（消息页脚、trajectory 面板），口径是解码时间；
+  路由器负责路由决策与花费，不负责速率展示。
+- **子代理永不被路由。** `subagent` 工具派生出的 worker 带 `session.header.origin === 'subagent'`
+  并保持其被钉住的模型；路由器只驱动顶层 agent 的轮次。
 
 ### 编排与 DSH subagent 工具
 
-原 pi 插件通过 pi-subagents 委派，使用 `agent: "worker"`、`context: "fresh"` 和每次调用固定模型——上游明确把这次调用级模型固定称为**必需项**：否则工作代理会继承父会话当前模型，而编排中途父会话正是 Smart 层，经济学前提直接崩塌。DSH 的 `subagent` 工具有一个关键差异：
+上游把「每 worker 的模型钉定」称为**强制**：没有它，worker 会继承父会话当前模型——编排中途那已是
+Smart——编排的经济学前提直接崩塌。DSH 里这个钉定居于**宿主持有的白名单**之后
+（`subagent-model-selection`，默认关闭），因此路由器不宣称自己做不到的保证，而是：
 
-- 该工具接受 `description` + `prompt`（以及 `run_in_background`）；工作代理运行在**自己的全新会话**中——prompt 就是它的整个世界。
-- 每次调用的 `provider` / `model` / `reasoning_effort` **确实存在**，但受宿主白名单管控：必须启用 harness 自身的 `subagent-model-selection` 设置（默认**关闭**）并把精确路由列入 `allowedModels`。只有配置了白名单，CTO 才能把工作代理固定到 Fast 层。
-- 未配置白名单时，工作代理继承父代理的模型。
+1. 用 `/router allow-workers` 帮你把 Fast 链写进该白名单（这是它在组合期唯一做不到的一步）；
+2. 白名单缺失时，在你能读到的地方如实说明：`/router status` 的 `Worker delegation:` 行
+   （`ctx.logger` 那份只在挂载了日志导出器的部署可见）；
+3. 如实告诉 CTO：worker 的模型来自哪里。
 
-因此路由器不去断言一个它无法保证的事，而是做两件事：
-
-1. **辅助授权** —— `/router allow-workers` 代你把 Fast 链写入 harness 白名单（这是插件在组合期无法替你做的那一步）。
-2. **自检** —— 当编排开启且 Fast 链非空时，报告模型可选委派不可用，指明需要启用的设置并说明后果。有两个界面，因为第一个并非总是可达：`ctx.logger` 告警（仅挂载了日志导出器的部署可见），以及 `/router status` 的 `Worker delegation:` 行（始终可见）。该白名单服务只由 `web` 组合挂载，因此在 `headless` 下该行显示 `unavailable on this harness`。
-3. **如实描述** —— 编排提示词告知 CTO：工作代理的模型来自 harness 白名单，下方列出的 Fast 链是部署**应当**已授权的路由。
-
-硬上限由路由器强制执行，不只是提示文字：编排轮次中每次 `subagent` 工具调用都会递增 `orchestration.rounds`；**连续**失败（`isError`）的 subagent 结果推进连击，达到 `orchestration.escalationThreshold` 时递增 `orchestration.escalations` 并清零连击（工作代理成功同样清零，因此偶发失败不会烧掉上限）。`capHit()` 还覆盖可选预算（`orchestration.maxSpendUsd`），并说明具体是哪一顶帽触发。一旦 `capHit()` 为真，`subagent` 工具会在 `tools/pre-execute` 被**拒绝**，编排 prompt section 切换为"立即收尾"通知。`/router status` 显示实时计数（`round x/max, esc y/threshold`）；一旦有 worker 回报，还会显示归因行 `Orchestration spend: $X · N/M workers reported`。成本取自 `pricing`；每个 worker 的花费来自**它自己**会话的用量，并按该 worker 实际运行的模型计价，因此继承了 Smart 模型的 worker 会按 Smart 计价。
-
-硬帽能防止「跑飞」，但防不住 CTO 声称验收了却没真的核对。因此**确实委派过**的运行还会被**审计**：确定性检查总会执行（每个派出的 worker 是否回报、是否存在 CTO 总结、是否因触帽结束），并且在启用审计时用一次小的 Fast 档调用核对声明是否有 worker 结果支撑、是否对齐你的目标、是否为占位实现。审计绝不阻断或改变轮次：LLM 半分离执行，结论以 `/router status` 的 `Last audit:` 行呈现。
+各项上限（`maxRounds`、连续失败升级、`maxSpendUsd`）由**路由器强制执行**而非仅写在提示词里：触顶后
+`subagent` 工具被拒绝、提示词段落切换为「立即收尾」，`/router status` 显示实时计数。真正委派过的轮次
+还会被审计——确定性检查总是跑，开启后另有一次分离的 Fast 档复核，从不阻塞轮次——结果落在
+`Last audit:`。契约见 SPEC §7.3、§7.4、§7.4.1。
 
 ## 开发
 

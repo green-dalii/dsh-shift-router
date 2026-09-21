@@ -213,43 +213,34 @@ only reachable from a source checkout.
 
 ## How it works (DSH integration)
 
-| Capability | DSH mechanism |
-|------------|---------------|
-| Turn-start classification | `agent/pre-step` waterfall (`step === 1`, top-level agents only) |
-| Model switching | `agent/request` waterfall (per-step provider/model override) |
-| Runtime failover | `agent/request-error` waterfall (cooldown + `{kind:'retry'}` same-tier retry) |
-| Judge LLM calls | `ctx.llm.stream()` — reuses the harness's adapters, credentials, and provider retry. The Judge prompt asks for a JSON reply and the parser is tolerant (JSON → loose → bare word); the plugin does **not** claim JSON-mode enforcement from the harness |
-| Orchestrator instruction | `ctx.systemPrompt.section()` rendered per agent while orchestration is active |
-| Turn teardown | `agent/turn-stopping` serial event (releases the one-turn manual override and orchestration state) |
-| Orchestration hard caps | `tools/pre-execute` denies the `subagent` tool at the cap; `tools/result` counts worker outcomes; the prompt section switches to a "wrap up" notice |
-| Config (GUI + commands) | `dsh-settings` namespace `shift-router`; `/router config` is a numbered editor over it (`settings.update` / `settings.mutate` path ops); the GUI card is a client module binding the same namespace via `settingsScope` + the `settings.plugin.item` slot |
-| Usage telemetry / cooldown recovery | `session/event` `assistant/message` (TokenUsage; a successful message clears the model's cooldown) |
-| Commands | `ctx.commands.register()` |
-| Tier-chain prompt variables | `{{shift_router_fast_chain}}` / `{{shift_router_smart_chain}}` |
+The mechanism-by-mechanism mapping is normative and lives in
+[SPEC.md §1.1](SPEC.md#11-dsh-integration-map). Two things are worth stating here because they are
+*not* in that table:
 
-Throughput is deliberately **not** part of this table: DSH already renders `tok/s`
-natively in the chat message footer and the trajectory panel, from decode time.
-The router owns routing decisions and spend, not rate display.
-
-**Subagents are never routed.** Workers spawned by the `subagent` tool carry `session.header.origin === 'subagent'` and keep their pinned model; the router only drives top-level agents.
+- **Throughput is deliberately absent.** DSH renders `tok/s` natively (chat footer, trajectory panel)
+  from decode time; the router owns routing decisions and spend, not rate display.
+- **Subagents are never routed.** Workers spawned by the `subagent` tool carry
+  `session.header.origin === 'subagent'` and keep their pinned model; the router drives top-level
+  agent turns only.
 
 ### Orchestration and the DSH subagent tool
 
-The original pi plugin delegated through pi-subagents with `agent: "worker"`, `context: "fresh"`, and a per-call model pin — and upstream calls that per-call pin **mandatory**, because without it a worker inherits the parent session's current model, which is Smart mid-orchestration: the economics collapse. DSH's `subagent` tool differs in a way that matters:
+Upstream calls the per-worker model pin **mandatory**: without it a worker inherits the parent's
+model — Smart mid-orchestration — and the economics collapse. In DSH that pin sits behind a
+**host-owned allowlist** (`subagent-model-selection`, default off), so instead of asserting a
+guarantee it cannot keep, the router:
 
-- The tool takes `description` + `prompt` (and `run_in_background`); a worker runs in its **own fresh session** — the prompt is its world.
-- Per-call `provider` / `model` / `reasoning_effort` **do exist**, but they are gated by a host-owned allowlist: the harness's `subagent-model-selection` setting (default **off**) must be enabled and list the exact routes in `allowedModels`. Only then can the CTO pin a worker to the Fast tier.
-- When that allowlist is not configured, a worker inherits the parent's model.
+1. writes the Fast chain into that allowlist for you (`/router allow-workers` — the one step it
+   cannot take at composition time);
+2. says so where you can read it when the allowlist is absent: a `Worker delegation:` line in
+   `/router status` (the `ctx.logger` copy is visible only where a log exporter is mounted);
+3. tells the CTO, factually, where a worker's model comes from.
 
-So the router does two things instead of asserting a guarantee it cannot keep:
-
-1. **Assisted authorisation** — `/router allow-workers` writes the Fast chain into the harness allowlist for you (it is the one step the plugin cannot do for itself at composition time).
-2. **Self-check** — when orchestration is enabled and the Fast chain is non-empty, it reports that model-selectable delegation is unavailable, naming the setting to enable and stating the consequence. Two surfaces, because the first one is not always reachable: a `ctx.logger` warning (visible wherever a log exporter is mounted), and a `Worker delegation:` line in `/router status`, which always works. The allowlist service is mounted by the `web` composition only, so on `headless` the line reads `unavailable on this harness`.
-3. **Factual prompt** — the orchestrator prompt tells the CTO that a worker's model comes from the harness allowlist, and that the Fast chain listed below is what the deployment should have authorised.
-
-The caps are enforced by the router, not just described: every `subagent` tool call while an orchestration turn is active increments `orchestration.rounds`; **consecutive** failed (`isError`) subagent results advance a streak, and reaching `orchestration.escalationThreshold` increments `orchestration.escalations` and resets the streak (a successful worker result also resets it, so isolated failures do not burn the cap). `capHit()` also covers the optional budget (`orchestration.maxSpendUsd`) and names the cap that fired. Once `capHit()` is true the `subagent` tool is **denied** at `tools/pre-execute` and the orchestrator prompt section is replaced by a "wrap up now" notice. `/router status` shows the live counters (`round x/max, esc y/threshold`), and — once workers have reported — the attribution line `Orchestration spend: $X · N/M workers reported`. Cost comes from the `pricing` table; a worker's spend is taken from **its own** session's usage and priced with the model the worker actually ran, so a worker that inherited the Smart model shows up priced as Smart.
-
-The caps stop a run from flying away; they cannot stop a CTO from *claiming* acceptance it never verified. So a run that actually delegated is also **audited**: deterministic checks always run (every dispatched worker reported, a CTO summary exists, no cap ended the run), and — when the audit is enabled — one small Fast-tier call verifies that the claim is grounded in the worker results, aligned with your goal, and not placeholder work. The audit never blocks or changes a turn: the LLM half runs detached, and its findings appear as `Last audit:` in `/router status`.
+The caps (`maxRounds`, consecutive-failure escalation, `maxSpendUsd`) are **enforced by the
+router**, not merely prompted: at the cap the `subagent` tool is denied and the prompt section
+switches to a wrap-up notice, with live counters in `/router status`. A run that actually delegated
+is also audited — deterministic checks always, one detached Fast-tier review when enabled, never
+blocking a turn — surfacing as `Last audit:`. Contracts: SPEC §7.3, §7.4, §7.4.1.
 
 ## Development
 

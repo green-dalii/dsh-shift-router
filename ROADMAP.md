@@ -112,9 +112,9 @@ are SPEC §12.2 (model source) and §12.3 (card UX).
 
 ## Settings layout + information architecture round (delivered)
 
-The card was measured in a real browser: 21 pairs of elements overlapped, and the
-open card showed 30 controls at once. The audit and the measurements are in
-[ALIGNMENT.md](ALIGNMENT.md) §R8; the rules are SPEC §12.3.
+The card was measured in a real browser (the numbers are in
+[ALIGNMENT.md](ALIGNMENT.md) §R8; the rules are SPEC §12.3): elements overlapped, and the
+open card showed far too many controls at once.
 
 | Item | Status |
 |---|---|
