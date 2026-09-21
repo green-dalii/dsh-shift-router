@@ -1,0 +1,57 @@
+# dsh-shift-router — continuous integration
+#
+# The gates themselves are defined in SPEC §14 and run identically on a laptop
+# (`npm run typecheck && npm run build && npm test`). CI exists so that a green
+# laptop is not the only evidence: every push and pull request re-runs them on
+# the two Node lines this package supports.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.19', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Upstream's gate order: build before test, so a build break is reported
+      # before a test break that may be its symptom.
+      - run: npm run build
+      - run: npm run test:coverage
+
+  e2e:
+    name: e2e (install + boot)
+    runs-on: ubuntu-latest
+    # The credential-free e2e needs the `dsh` CLI and pnpm, and it builds a
+    # scratch profile by installing real packages. That is exactly the path that
+    # once shipped a boot-aborting defect (ALIGNMENT §R3), so it runs on main
+    # instead of being left to the maintainer's laptop. It is kept as its own job
+    # so a failure is attributable to the install path rather than to a unit test.
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm i -g pnpm @deepseek-ai/dsh@0.1.5-rc.2
+      - run: npm run test:e2e

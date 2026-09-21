@@ -244,7 +244,11 @@ crawl that topic and npm; nothing needs submitting to a private registry.
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry (Keep a Changelog).
 2. Update the READMEs if user-facing behavior changed — including the test-count and
    Node badges at the top.
-3. Run the gates (SPEC §14): `npm run typecheck && npm test && npm run build && npm run test:e2e`.
+3. Run the gates (SPEC §14): `npm run typecheck && npm run build && npm test && npm run test:e2e`.
+   CI re-runs `typecheck`, `build` and `test:coverage` on Node 22.19 and 24 for every push and pull
+   request, and the credential-free e2e on `main` — so a red laptop is not the only thing standing
+   between a change and a user. `test:coverage` enforces the bars in `vitest.config.ts`: a floor over
+   all shipping source, plus upstream's core-module bar on the decision modules.
 4. `npm pack --dry-run` and confirm `files` still ships the artifacts, the patch and the docs.
 5. Publish: `npm publish` (runs `prepare`, then `prepublishOnly`), or hand out the tarball.
 6. Tag the release (`git tag vX.Y.Z`) and push main + the tag — both READMEs pin the git

@@ -7,9 +7,11 @@
 **A two-tier model router for DeepSeek Harness** — an LLM Judge sends each turn to the cheap Fast chain or the Smart chain by **expected cost**, with multi-model fallback chains, exponential-backoff failover, cache-aware switching, and task-level orchestration (Smart plans, Fast workers execute).
 
 A DSH adaptation of [pi-shift-router](https://github.com/green-dalii/pi-shift-router).
-Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
-[ROADMAP.md](ROADMAP.md#upstream-alignment) for the per-version table and
-[SPEC.md](SPEC.md) for the contract.
+This project **forked from upstream v1.0.0** (its first commit and upstream's tag share the date
+2026-08-14, so several upstream releases were already present here) and has since been **realigned
+through upstream v1.6.0** — the per-version status (aligned / adapted / deliberately not ported) is
+the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), and the contract is
+[SPEC.md](SPEC.md).
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)

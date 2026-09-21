@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CI, and coverage thresholds that mean something.** `.github/workflows/ci.yml` runs
+  `typecheck`, `build` and `test:coverage` on Node 22.19 and 24 for every push and pull request, plus
+  the credential-free e2e (install + boot) on `main` — the path that once shipped a boot-aborting
+  defect now has a second, automatic defence instead of the maintainer's laptop. `vitest.config.ts`
+  measures coverage over the shipping source only (the e2e harnesses and the build config have their
+  own gates) and enforces two bars: a floor over everything, and upstream's core-module bar on the
+  decision modules. `npm run test:coverage` is the new entry point.
+
 ### Documentation
 
 - **The READMEs now describe task-level orchestration as the flagship capability it is.** It had

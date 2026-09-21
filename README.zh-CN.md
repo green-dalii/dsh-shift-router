@@ -7,8 +7,9 @@
 **面向 DeepSeek Harness 的双层模型路由器** —— LLM 裁判按**期望成本**把每一轮交给便宜的 Fast 层或 Smart 层，并配以多模型回退链、指数退避故障转移、缓存感知切换，以及「Smart 规划、Fast 执行」的任务级编排。
 
 由 [pi-shift-router](https://github.com/green-dalii/pi-shift-router) 适配到 DSH 的版本。
-移植基线为上游 **v1.0.0**，对齐目标为上游 **v1.6.0** —— 逐版本对照见
-[ROADMAP.md](ROADMAP.md#upstream-alignment)，契约见 [SPEC.md](SPEC.md)。
+本项目**分叉自上游 v1.0.0**（本仓库首个提交与上游该 tag 同日，均为 2026-08-14，因此上游若干版本
+的内容在此**本就存在**），此后**重新对齐到上游 v1.6.0** —— 逐版本状态（已对齐／已适配／刻意不移植）
+见 [ROADMAP.md 的 Upstream alignment 表](ROADMAP.md#upstream-alignment)，契约见 [SPEC.md](SPEC.md)。
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
