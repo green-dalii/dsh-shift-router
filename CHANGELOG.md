@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **The READMEs now describe task-level orchestration as the flagship capability it is.** It had
+  been reduced to one feature bullet plus a compressed subsection under "How it works" — a side
+  effect of the ownership pass — while upstream gives it a top-level section. Both languages now
+  carry a full `## Task-level orchestration` section: how an orchestrated turn runs (enter → delegate
+  → review → stop), the enforced caps, the acceptance audit, the worker-model authorisation the
+  harness requires, how to tell it happened, and when it does not engage.
 - **Document ownership is written down** (`CONTRIBUTING.md` § Documentation ownership): seven
   documents, seven jobs, one home per fact — the rule the previous two rounds applied by hand is now
   a contributor-visible table, so "where does this belong?" has an answer that is not folklore.

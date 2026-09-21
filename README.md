@@ -229,24 +229,64 @@ The mechanism-by-mechanism mapping is normative and lives in
   `session.header.origin === 'subagent'` and keep their pinned model; the router drives top-level
   agent turns only.
 
-### Orchestration and the DSH subagent tool
+## Task-level orchestration
 
-Upstream calls the per-worker model pin **mandatory**: without it a worker inherits the parent's
-model — Smart mid-orchestration — and the economics collapse. In DSH that pin sits behind a
-**host-owned allowlist** (`subagent-model-selection`, default off), so instead of asserting a
-guarantee it cannot keep, the router:
+Turn-level routing decides *which model* runs a turn; task-level orchestration decides *how a complex
+task is executed*. When the Judge says `smart` and `orchestration.mode` is `auto` (the default), the
+router hands the turn to the Smart tier as a **CTO**: it plans, delegates implementation to Fast
+workers through the harness's `subagent` tool, reviews each result and iterates — then an independent
+acceptance audit checks the claim. A `fast` verdict never triggers any of this.
 
-1. writes the Fast chain into that allowlist for you (`/router allow-workers` — the one step it
-   cannot take at composition time);
-2. says so where you can read it when the allowlist is absent: a `Worker delegation:` line in
-   `/router status` (the `ctx.logger` copy is visible only where a log exporter is mounted);
-3. tells the CTO, factually, where a worker's model comes from.
+### How an orchestrated turn runs
 
-The caps (`maxRounds`, consecutive-failure escalation, `maxSpendUsd`) are **enforced by the
-router**, not merely prompted: at the cap the `subagent` tool is denied and the prompt section
-switches to a wrap-up notice, with live counters in `/router status`. A run that actually delegated
-is also audited — deterministic checks always, one detached Fast-tier review when enabled, never
-blocking a turn — surfacing as `Last audit:`. Contracts: SPEC §7.3, §7.4, §7.4.1.
+1. **Enter** — the decision tier is Smart, the `subagent` tool is present and the mode is `auto`; the
+   orchestrator instruction is injected as a system-prompt section (SPEC §7.2).
+2. **Delegate** — the CTO calls `subagent`; each call is one round, counted at **dispatch** (a
+   dispatched delegation has already spent budget, so this keeps `maxRounds` a true ceiling).
+3. **Review and iterate** — a failed worker advances the failure streak, and the convergence protocol
+   requires every re-delegation to carry a structured `## Failure report` (what failed, where, which
+   acceptance test re-checks it); repeating the same feedback triggers takeover (SPEC §7.2.1).
+4. **Stop** — at the cap the `subagent` tool is **denied** at `tools/pre-execute` and the prompt
+   section becomes a wrap-up notice; `agent/turn-stopping` releases the state. Orchestration is
+   single-turn: nothing spans turns, and a leaked run is swept at the next turn's start.
+
+### Hard caps (enforced, not prompted)
+
+| Setting | Default | Effect |
+|---|---|---|
+| `orchestration.maxRounds` | 3 | delegations per task |
+| `orchestration.escalationThreshold` | 2 | **consecutive** worker failures before the Smart agent takes that phase over itself |
+| `orchestration.maxSpendUsd` | 0 (no guard) | stop delegating at a USD budget, priced from the `pricing` table |
+| `orchestration.workerLedgerCap` | 20 | per-worker cost rows kept for display |
+
+### The acceptance audit (a safety net, never a gate)
+
+Caps stop a run from flying away; they cannot stop a CTO from *claiming* acceptance it never verified.
+A run that actually delegated is therefore audited: deterministic checks always run (every dispatched
+worker reported, a CTO summary exists, no cap ended the run), and — when `orchestration.audit.enabled`
+— one small Fast-tier review reads the goal, the summary and the worker results. It never blocks a
+turn: the LLM half runs detached and its verdict appears as `Last audit:` in `/router status`.
+
+### Worker models need authorisation
+
+Upstream calls the per-worker model pin **mandatory**: a worker that inherits the parent's model runs
+on Smart mid-orchestration, which collapses the economics. In DSH that pin sits behind the harness's
+own allowlist (`subagent-model-selection`, default **off**). `/router allow-workers` writes the Fast
+chain into it for you; when it is not authorised the router says so in a `Worker delegation:` line
+rather than pretending otherwise (SPEC §7.4).
+
+### How to tell it happened
+
+`/router status` shows `🪄 active (round x/y, esc a/b, fail streak n)`, then
+`Orchestration spend: $X · N/M workers reported` once workers report, and `Last audit: …` after the
+audit settles. Entry also writes a route notice into the transcript (SPEC §13.1), so the shape of the
+turn is visible without reading counters.
+
+### When it does not engage
+
+A `fast` verdict; `orchestration.mode: off` (or `/router orchestrate off`); the `subagent` tool absent
+from the composition; or no Smart model resolvable — in which case the turn simply runs on Smart,
+with no delegation and no audit.
 
 ## Development
 

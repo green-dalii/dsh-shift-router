@@ -207,21 +207,58 @@ Fast 与 Smart 模型（Fast 链同时也是裁判链）、什么样的模型适
 - **子代理永不被路由。** `subagent` 工具派生出的 worker 带 `session.header.origin === 'subagent'`
   并保持其被钉住的模型；路由器只驱动顶层 agent 的轮次。
 
-### 编排与 DSH subagent 工具
+## 任务级编排
 
-上游把「每 worker 的模型钉定」称为**强制**：没有它，worker 会继承父会话当前模型——编排中途那已是
-Smart——编排的经济学前提直接崩塌。DSH 里这个钉定居于**宿主持有的白名单**之后
-（`subagent-model-selection`，默认关闭），因此路由器不宣称自己做不到的保证，而是：
+轮次级路由决定**用哪个模型**跑这一轮；任务级编排决定**复杂任务怎么执行**。当裁判判定 `smart`
+且 `orchestration.mode` 为 `auto`（默认）时，路由器把这一轮交给 Smart 层担任 **CTO**：它制定计划、
+通过 harness 的 `subagent` 工具把实现委派给 Fast 层 worker、逐个审查结果并迭代——最后由一次独立的
+验收审计核对它的说法。`fast` 判定永远不会触发这些。
 
-1. 用 `/router allow-workers` 帮你把 Fast 链写进该白名单（这是它在组合期唯一做不到的一步）；
-2. 白名单缺失时，在你能读到的地方如实说明：`/router status` 的 `Worker delegation:` 行
-   （`ctx.logger` 那份只在挂载了日志导出器的部署可见）；
-3. 如实告诉 CTO：worker 的模型来自哪里。
+### 一轮编排是怎么跑的
 
-各项上限（`maxRounds`、连续失败升级、`maxSpendUsd`）由**路由器强制执行**而非仅写在提示词里：触顶后
-`subagent` 工具被拒绝、提示词段落切换为「立即收尾」，`/router status` 显示实时计数。真正委派过的轮次
-还会被审计——确定性检查总是跑，开启后另有一次分离的 Fast 档复核，从不阻塞轮次——结果落在
-`Last audit:`。契约见 SPEC §7.3、§7.4、§7.4.1。
+1. **进入** —— 决策档位是 Smart、`subagent` 工具存在、模式为 `auto`；编排器指令以系统提示词段落
+   注入（SPEC §7.2）。
+2. **委派** —— CTO 调用 `subagent`；每次调用算一轮，且**在派发时**计数（派发出去的委派已经花掉了
+   预算，这样 `maxRounds` 才是真正的上限）。
+3. **审查与迭代** —— worker 失败会推进失败连击；收敛协议要求每次重派都携带结构化的
+   `## Failure report`（什么失败、在哪、用哪个验收测试复测），重复同一反馈即触发接管
+   （SPEC §7.2.1）。
+4. **停止** —— 触顶后 `tools/pre-execute` **直接拒绝** `subagent` 工具、提示词段落切换为「立即
+   收尾」；`agent/turn-stopping` 释放状态。编排是**单轮**的：不跨轮，泄漏的运行会在下一轮开始时清扫。
+
+### 硬上限（由路由器强制执行，而非仅写在提示词里）
+
+| 设置 | 默认值 | 作用 |
+|---|---|---|
+| `orchestration.maxRounds` | 3 | 每个任务的委派轮数 |
+| `orchestration.escalationThreshold` | 2 | **连续**多少轮 worker 失败后，Smart 层自己接管该阶段 |
+| `orchestration.maxSpendUsd` | 0（不设闸） | 达到 USD 预算即停止委派，按 `pricing` 表计价 |
+| `orchestration.workerLedgerCap` | 20 | 保留用于展示的每 worker 成本行数 |
+
+### 验收审计（安全网，从不是门禁）
+
+硬上限能防止跑飞，防不住 CTO **声称**验收了却其实没核对。因此真正委派过的运行会被审计：确定性
+检查总是跑（每个派发出去的 worker 都回报了、存在 CTO 总结、没有被上限截断），并在
+`orchestration.audit.enabled` 时追加一次小的 Fast 层复核，读取目标、总结与 worker 结果。它**从不
+阻塞**轮次：LLM 那一半是分离执行的，结论以 `Last audit:` 出现在 `/router status`。
+
+### worker 的模型需要授权
+
+上游把「每 worker 的模型钉定」称为**强制**：worker 若继承父会话的模型，编排中途那已是 Smart，
+经济学前提直接崩塌。DSH 里这个钉定居于宿主持有的白名单之后（`subagent-model-selection`，默认
+**关闭**）。`/router allow-workers` 帮你把 Fast 链写进去；未授权时路由器会在
+`Worker delegation:` 行里如实说明，而不是假装可以（SPEC §7.4）。
+
+### 怎么知道它发生了
+
+`/router status` 会显示 `🪄 active (round x/y, esc a/b, fail streak n)`，worker 回报后追加
+`Orchestration spend: $X · N/M workers reported`，审计结束后还有 `Last audit: …`。进入编排时还会
+往对话里写一条路由通知（SPEC §13.1），所以不必去读计数器也能看出这一轮的形态。
+
+### 什么时候不触发
+
+`fast` 判定；`orchestration.mode: off`（或 `/router orchestrate off`）；组合里没有 `subagent`
+工具；或解析不到 Smart 模型——这些情况下这一轮就只是跑在 Smart 上，没有委派、也没有审计。
 
 ## 开发
 
