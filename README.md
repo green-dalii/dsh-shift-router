@@ -18,6 +18,7 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-81.82%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>

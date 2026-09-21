@@ -242,8 +242,9 @@ crawl that topic and npm; nothing needs submitting to a private registry.
 ## Releasing
 
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry (Keep a Changelog).
-2. Update the READMEs if user-facing behavior changed — including the test-count and
-   Node badges at the top.
+2. Update the READMEs if user-facing behavior changed — including the badges at the top:
+   the test count, the Node line, and the coverage number (take it from the `test:coverage`
+   summary; the badge states the lines figure, and drops to a lower colour when it falls).
 3. Run the gates (SPEC §14): `npm run typecheck && npm run build && npm test && npm run test:e2e`.
    CI re-runs `typecheck`, `build` and `test:coverage` on Node 22.19 and 24 for every push and pull
    request, and the credential-free e2e on `main` — so a red laptop is not the only thing standing
