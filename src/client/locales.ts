@@ -140,7 +140,7 @@ export type ShiftRouterCardDict = Record<ShiftRouterCardKey, string>
 /** English copy. */
 export const en: ShiftRouterCardDict = {
   title: 'Shift-Router',
-  description: 'Two-tier model routing: fast for routine work, smart for complex work. Author: green-dalii',
+  description: 'Two-tier routing by expected cost: routine turns on the Fast chain, hard turns on Smart — with model fallbacks, failover and orchestration.',
   expand: 'Show settings',
   collapse: 'Hide settings',
   readOnly: 'This deployment stores settings read-only.',
@@ -270,7 +270,7 @@ export const en: ShiftRouterCardDict = {
 /** Simplified Chinese copy. */
 export const zh: ShiftRouterCardDict = {
   title: 'Shift-Router',
-  description: '两层模型路由：日常任务走 Fast 层，复杂任务走 Smart 层。作者：green-dalii',
+  description: '按期望成本做双层路由：日常任务走 Fast 链、复杂任务走 Smart——带模型回退、故障转移与编排。',
   expand: '展开设置',
   collapse: '收起设置',
   readOnly: '本部署的设置为只读。',

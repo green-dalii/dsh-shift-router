@@ -4,7 +4,7 @@
 
 # dsh-shift-router
 
-**面向 DeepSeek Harness 的双层模型路由器** —— 基于 LLM 裁判的自动执行/判定路由、多模型回退链、指数退避运行时故障转移，以及任务级编排。
+**面向 DeepSeek Harness 的双层模型路由器** —— LLM 裁判按**期望成本**把每一轮交给便宜的 Fast 层或 Smart 层，并配以多模型回退链、指数退避故障转移、缓存感知切换，以及「Smart 规划、Fast 执行」的任务级编排。
 
 由 [pi-shift-router](https://github.com/green-dalii/pi-shift-router) 适配到 DSH 的版本。
 移植基线为上游 **v1.0.0**，对齐目标为上游 **v1.6.0** —— 逐版本对照见

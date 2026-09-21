@@ -4,7 +4,7 @@
 
 # dsh-shift-router
 
-**A two-tier model router for DeepSeek Harness** — automatic execution/judgment routing with an LLM Judge, multi-model fallback chains, exponential-backoff runtime failover, and task-level orchestration.
+**A two-tier model router for DeepSeek Harness** — an LLM Judge sends each turn to the cheap Fast chain or the Smart chain by **expected cost**, with multi-model fallback chains, exponential-backoff failover, cache-aware switching, and task-level orchestration (Smart plans, Fast workers execute).
 
 A DSH adaptation of [pi-shift-router](https://github.com/green-dalii/pi-shift-router).
 Ported from upstream **v1.0.0**; aligned with upstream **v1.6.0** — see
