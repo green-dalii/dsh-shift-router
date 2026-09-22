@@ -39,7 +39,7 @@
  * this never touches the user's real DSH_HOME.
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -157,6 +157,42 @@ function assert(condition, message) {
   console.error(`  ✗ ${message}`)
   process.exitCode = 1
 }
+
+/**
+ * Fail fast when a prerequisite is missing.
+ *
+ * `dsh plugin … add` forwards to **pnpm on PATH** (the official publish doc says
+ * so), and this script installs a bundle twice. Because `assert()` records rather
+ * than throws, one missing tool otherwise surfaces as half a dozen unrelated red
+ * assertions — no namespace registered, an empty model catalog, failed
+ * packed-install checks — and the real cause is buried in the first line of the
+ * noise. This turns that into one sentence that names the fix.
+ */
+function preflight() {
+  const problems = []
+  const dsh = spawnSync(DSH, ['--version'], { encoding: 'utf8' })
+  if (dsh.error || dsh.status !== 0) {
+    problems.push(
+      `  • the dsh CLI is not runnable as "${DSH}"` +
+        (process.env.DSH_BIN
+          ? ' (that path came from $DSH_BIN)'
+          : ' — install @deepseek-ai/dsh, or set $DSH_BIN to its bin'),
+    )
+  }
+  const pnpm = spawnSync('pnpm', ['--version'], { encoding: 'utf8' })
+  if (pnpm.error || pnpm.status !== 0) {
+    problems.push(
+      '  • pnpm is not on PATH — `dsh plugin … add` forwards to it, so every install below would fail; install pnpm (`npm i -g pnpm`, or corepack)',
+    )
+  }
+  if (problems.length === 0) return
+  console.error('\n✗ missing prerequisites for the e2e:')
+  console.error(problems.join('\n'))
+  console.error('')
+  process.exit(1)
+}
+
+preflight()
 
 try {
   step(`scratch DSH_HOME: ${home}`)
