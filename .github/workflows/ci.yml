@@ -51,6 +51,14 @@ jobs:
         with:
           node-version: '22.19'
           cache: npm
+      # `dsh plugin ... add` shells out to pnpm on PATH (the official publish doc
+      # says so, and the GitHub-hosted Ubuntu runner has no pnpm by default). The
+      # first run failed with `dsh: pnpm not found on PATH — install pnpm to manage
+      # profile plugins`, which then cascaded into every later assertion; this
+      # installs pnpm for the rest of the job.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - run: npm ci
       - run: npm run build
       # Resolve the `dsh` bin through npx into a per-step cache (no system write),
