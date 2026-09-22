@@ -15,7 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defect now has a second, automatic defence instead of the maintainer's laptop. `vitest.config.ts`
   measures coverage over the shipping source only (the e2e harnesses and the build config have their
   own gates) and enforces two bars: a floor over everything, and upstream's core-module bar on the
-  decision modules. `npm run test:coverage` is the new entry point.
+  decision modules. `npm run test:coverage` is the new entry point. The credential-free e2e job is
+  marked informational: it depends on installing the harness CLI from npm, which upstream leaves
+  unresolvable during its own publishes (a half-published `0.1.5-rc.3` made the pinned `0.1.5-rc.2`
+  uninstallable), so it cannot be allowed to fail the build. `e2e/run-e2e.mjs` also gained a
+  `preflight()` that names a missing `dsh`/`pnpm` in one line instead of letting one cause surface
+  as six unrelated red assertions, and it now treats an empty `$DSH_BIN` (what a failed CI step
+  actually produces) as unset.
 
 ### Documentation
 

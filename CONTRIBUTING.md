@@ -247,9 +247,13 @@ crawl that topic and npm; nothing needs submitting to a private registry.
    summary; the badge states the lines figure, and drops to a lower colour when it falls).
 3. Run the gates (SPEC §14): `npm run typecheck && npm run build && npm test && npm run test:e2e`.
    CI re-runs `typecheck`, `build` and `test:coverage` on Node 22.19 and 24 for every push and pull
-   request, and the credential-free e2e on `main` — so a red laptop is not the only thing standing
-   between a change and a user. `test:coverage` enforces the bars in `vitest.config.ts`: a floor over
-   all shipping source, plus upstream's core-module bar on the decision modules.
+   request — those are the blocking gates. `test:coverage` enforces the bars in `vitest.config.ts`:
+   a floor over all shipping source, plus upstream's core-module bar on the decision modules.
+   The credential-free e2e also runs in CI, but **informational only**: it has to fetch the harness
+   CLI from npm, and the harness's own publishes leave that unresolvable for hours at a time (a
+   half-finished `0.1.5-rc.3` release made `@deepseek-ai/dsh@0.1.5-rc.2` uninstallable — ETARGET on
+   `dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3`). Run it locally against your installed
+   harness, where it is authoritative.
 4. `npm pack --dry-run` and confirm `files` still ships the artifacts, the patch and the docs.
 5. Publish: `npm publish` (runs `prepare`, then `prepublishOnly`), or hand out the tarball.
 6. Tag the release (`git tag vX.Y.Z`) and push main + the tag — both READMEs pin the git

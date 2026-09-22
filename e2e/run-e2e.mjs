@@ -47,7 +47,10 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..')
-const DSH = process.env.DSH_BIN ?? 'dsh'
+// `??` does NOT fall back on an empty string, and a GitHub Actions step whose
+// output never got set yields exactly `DSH_BIN=""` — so trim, then fall back.
+// (Learned the hard way: `spawnSync('')` throws ERR_INVALID_ARG_VALUE.)
+const DSH = process.env.DSH_BIN?.trim() || 'dsh'
 const KEEP = process.argv.includes('--keep')
 const PROFILE = 'shift-router-e2e'
 /** Separate profile for the packed-artifact boot, in the same scratch home. */
@@ -170,11 +173,13 @@ function assert(condition, message) {
  */
 function preflight() {
   const problems = []
-  const dsh = spawnSync(DSH, ['--version'], { encoding: 'utf8' })
+  // An empty binary makes spawnSync throw instead of failing the check, so ask
+  // the question the check actually cares about: is there something to run?
+  const dsh = DSH ? spawnSync(DSH, ['--version'], { encoding: 'utf8' }) : { error: new Error('empty') }
   if (dsh.error || dsh.status !== 0) {
     problems.push(
       `  • the dsh CLI is not runnable as "${DSH}"` +
-        (process.env.DSH_BIN
+        (process.env.DSH_BIN?.trim()
           ? ' (that path came from $DSH_BIN)'
           : ' — install @deepseek-ai/dsh, or set $DSH_BIN to its bin'),
     )
