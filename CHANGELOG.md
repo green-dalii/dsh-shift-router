@@ -22,6 +22,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `preflight()` that names a missing `dsh`/`pnpm` in one line instead of letting one cause surface
   as six unrelated red assertions, and it now treats an empty `$DSH_BIN` (what a failed CI step
   actually produces) as unset.
+- **Pluggable Judge sources (upstream v1.7.0).** `routing.judge.mode` selects where the verdict comes
+  from: `fast-chain` (the default, behaviour unchanged), `custom` (a dedicated judge chain in
+  `routing.judge.models`), or `decision`. `normalizeJudgeMode()` makes the migration explicit — a
+  `judge.models` list stored without a `mode`, which the old merge would have silently discarded,
+  becomes `custom` and is logged, and an unrecognised mode falls back to `fast-chain` and is logged.
+- **The judge availability ladder.** The judge chain is one ordered, deduplicated list: the
+  configured source, then the Fast chain. A configured judge that is unusable *or* fails at call time
+  now falls through to the Fast chain in the same turn instead of costing that turn its routing.
+- **A decision model as Judge — `mode: 'decision'` (Jev / System One class, opt-in).** One POST to
+  `<routing.judge.decision.baseUrl>/v1/systemone` carries a `choice` question for the tier and a
+  `noul` question for orchestration; `probabilities[choice]` is what θ eats, so there is no reply to
+  parse and no malformed-reply failure class, and an out-of-set choice is never guessed — the walk
+  moves on. The key is a credential *reference* resolved through the harness credential seam on every
+  call (a rotated key reaches the next verdict, and no secret enters the settings document), and
+  `DECISION_MIN_JUDGE_TIMEOUT_MS` floors the call at 15 s, taken from upstream's measured 1.4–6.6 s
+  per verdict rather than from the feature list. A decision response reports the resolved model id, so
+  the `jev-latest` alias stays observable and a version move is logged.
+
+### Changed
+
+- **"Judge unavailable" now means *no routing*, not *hold*.** Rung 3 of the ladder **releases** the
+  turn: nothing is switched (not even the first-turn initial resolution), orchestration is cleared,
+  the wire sees the session's own selected model, and the session is told **once per session** rather
+  than once per turn. A hold is now only what the word says — a verdict that arrived but is too weak
+  to act on (`window.minConfidence`) — and it keeps the per-turn notice. A hold was a routing decision
+  taken without evidence, and a sticky one: after an upgrade it would keep the Smart model for the
+  rest of the session on a verdict that had stopped arriving.
 
 ### Documentation
 
@@ -51,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `expandEnv`, the pi registry) replaced by DSH's. Every model fact carries its source and retrieval
   date, and each file opens by stating that the runtime catalog — not this page — is the authority on
   what a deployment can call.
+- **SPEC gained the ladder, the three judge sources and the decision protocol** (§6.3/§6.4/§6.6);
+  §2 now splits `released` from `held` in `RouteDecision`; §10 records why the Judge's *budget* keys
+  stay flat while its *source* is nested; §13.1 records the once-per-session release notice.
+- **Both READMEs gained the five new configuration rows, a *Pluggable Judge* feature bullet, and the
+  corrected sentence that called every Judge outage a hold.**
+- **ALIGNMENT §R12 records the audit**: why the decision transport belongs in this plugin rather than
+  at the LLM seam (the seam is chat-shaped, and routing a decision request through it would mean
+  inventing a private encoding), the two places we go further than upstream (the credential seam, and
+  a timeout floor copied from a measurement rather than a feature list), the one we do not need
+  (`chatCapableModels()` — a DSH decision endpoint is not a catalog entry, so it cannot be picked as a
+  tier model), and what remains unverified (no live endpoint).
+- **ROADMAP targets upstream v1.7.0** and names the real v1.6.0 tag commit (`4d1b546`; the previously
+  recorded `69ffb34` was not the tag), with the R12 delivery table.
 
 ## [0.6.0] - 2026-09-20
 

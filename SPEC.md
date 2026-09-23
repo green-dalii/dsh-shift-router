@@ -149,7 +149,8 @@ interface RouteDecision {
   switchTo: ResolvedModel | null
   action: 'upgrade' | 'downgrade' | 'stay' | 'manual'
   decisionTier: Tier   // the tier this turn runs at, after EV + hold + manual
-  held: boolean        // the Judge was unusable; the router held position
+  held: boolean        // no usable verdict; the router did not act on one
+  released: boolean    // …and it also let the wire through (no Judge at all)
 }
 ```
 
@@ -161,16 +162,30 @@ Order of evaluation:
    never taken from the raw verdict: `/route-force <provider/model>` while the
    Judge says `smart` must not report `decisionTier: 'smart'`, or an
    orchestration turn could start on a user-pinned model (§7.1).
-2. **Judge usability** — if `judgeResult.source === 'fallback'`, the router
-   **holds**: `decisionTier = state.currentTier`, `held = true`,
-   `switchTo = null`, `action = 'stay'`. The verdict is pushed to the window as
-   a **hold entry** (`hold: true`). A hold never counts toward the downgrade
-   streak and never lets an earlier fast streak survive — it resets it (§4).
-   *Rationale: "When the Judge is unavailable, hold position — never guess."
-   Treating an outage as a decisive `fast` verdict silently downgrades a smart
-   session after two outages.*
+2. **No Judge at all** — `judgeResult.source === 'fallback'` is the ladder's
+   rung 3 (§6.3), and the router **releases** the turn: `planNoJudge()` returns
+   `decisionTier = state.currentTier`, `held = true`, `released = true`,
+   `switchTo = null`, `action = 'stay'`. `agent/request` then passes the
+   incoming config through untouched — the turn runs on the session's own
+   selected model, which is what "as if the plugin were not installed" means;
+   no switch is applied and none is resolved either, not even the first-turn
+   initial resolution. Orchestration never starts on a released turn (§7.1).
+   The turn still pushes a **hold entry** (`hold: true`) to the window: it
+   carries no verdict, so it counts toward no downgrade streak and lets no
+   earlier fast streak survive (§4).
+   *Rationale: "With no Judge there is no router." A hold is a routing decision
+   taken without evidence, and it is sticky — after an upgrade it keeps the
+   Smart model for the rest of the session on a verdict that has stopped
+   arriving. Treating an outage as a decisive `fast` verdict would instead
+   downgrade a smart session after two outages. Release is the neutral answer;
+   it is deliberately not a silent downgrade, because the wire sees the user's
+   own model rather than a tier the router chose.*
 3. **EV decision** (§3) — compute `pSmart` and `θ_eff`. A verdict whose raw
-   `confidence` is below `window.minConfidence` is the same hold as step 2.
+   `confidence` is below `window.minConfidence` is a **hold**, not a release:
+   `decisionTier = state.currentTier`, `held = true`, `released = false`,
+   `switchTo = null`, `action = 'stay'`. A verdict did arrive — it is merely too
+   weak to act on — so the router keeps the wire and stays where it is, and the
+   verdict is pushed as a hold entry.
 4. **Immediate upgrade** — decision `smart` while `currentTier === 'fast'`:
    resolve the Smart tier's best healthy model; on success the window is
    **cleared**, `upgradeCount += 1`, `action = 'upgrade'`.
@@ -202,8 +217,9 @@ While the router is enabled (`enabled && routing.mode === 'auto'`), the router
   decision.
 - `/route-force` is the escape hatch; `/router off` (or `routing.mode` `off`)
   returns control to the harness.
-- The Judge's own model is never the Smart tier's model (it walks the fast
-  chain; see §6.4).
+- The Judge's own model is never the Smart tier's model: the default source is
+  the fast chain, and a configured source (§6.4) is one the user set for judging
+  (§6.3).
 
 ---
 
@@ -328,22 +344,63 @@ the implementation; adding one would violate §0.
 
 ### 6.3 Failure policy
 
-`classify()` walks the whole fast chain in priority order, skipping models in
-cooldown. Every failed call (failover or not) tries the next model. When **all**
-models fail it returns `{ tier: 'fast', source: 'fallback' }`.
+`classify()` walks the **judge chain** in priority order, skipping entries in
+cooldown. Every failed call (failover or not) tries the next entry. When **all**
+entries fail it returns `{ tier: 'fast', source: 'fallback' }`.
 
-- `source === 'fallback'` is a **hold**, not a verdict (§2 step 2). The returned
-  `tier` value is only a type-compatible placeholder and must never be treated
-  as evidence.
-- Failover-worthy failures (429 / 402 / 5xx / quota / usage-limit /
-  unsupported-model) call `onFailure` so the caller cools the model in the shared
-  map. Network errors, timeouts, auth/config errors and 200-but-unparseable
-  replies do **not** cool anything down.
+The chain is the **availability ladder** — one ordered list, resolved before the
+walk — so a single pass covers both ways an entry can fail: it may not resolve at
+all (retired model, removed key, unknown provider) or it may fail *at call time*
+(429, 402, 5xx, timeout, cooldown).
 
-### 6.4 Judge model
+| Rung | Source | When |
+|---|---|---|
+| 1 | the configured judge (§6.4) | `custom` / `decision` modes only |
+| 2 | the Fast tier chain | the default source, and what rung 1 falls through to |
+| 3 | **no routing at all** | every rung-1 and rung-2 entry failed |
 
-The Judge runs on the **fast tier chain** (never the Smart tier): it is a
-one-shot classification, and paying Smart prices for it defeats the router.
+Rung 3 is a **release**, not a hold: the router stops owning the turn (§2 step 2),
+orchestration is cleared, and the session is told **once** — not once per turn.
+`source === 'fallback'` is the only signal for it; the returned `tier` value is a
+type-compatible placeholder and must never be treated as evidence.
+
+Rung 1 falling through to rung 2 is the point of the ladder: an unusable or
+transiently failing dedicated judge must not cost the turn its routing while a
+working judge is one rung away.
+
+Failover-worthy failures (429 / 402 / 5xx / quota / usage-limit /
+unsupported-model) call `onFailure` so the caller cools the model in the shared
+map. Network errors, timeouts, auth/config errors and 200-but-unparseable
+replies do **not** cool anything down.
+
+### 6.4 Judge source
+
+`routing.judge.mode` selects where the verdict comes from. The default is
+`fast-chain` and every other value is opt-in.
+
+| Mode | Chain |
+|---|---|
+| `fast-chain` | the Fast tier chain — the legacy behaviour |
+| `custom` | `routing.judge.models`, in priority order |
+| `decision` | `routing.judge.decision` — a decision model (§6.6) |
+
+`normalizeJudgeMode()` is the migration contract: `mode` is honoured when it is
+one of the three; `models` present with **no** `mode` migrates to `custom` (the
+old merge would have silently discarded the list, and inferring `custom` is the
+only reading that does not throw the user's intent away); an absent or unknown
+`mode` is `fast-chain`, so a typo or a hand-edit can never brick routing.
+
+An unrecognised `mode` or an inferred `custom` is logged. In `custom` and
+`decision` mode rung 1 resolves **only** what the user configured — never a
+cheap-model substitution, because judging on a model the user did not choose is
+a different decision from the one they asked for. When rung 1 resolves to
+nothing the ladder logs that and uses the Fast chain.
+
+Never the Smart tier: the Judge is a one-shot classification, and paying Smart
+prices for it on every turn defeats the router.
+
+The Judge's verdict is a `JudgeResult` in both modes, so nothing downstream of
+`classify()` knows which source answered.
 
 ### 6.5 Parsing
 
@@ -355,6 +412,53 @@ Tolerant, layered, pure:
 - reason: JSON `reason`/`why` string, collapsed to one line, capped at 120 chars.
 - orchestrate: JSON boolean (`orchestrate`/`delegate`/`subagents` aliases).
 
+### 6.6 Decision models (`mode: 'decision'`)
+
+A **decision model** answers with a choice and a calibrated probability instead
+of prose — the TypeSafe Jev / System One class. One POST per judgement, with
+every question in that one request:
+
+```
+POST <routing.judge.decision.baseUrl>/v1/systemone
+{ model, state: <prompt>,
+  questions: { tier:        { type: 'choice', instructions, criteria: { fast, smart } },
+               orchestrate: { type: 'noul',   instructions, criteria: { true, false } } } }
+```
+
+- **Parse.** Answers are read from an `answers` envelope or a bare map.
+  `tier.choice` must be exactly `fast` or `smart` — **an out-of-set choice is not
+  a verdict** and returns null, so the walk continues to rung 2. There is no
+  text-parsing step, so the 200-but-unparseable class does not exist here.
+- **`confidence` is `probabilities[choice]`** (falling back to a numeric
+  `confidence`), which is already probability-shaped: `pSmartOf()` (§3) consumes
+  it unchanged, and the verdict's `tier` still fills the EV's `pSmart` with the
+  *reported* probability rather than a re-scaled guess.
+- **`orchestrate`** is the `noul` number ≥ 0.5 (accepting a nested `.noul`).
+- **`reason` does not exist.** The response carries no prose, so `reason` stays
+  undefined and verbose logs show the **resolved** model id instead. A decision
+  response reports the id behind an alias (`jev-latest` → `jev-1.13.0`), and a
+  change between calls is logged: that is what keeps the default alias
+  observable rather than quietly shifting the distribution behind θ.
+- **Timeout floor.** A decision call is floored at
+  `DECISION_MIN_JUDGE_TIMEOUT_MS` (15 s), measured rather than assumed
+  (1.4–6.6 s per verdict, dominated by service-side inference). `judgeTimeout`
+  alone would abort most decision calls and release every turn.
+- **Credentials** come from the credential seam: `apiKeyRef` is a
+  `CredentialRef`, resolved **per call** through `ctx.credentials` and never
+  cached, so a rotated key reaches the next judgement. An empty or absent ref
+  means the endpoint authenticates ambiently. The seam is an optional
+  dependency: with no credentials provider the endpoint simply does not resolve
+  and the ladder uses rung 2.
+- **The plugin owns this transport**, because the harness LLM seam is
+  chat-shaped (`LlmCallConfig` in, `StreamChunk` out) and a decision request has
+  no chat encoding — routing it through the seam would mean inventing a private
+  one. Escaping a *provider* seam would be a defect; this is a protocol the seam
+  structurally cannot express. Recorded as a deliberate divergence with its
+  reasoning in ALIGNMENT §R12.
+- **Not a chat model.** A decision endpoint is not registered with the LLM seam
+  and is not a catalog entry, so it cannot be selected as a Fast/Smart tier
+  model — one less filter to maintain than a catalog that mixes the two.
+
 ---
 
 ## 7. Task-level orchestration
@@ -365,13 +469,18 @@ Tolerant, layered, pure:
 
 1. `config.enabled`
 2. `orchestration.mode === 'auto'`
-3. `decision.decisionTier === 'smart'` (post-EV, post-hold — **not** the raw
+3. `decision.held === false`. A turn the router did not decide is not a turn it
+   may hand to a CTO: this covers both a **hold** (a verdict too weak to act on)
+   and a **release** (no Judge at all, §6.3), which carries `held: true` for
+   exactly this reason. Without it, a released turn on a session that had already
+   upgraded would start an orchestration loop on the strength of no verdict.
+4. `decision.decisionTier === 'smart'` (post-EV, post-hold — **not** the raw
    verdict). Because `decisionTier` only reports `smart` when the router
    actually owns a resolvable Smart model for the turn (SPEC §2), entry needs no
    separate "is Smart resolvable?" precondition and there is no config knob that
    can force the orchestrator prompt onto a non-Smart run.
-4. no Judge veto: `judgeResult.orchestrate !== false`
-5. the `subagent` tool is available — otherwise degrade to a plain Smart run
+5. no Judge veto: `judgeResult.orchestrate !== false`
+6. the `subagent` tool is available — otherwise degrade to a plain Smart run
 
 Simple tasks never orchestrate. There is no "always" mode.
 
@@ -594,14 +703,23 @@ it for users and the GUI card (§12) renders it with per-field hints. Keeping a
 third copy here would only add a surface that drifts, so this section states the
 *shape* of the contract instead:
 
-- Every leaf has a default **except three that are intentionally unset** —
+- Every leaf has a default **except four that are intentionally unset** —
   `routing.window.threshold` and `routing.cacheAware.sameFamilyThreshold` (legacy
-  knobs that must stay inert until a user writes a value, §15) and
-  `routing.economics.mode` (a preset selector). An empty config row is still a
-  working no-op.
+  knobs that must stay inert until a user writes a value, §15),
+  `routing.economics.mode` (a preset selector) and `routing.judge.mode`, which
+  must stay absent so that a stored `judge.models` list is recognisable as the
+  pre-0.7.0 "use these models to judge" shape and migrates to `custom` instead of
+  being silently ignored (§6.4). An empty config row is still a working no-op.
 - `tiers.<tier>.label` and `.description` are display-only strings; the tier
   chains themselves are `{provider, model, priority}[]`, priority ascending =
   fallback order.
+- Judge configuration has exactly two homes and no key appears in both: the flat
+  `routing.judgeTimeout` / `judgeMaxTokens` / `judgePromptCap` are the Judge's
+  **budget** on every source (§6.6's decision floor is applied on top of
+  `judgeTimeout`), while the nested `routing.judge` object is its **source** —
+  `mode`, `models` (§6.4) and `decision` (§6.6). The split is deliberate: renaming
+  the three budget keys would break every existing config for no gain, and a
+  budget is a different fact from a source.
 - Invalid values fail plugin load (Schemastery validation), never silently coerce.
 - Layering — later wins, and a patch replaces the target row's **whole** `config`
   value: bundles' patches → profile `cordis.patch.yml` → the `shift-router`
@@ -770,6 +888,11 @@ model per request, §1.1), so nothing else would announce it.
   rejected step, a disabled router, a non-`auto` mode, or a turn where no model resolved
   at all (nothing reached the wire; that condition is stated at startup and in
   `/router status`).
+- **A release notices once per session, not once per turn.** Rung 3 (§6.3) repeats
+  every turn the Judge stays unavailable, so a per-turn line would be noise about a
+  condition that has not changed; the first release is the news, and `/router status`
+  reports it thereafter. A hold — a verdict too weak to act on — is not a release and
+  keeps the per-turn rule above.
 - **Content.** One line: the prefix, the tier transition with the configured labels, the
   model transition (`model` alone while the provider is unchanged, `provider/model` once
   it differs), the action (`upgrade`/`downgrade`/`stay`), the Judge's `reason` and

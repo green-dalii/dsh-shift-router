@@ -8,16 +8,19 @@ adaptation of [pi-shift-router](https://github.com/green-dalii/pi-shift-router).
 This project versions on its **own** line. It never claimed numeric parity with
 upstream, and the earlier note that "the original's v0.x feature line maps onto
 our v0.x line one-to-one" is retired: upstream has moved from v0.x through
-v1.6.0 while this project's own releases continued in parallel.
+v1.7.0 while this project's own releases continued in parallel.
 
 - **Port baseline**: upstream **v1.0.0** (2026-08-14) — the commit date of this
   project's first commit, matching upstream's task-level-orchestration release.
-- **Alignment target**: upstream **v1.6.0** (`69ffb34`, 2026-09-18).
-- **Aligned through**: upstream **v1.6.0**, for the P0 (correctness) + P1
-  (decision core) scope plus the P2 round — **shipped in v0.6.0**. What remains is the
-  GUI (card-button) form of worker-route authorisation and the v1.6.0 pricing
-  single-source work (see Planned). The delivery audit is in
-  [`ALIGNMENT.md`](ALIGNMENT.md).
+- **Alignment target**: upstream **v1.7.0** (`932675d`, 2026-09-23) — pluggable
+  Judge sources, the decision (Jev) Judge, and the judge availability ladder.
+- **Aligned through**: upstream **v1.6.0** (`4d1b546`, 2026-09-18) for the P0
+  (correctness) + P1 (decision core) scope plus the P2 round — **shipped in
+  v0.6.0** — and the **v1.7.0** round (R12), implemented in the working tree and
+  awaiting its release. What remains is the GUI (card-button) form of
+  worker-route authorisation, the v1.6.0 pricing single-source work, and a
+  real-machine check of `mode: 'decision'` (see Planned). The delivery audit is
+  in [`ALIGNMENT.md`](ALIGNMENT.md).
 - The full audit, including what was deliberately **not** ported and why, lives
   in [`ALIGNMENT.md`](ALIGNMENT.md); the normative contract is
   [`SPEC.md`](SPEC.md).
@@ -39,6 +42,7 @@ v1.6.0 while this project's own releases continued in parallel.
 | v1.5.0 | per-worker cost attribution | ✅ shipped in the P2 round (bounded worker ledger, attributed from the child session) |
 | v1.5.1 | verbose logs to a file | ⛔ not needed (DSH does not hand the terminal to plugins); diagnostics use `ctx.logger` (now supplemented by route notices — see R9) |
 | v1.6.0 | model catalog from the host registry (single source of truth) | ✅ principle shipped in v0.6.0 (GUI card dropdowns — R7); the DSH-side pricing replacement is ⏳ P3 |
+| v1.7.0 | pluggable Judge sources (`fast-chain`/`custom`/`decision` + `normalizeJudgeMode()`), a decision model (Jev / System One class) as Judge, and the judge availability ladder ending in **no routing at all** | ✅ R12 (see below; audit in [`ALIGNMENT.md`](ALIGNMENT.md) §R12) — `mode: 'decision'` is implemented and unit-tested but not yet verified against a live endpoint |
 
 ## Released
 
@@ -137,6 +141,25 @@ this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13
 | `ux.routerLogVerbose` now means what it says: every judged turn gets a notice, not just every switch | ✅ |
 | No status bar is invented — DSH has no statusbar/toolbar slot; the harness-proven notice channel is used instead | ✅ |
 
+## Judge source + decision model round (R12, in progress)
+
+Upstream v1.7.0 asked *where* a verdict may come from. The audit — including why
+the decision transport belongs in this plugin rather than at the LLM seam, and
+what we deliberately do differently from upstream — is in
+[ALIGNMENT.md](ALIGNMENT.md) §R12; the rules are SPEC §6.3/§6.4/§6.6.
+
+| Item | Status |
+|---|---|
+| `routing.judge.mode` (`fast-chain` / `custom` / `decision`) + `routing.judge.models`, with `normalizeJudgeMode()` migrating `models`-without-`mode` to `custom` (logged) and an unknown mode back to `fast-chain` (logged) | ✅ |
+| Judge availability ladder as one ordered, deduplicated chain: the configured source, then the Fast chain | ✅ |
+| Rung 3 = **no routing at all** — no switch (not even the first-turn initial resolution), no orchestration, the wire released to the session's own model, window records a hold entry, **one notice per session** (`planNoJudge()`) | ✅ |
+| `mode: 'decision'`: one POST to `<baseUrl>/v1/systemone` carrying a `choice` question (tier) and a `noul` question (orchestrate); `probabilities[choice]` → `confidence`; an out-of-set choice is never guessed — the walk continues | ✅ |
+| Decision credentials resolved **per call** through the harness credential seam (settings hold only the reference name); the seam is an optional dependency, so a deployment without it falls to rung 2 instead of failing to load | ✅ |
+| `DECISION_MIN_JUDGE_TIMEOUT_MS` (15 s) floor, taken from upstream's measured 1.4–6.6 s per verdict rather than from the feature list | ✅ |
+| Resolved-model observability behind an alias (`jev-latest` → `jev-1.13.0`), logged when it moves | ✅ |
+| Decision-protocol wire shapes (request body, response parsing, out-of-set rejection, `noul` threshold) unit-tested against fixtures taken from upstream's implementation | ✅ (live verification is a Planned item) |
+| Release is distinguishable from hold end to end: `RouteDecision.released`, a `no judge · not routing` notice, `/router status` wording, and `agent/request` leaving the wire alone for the whole turn | ✅ |
+
 ## Planned
 
 | Feature | Priority | Notes |
@@ -155,6 +178,8 @@ this plugin — is in [ALIGNMENT.md](ALIGNMENT.md) §R9; the rules are SPEC §13
 | ~~Packaged-install verification gate~~ | ~~P3~~ | ✅ delivered: `tests/packaged-install.test.ts` (built-artifact imports ⊆ `dependencies` ∪ `peerDependencies`, browser requires ⊆ platform seed ∪ `dsh.client`, `files` completeness) + an `npm pack` → install → **boot** scenario in `npm run test:e2e` |
 | Unit tests for `src/index.ts` **event-callback bodies** | P3 | the load-safety and `agent/pre-step` paths are covered; the remaining branches are the `agent/request-error` cooldown ladder and the `agent/request` rewrite |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
+| GUI/CLI: reach the `routing.judge.*` leaves | P3 | **Neither registry lists them yet**, so a decision judge is configured through the settings document only. Both registries are hand-maintained (`CONFIG_FIELDS` / `CARD_FIELDS`) and have no **string** leaf type, which `decision.baseUrl` / `.model` / `.apiKeyRef` need; `mode` (enum) and `models` (chain) can go in as soon as that exists |
+| `mode: 'decision'` **live** verification against TypeSafe | P2 | needs a key; until then the mode ships as "implemented and unit-tested, not live-verified" (ALIGNMENT §R12.4) |
 
 
 ## Explicitly excluded (by design)

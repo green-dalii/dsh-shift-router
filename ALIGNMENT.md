@@ -758,6 +758,69 @@ pi 向导语法），并执行维护者的硬要求：**每条模型事实都要
 adapter 的 `DEFAULT_MODELS`、真实部署的 `~/.dsh/settings.yaml`（标注为「某部署的示例」而非通用
 清单）、OpenRouter 公开模型 API 与官方 provider 指南；无法核实的一律不写。
 
+## R12：上游 v1.7.0 —— 可插拔裁判、决策模型与可用性阶梯
+
+上游 v1.7.0（tag `932675d`，「A judge that answers with a number」）有三项 Added：① 可插拔
+`routing.judge.mode`（`fast-chain` / `custom` / `decision`）+ `routing.judge.models` 与
+`normalizeJudgeMode()`；② 决策模型 Jev（TypeSafe System One 类，Beta、非默认、菜单里排第三）；
+③ 判定可用性阶梯（配置的裁判链 → LLM 裁判 → **完全不路由**）。维护者提问：**Jev 能不能作为 Judge
+放进本项目？** 结论：能，而且放进本插件才是 DSH 下的正确分层 —— 理由见 R12.1。
+
+### R12.1 分层判断：为什么 decision 传输留在这个插件里
+
+先纠正一个直觉：上游也是把 decision 传输放在**插件内**的。上游 `src/judge.ts`（v1.7.0，480 行）
+自己 `await fetch()` 打 `${baseUrl}/v1/systemone`，自己带 `x-api-key` / `Authorization: Bearer` ——
+它没有走 pi 的模型 seam。原因是结构性的而非省事：**宿主的 LLM seam 是 chat 形状的**（DSH：
+`LlmCallConfig` 进、`StreamChunk` 出）。决策协议是「一个 `choice` 问题 + 一个 `noul` 问题、一次
+POST」，没有 chat 编码；要把它塞进 seam，就得把结构化问题编成聊天文本、再让适配器反解，等于**自己
+发明一套私有编码** —— 比一条直连、有文档的客户端更差，而且两处都要维护。
+
+因此本项目的选择是：`mode: 'decision'` 的传输留在 `judge.ts` 内，并把上游的 wire 形状**照抄而不是
+自创** —— `buildDecisionRequestBody()` / `parseDecisionResponse()` 的字段、`choice ∈ {fast, smart}`
+的硬约束（越界不猜，直接交下一级）、`probabilities[choice]` → `confidence`、`noul ≥ 0.5` →
+`orchestrate`，全部按上游实测实现。关键是 `probabilities[choice]` 本身就是概率，所以
+`pSmartOf()`（EV 规则）与它**零改动**对接：一个没有文本可解析、因而也没有「回复格式坏了」这一类
+失败的判定来源。
+
+### R12.2 我们比上游多做的两件事、少做的一件事
+
+- **多做（凭据走 seam）**：上游从 pi 的 models.json / auth 存储取 `apiKey`。本项目把密钥交给
+  **harness 凭据 seam**（`ctx.credentials.resolve(CredentialRef)`），**每次调用重新解析、不缓存**，
+  所以轮换后的 key 下一次判定即生效；settings 里只存**引用名**，不存密钥，卡片的 `apiKeyRef` 字段
+  因此是一个不带秘密的字符串。seam 是可选依赖（`ctx.get('credentials')`）：没有凭据提供方时端点
+  解析不出来，阶梯自然走 rung 2，插件不会因此加载失败。
+- **多做（超时下限来自测量）**：上游实测决策判定 **1.4–6.6 s**（api.typesafe.ai，2026-09-18，8 次
+  调用，458–2265 输入 token，与 payload 大小无关即供给侧瓶颈），因此
+  `DECISION_MIN_JUDGE_TIMEOUT_MS = 15000`。这一条必须照抄**测量**而不只是照抄功能：我们自己的
+  `judgeTimeout` 默认 5000，若不抬高下限，绝大多数决策调用会被路由器自己的超时打断、于是每轮
+  release —— 功能看起来在、实际完全不可用。
+- **少做（无需目录过滤）**：上游需要 `chatCapableModels()` 把决策端点从 Fast/Smart 选择器里滤掉，
+  因为在 pi 里它们与聊天模型同住一个 models 存储。DSH 下决策端点**不是** LLM seam 的 provider、也
+  不在运行时目录里，因此天然不可能被选成档位模型 —— 少一项需要维护的过滤。
+
+### R12.3 release：rung 3 改写了「裁判不可用」的语义
+
+阶梯的第三级不是 hold，而是**交还控制权**：不切换、清除编排、不应用任何模型覆盖（本轮改用会话自己
+选定的模型，连「首轮初始解析」也不做）、窗口只记一条 hold 条目、并且**每个会话只通知一次**。
+
+旧的「hold 住当前位置」是**没有证据也要做的路由决定**，而且是黏性的 —— 升级到 Smart 之后裁判死掉，
+它会用 Smart 跑完整个会话，理由是那个已经不再到达的判定。新语义是「没有裁判就没有路由器」，且它不是
+静默降级：上线的是用户自己选的模型，不是路由器挑的档位。这条改写了 SPEC §2 step 2 与 §6.3，属
+**刻意的语义修订**，不是等价改写；`RouteDecision` 因此新增 `released`（`released ⊆ held`：低置信度
+的 hold 仍保留上线控制权与逐轮通知）。
+
+### R12.4 残余不确定性
+
+- **决策协议未在真机验证。** 请求/响应形状、越界 choice 拒绝、`noul` 阈值、超时下限都有单测（fixture
+  按上游 wire 形状写死），但**没有 TypeSafe 密钥**，因此一次真实判定都没跑过。真机验证需要维护者提供
+  key；在此之前 `mode: 'decision'` 的定位是「协议已实现且可单测，未经真机端到端验证」。
+- **`jev-latest` 的默认值依赖上游的别名策略。** 上游的论证是「钉死版本会以最坏方式失败：厂商下线 →
+  裁判永远 hold」，所以默认用别名 + 把解析后的真实 id 记进日志，让版本移动可见。我们沿用该策略，但
+  **没有**核实 TypeSafe 当前是否仍提供 `jev-latest`，也没有核实其计费（上游称仅按输入计费、约
+  $0.0001/次）。
+- **决策模型的准确率结论是上游引用的第三方研究**（2026-09 独立研究：15 项标注任务中 14 项落后于最好
+  的 LLM）。我们没有独立复现，因此沿用上游姿态：Beta、非默认、菜单里非首选。
+
 ## 明确不对齐（附理由）
 
 规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再
@@ -780,5 +843,6 @@ adapter 的 `DEFAULT_MODELS`、真实部署的 `~/.dsh/settings.yaml`（标注�
 ## 下一轮做什么
 
 见 [`ROADMAP.md`](ROADMAP.md) 的 **Planned** 表 —— 它是待办与状态的唯一来源，本审计不再维护
-第二份。按该表口径，R10 时仍未闭合的是：GUI（卡片按钮）形态的 worker 路由授权、v1.6.0 的价格
-单一事实来源，以及 `agent/request-error` 冷却分支的单测。
+第二份。按该表口径，R12 时仍未闭合的是：GUI（卡片按钮）形态的 worker 路由授权、v1.6.0 的价格
+单一事实来源，以及 `agent/request-error` 冷却分支的单测；`mode: 'decision'` 的真机端到端验证在
+拿到 TypeSafe 密钥之前同样算未闭合（见 R12.4）。

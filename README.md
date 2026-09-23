@@ -25,7 +25,7 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 
 Routine turns shouldn't cost flagship money. The turns that matter shouldn't be left to a cheap model.
 
-Before every turn of a top-level agent, a small **LLM Judge** (running on your Fast-tier model chain) classifies the user's message as `fast` (routine) or `smart` (consequential). The chosen tier then drives the whole turn — thinking, tool calls, code edits — through the harness's own `agent/request` pipeline. The Judge only classifies; it never does the work.
+Before every turn of a top-level agent, a small **LLM Judge** (running on your Fast-tier model chain by default — see `routing.judge.mode`) classifies the user's message as `fast` (routine) or `smart` (consequential). The chosen tier then drives the whole turn — thinking, tool calls, code edits — through the harness's own `agent/request` pipeline. The Judge only classifies; it never does the work.
 
 ```text
 🦾 [deepseek-flash]     → fix the failing test
@@ -37,7 +37,8 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 
 ## Features
 
-- **Expected-cost routing** — the turn runs Smart iff `pSmart ≥ θ`, with `θ = 1/reworkPenalty`: the bar is price-independent, so the one knob is how badly a wrong downgrade hurts. Upgrades are instant; coming back down needs `downgradeMemory` **consecutive** decisive `fast` turns. A Judge outage or an unsure verdict is a **hold** — the router keeps its position instead of guessing.
+- **Expected-cost routing** — the turn runs Smart iff `pSmart ≥ θ`, with `θ = 1/reworkPenalty`: the bar is price-independent, so the one knob is how badly a wrong downgrade hurts. Upgrades are instant; coming back down needs `downgradeMemory` **consecutive** decisive `fast` turns. An unsure verdict is a **hold** — the router keeps its position instead of guessing.
+- **Pluggable Judge** — the verdict comes from the Fast chain by default; `routing.judge.mode` can point it at a dedicated Judge chain (`custom`) or at a **decision model** (`decision` — the TypeSafe Jev / System One class, Beta), which answers with a calibrated probability instead of prose, so there is no reply-parsing step and no malformed-reply failure class. Every configured source falls back to the Fast chain when it is unusable, and **with no Judge at all the router stops routing**: the turn runs on your own selected model, orchestration is cleared, and the session is told once.
 - **Cache-aware routing** — when Fast and Smart share a provider, the decision bar is divided by `sameFamilyPenalty` (default 1.5) and downgrades are held off while the prompt cache is warm, so switching to a cheaper model never costs more than staying put.
 - **Runtime failover** — 429 / 402 / 5xx / quota / usage-limit / unsupported-model failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h04m → 4h16m → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
 - **Task-level orchestration** — complex tasks run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, consecutive worker failures count an escalation, and once a cap is hit the `subagent` tool is denied outright and the system prompt switches to a "wrap up now" notice.
@@ -133,18 +134,23 @@ DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, b
 Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Shift-Router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
 
 Tier models are the only thing you must choose: **[docs/MODELS.md](docs/MODELS.md)** covers how
-to pick a Fast and a Smart model (the Fast chain also serves the Judge), what makes a good fallback,
+to pick a Fast and a Smart model (the Fast chain also serves the Judge by default), what makes a good fallback,
 and which models can take images.
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `true` | Master switch |
-| `tiers.fast.models` | `[]` | Fast-tier chain (`provider/model` + `priority`); also the Judge's model chain |
+| `tiers.fast.models` | `[]` | Fast-tier chain (`provider/model` + `priority`); also the Judge's default source |
 | `tiers.smart.models` | `[]` | Smart-tier chain |
 | `routing.mode` | `auto` | `auto` (default): judge + routing + failover + orchestration; `manual`: no judge, only explicit `/route-force` overrides; `off`: fully passive for model selection (commands/telemetry still work) |
-| `routing.judgeTimeout` | `5000` | Judge call timeout (ms) |
+| `routing.judgeTimeout` | `5000` | Judge call timeout (ms). `decision` mode floors it at 15000 — a decision verdict measured 1.4–6.6 s |
 | `routing.judgeMaxTokens` | `4000` | Max output tokens for a single Judge call |
 | `routing.judgePromptCap` | `6000` | Max prompt characters sent to the Judge (bounds Judge cost) |
+| `routing.judge.mode` | `fast-chain` | Where the verdict comes from: `fast-chain` (the Fast chain), `custom` (`routing.judge.models`), `decision` (a decision model). A `models` list with no `mode` migrates to `custom`; an unknown value falls back to `fast-chain` and is logged |
+| `routing.judge.models` | `[]` | Dedicated Judge chain for `custom` (`provider/model` + `priority`), priority ascending. Never substituted with a cheaper model — an unusable chain falls back to the Fast chain |
+| `routing.judge.decision.baseUrl` | `''` | Decision-model base URL; `/v1/systemone` is appended. Empty = not configured |
+| `routing.judge.decision.model` | `jev-latest` | Model requested from a decision endpoint. The response reports the resolved id and a change is logged, which is what keeps the alias observable |
+| `routing.judge.decision.apiKeyRef` | `''` | Name of the credential holding this endpoint's key, resolved through the harness credential seam **on every call** (a rotated key reaches the next judgement). Empty = ambient auth |
 | `routing.economics.reworkPenalty` | `3` | **R** — how many price-deltas a wrong downgrade costs. The turn runs Smart iff `pSmart ≥ θ`, where `θ = 1/R`: higher R → lower θ → stickier on Smart |
 | `routing.economics.downgradeMemory` | `2` | Consecutive decisive `fast` turns required before Smart → Fast (a hold or a `smart` verdict resets the streak) |
 | `routing.economics.mode` | *(unset)* | Named gear preset, authoritative over `reworkPenalty`: `eco` (R=2, θ=0.5) / `default` (R=3, θ≈0.33) / `sport` (R=5, θ=0.2) |
@@ -167,7 +173,7 @@ and which models can take images.
 | `failover.maxMs` | `21600000` | Hard cap on the backoff ladder (6h) |
 | `failover.startAttempts4xx` | `3` | 4xx (429/402/quota) failures start at this attempt (16m), client limits usually outlive server blips |
 | `telemetry.callLogCap` | `1000` | Max per-message attribution records kept for baseline cost computation |
-| `ux.routerLogVerbose` | `false` | Print router decisions to the plugin's `ctx.logger`, **and** emit a route notice on every judged turn (including one that holds position). The stock DSH profiles register **no log exporter**, so the log lines are visible only where a deployment mounts one — the notice and `/router status` are the surfaces that always work |
+| `ux.routerLogVerbose` | `false` | Print router decisions to the plugin's `ctx.logger`, **and** emit a route notice on every judged turn (including one that holds position; a *release* — no Judge at all — notices once per session, not once per turn). The stock DSH profiles register **no log exporter**, so the log lines are visible only where a deployment mounts one — the notice and `/router status` are the surfaces that always work |
 | `ux.promptSectionOrder` | `150` | Sort position of the orchestrator system-prompt section. DSH allocates prompt order centrally (`SECTION_ORDERS`) and reserves no slot for third-party sections, so this is a setting, not a constant |
 | `pricing` | `[]` | Optional `{provider, model, input, output, cacheRead?, cacheWrite?}` USD-per-1M-token table for cost telemetry |
 

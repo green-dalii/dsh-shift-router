@@ -23,7 +23,7 @@
 
 日常对话不该花旗舰模型的钱；真正重要的对话也不该交给便宜模型。
 
-在每个顶层 Agent 的每一轮开始之前，一个轻量的 **LLM 裁判**（运行在你的 Fast 层模型链上）会把用户消息判定为 `fast`（日常）或 `smart`（重要）。被选中的层随后通过 harness 自身的 `agent/request` 管线驱动整轮——思考、工具调用、代码编辑。裁判只做判定，从不干活。
+在每个顶层 Agent 的每一轮开始之前，一个轻量的 **LLM 裁判**（默认运行在你的 Fast 层模型链上，见 `routing.judge.mode`）会把用户消息判定为 `fast`（日常）或 `smart`（重要）。被选中的层随后通过 harness 自身的 `agent/request` 管线驱动整轮——思考、工具调用、代码编辑。裁判只做判定，从不干活。
 
 ```text
 🦾 [deepseek-flash]     → fix the failing test
@@ -35,7 +35,8 @@
 
 ## 特性
 
-- **期望成本路由（EV）** —— 当且仅当 `pSmart ≥ θ` 时走 Smart，其中 `θ = 1/reworkPenalty`：这条门槛与模型价格无关，所以唯一的旋钮就是"错误降级有多痛"。升级是即时的；降回来需要 `downgradeMemory` 次**连续**的决定性 `fast` 判定。裁判不可用或判定不确信时一律**保持原位**，绝不猜测。
+- **期望成本路由（EV）** —— 当且仅当 `pSmart ≥ θ` 时走 Smart，其中 `θ = 1/reworkPenalty`：这条门槛与模型价格无关，所以唯一的旋钮就是"错误降级有多痛"。升级是即时的；降回来需要 `downgradeMemory` 次**连续**的决定性 `fast` 判定。判定不确信时一律**保持原位**，绝不猜测。
+- **可插拔的裁判来源** —— 判定默认来自 Fast 链；`routing.judge.mode` 可以把它指向一条专用裁判链（`custom`），或指向**决策模型**（`decision` —— TypeSafe Jev / System One 这一类，Beta）：它返回的是标定过的概率而不是散文，因此没有回复解析步骤，也不存在"回复格式坏了"这一类失败。任何已配置的来源不可用时都会回落 Fast 链；而**完全没有裁判时路由器就停止路由**——本轮改用你自己选定的模型、编排被清除，且每个会话只提示一次。
 - **缓存感知路由** —— 当 Fast 与 Smart 共享同一 provider 时，决策门槛会除以 `sameFamilyPenalty`（默认 1.5），并在 prompt 缓存仍热时抑制降级，避免切到便宜模型反而更贵。
 - **运行时故障转移** —— 429 / 402 / 5xx / 配额 / 用量上限 / 模型下线 等失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h04m → 4h16m，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
 - **任务级编排** —— 复杂任务会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、**连续**工作代理失败计一次升级，一旦触顶 `subagent` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
@@ -119,17 +120,22 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「Shift-Router」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
 
 唯一必须由你决定的是档位模型：**[docs/MODELS.zh-CN.md](docs/MODELS.zh-CN.md)** 说明如何挑选
-Fast 与 Smart 模型（Fast 链同时也是裁判链）、什么样的模型适合做回退、以及哪些模型能接收图片。
+Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模型适合做回退、以及哪些模型能接收图片。
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `enabled` | `true` | 总开关 |
-| `tiers.fast.models` | `[]` | Fast 层模型链（`provider/model` + `priority`）；同时也是裁判的模型链 |
+| `tiers.fast.models` | `[]` | Fast 层模型链（`provider/model` + `priority`）；同时也是裁判的默认来源 |
 | `tiers.smart.models` | `[]` | Smart 层模型链 |
 | `routing.mode` | `auto` | `auto`（默认）：裁判 + 路由 + 故障转移 + 编排；`manual`：无裁判，仅显式 `/route-force` 覆盖；`off`：模型选择完全被动（命令/遥测仍可用） |
-| `routing.judgeTimeout` | `5000` | 裁判调用超时（毫秒） |
+| `routing.judgeTimeout` | `5000` | 裁判调用超时（毫秒）。`decision` 模式下下限被抬高到 15000——实测一次决策判定需要 1.4–6.6 秒 |
 | `routing.judgeMaxTokens` | `4000` | 单次裁判调用最大输出 token |
 | `routing.judgePromptCap` | `6000` | 发送给裁判的最大 prompt 字符数（限制裁判成本） |
+| `routing.judge.mode` | `fast-chain` | 判定来自哪里：`fast-chain`（Fast 链）、`custom`（`routing.judge.models`）、`decision`（决策模型）。只写了 `models` 而没有 `mode` 时会迁移为 `custom`；无法识别的取值回落 `fast-chain` 并记日志 |
+| `routing.judge.models` | `[]` | `custom` 模式下的专用裁判链（`provider/model` + `priority`，priority 升序）。绝不用更便宜的模型替代——链不可用时回落到 Fast 链 |
+| `routing.judge.decision.baseUrl` | `''` | 决策模型的基础 URL，会拼接 `/v1/systemone`。空 = 未配置 |
+| `routing.judge.decision.model` | `jev-latest` | 向决策端点请求的模型。响应会回报解析后的真实 id，变化时会记日志——别名正是这样才能保持可观测 |
+| `routing.judge.decision.apiKeyRef` | `''` | 保存该端点密钥的凭据名，**每次调用**都通过 harness 凭据 seam 解析（轮换后的密钥下一次判定即可生效）。空 = 使用环境自带认证 |
 | `routing.economics.reworkPenalty` | `3` | **R** —— 一次错误降级的返工代价（以价差为倍数）。当且仅当 `pSmart ≥ θ` 时走 Smart，`θ = 1/R`：R 越大 θ 越小，越黏在 Smart |
 | `routing.economics.downgradeMemory` | `2` | Smart → Fast 所需的**连续**决定性 `fast` 判定次数（hold 或 `smart` 判定都会打断连击） |
 | `routing.economics.mode` | *(未设置)* | 命名档位预设，优先级高于 `reworkPenalty`：`eco`(R=2, θ=0.5) / `default`(R=3, θ≈0.33) / `sport`(R=5, θ=0.2) |
@@ -152,7 +158,7 @@ Fast 与 Smart 模型（Fast 链同时也是裁判链）、什么样的模型适
 | `failover.maxMs` | `21600000` | 退避阶梯硬上限（6 小时） |
 | `failover.startAttempts4xx` | `3` | 4xx（429/402/配额）失败从该尝试次数起步（16 分钟），客户端限流通常比服务端抖动更持久 |
 | `telemetry.callLogCap` | `1000` | 基线成本计算保留的最大逐条消息归属记录数 |
-| `ux.routerLogVerbose` | `false` | 把路由决策打印到本插件的 `ctx.logger`，**并**在每一轮判定后写一条路由通知（包括保持原位的轮次）。DSH 自带 profile **未挂载任何日志导出器**，所以日志只在额外挂载导出器的部署可见；通知与 `/router status` 才是始终可用的界面 |
+| `ux.routerLogVerbose` | `false` | 把路由决策打印到本插件的 `ctx.logger`，**并**在每一轮判定后写一条路由通知（包括保持原位的轮次；而 *release*——完全没有裁判——每个会话只通知一次，不是每轮一次）。DSH 自带 profile **未挂载任何日志导出器**，所以日志只在额外挂载导出器的部署可见；通知与 `/router status` 才是始终可用的界面 |
 | `ux.promptSectionOrder` | `150` | 编排器系统提示词段落的排序位置。DSH 集中分配提示词顺序（`SECTION_ORDERS`），未给第三方段落预留槽位，因此这是配置项而非常量 |
 | `pricing` | `[]` | 可选 `{provider, model, input, output, cacheRead?, cacheWrite?}` 每百万 token 的 USD 计价表，用于成本遥测 |
 
