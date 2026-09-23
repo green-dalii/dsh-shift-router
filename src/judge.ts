@@ -674,7 +674,18 @@ export function createDecisionCall(deps: DecisionCallDeps): DecisionCall {
   return async (entry, prompt, signal) => {
     let key: string | undefined
     if (deps.apiKeyRef) {
-      key = await deps.resolveKey?.(deps.apiKeyRef)
+      try {
+        key = await deps.resolveKey?.(deps.apiKeyRef)
+      } catch (error) {
+        // The reference is user-typed text and the seam rejects names outside
+        // its grammar, so a throw here is a configuration mistake, not an
+        // outage — and it must not escape into the turn.
+        deps.log?.(
+          `judge decision: credential "${deps.apiKeyRef}" could not be resolved — ` +
+            (error instanceof Error ? error.message : String(error)),
+        )
+        return { ok: false, code: null }
+      }
       if (key === undefined) {
         // Configured but unavailable: a structural failure, never a cooldown —
         // the same model will be just as unavailable next turn.

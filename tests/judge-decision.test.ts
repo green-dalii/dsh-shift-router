@@ -206,6 +206,21 @@ describe('createDecisionCall', () => {
     expect(outcome).toEqual({ ok: false, code: null })
   })
 
+  it('treats a credential lookup that throws as "not configured"', async () => {
+    // `ctx.credentials.resolve()` rejects a name outside its grammar, and the
+    // name comes from a text field a user types into. A throw here must not
+    // escape into the turn: it is the same structural failure as a missing
+    // credential, so the ladder moves on and nothing is cooled down.
+    const { call, fetchImpl } = setup({
+      resolveKey: async () => {
+        throw new TypeError('not a valid credential reference')
+      },
+    })
+    const outcome = await call(ENTRY, 'hello', new AbortController().signal)
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(outcome).toEqual({ ok: false, code: null })
+  })
+
   it('maps HTTP statuses onto the shared failover vocabulary', async () => {
     for (const [status, code] of [[429, '429'], [402, '402'], [503, '503']] as const) {
       const { call } = setup({ fetchImpl: (async () => jsonResponse({}, status)) as unknown as typeof fetch })

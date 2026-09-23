@@ -18,7 +18,7 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
-[![Coverage](https://img.shields.io/badge/coverage-83.03%25%20lines-green)](.github/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-83.21%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -301,7 +301,7 @@ with no delegation and no audit.
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (397 tests across 22 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
+npm test            # vitest (399 tests across 22 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
 npm run typecheck
 ```
 

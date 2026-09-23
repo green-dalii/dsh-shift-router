@@ -21,7 +21,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as plugin from '../src/index.js'
 
 /** A session that topped out on Smart: the case a sticky hold used to pin. */
@@ -45,8 +45,12 @@ function userMessage(text: string): UserMessage {
   return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 }
 
-/** A plugin-loaded context whose Judge always fails (every rung of the ladder). */
-async function loaded() {
+/**
+ * A plugin-loaded context whose Judge always fails (every rung of the ladder).
+ *
+ * @param over - config overrides merged over the default fixture.
+ */
+async function loaded(over: Record<string, unknown> = {}) {
   const ctx = new Context()
   ctx.provide('llm', {
     resolveModelInfo: async () => ({ provider: 'fake', model: 'fake-fast' }),
@@ -63,7 +67,7 @@ async function loaded() {
     section: () => () => undefined,
     variable: () => () => undefined,
   })
-  await ctx.plugin(plugin, config())
+  await ctx.plugin(plugin, { ...config(), ...over })
   return ctx
 }
 
@@ -123,6 +127,35 @@ describe('a session whose Judge is dead', () => {
     await preStep(ctx)
     const second = await preStep(ctx)
     expect(noticeText(second)).toBe('')
+  })
+
+  it('releases when a configured decision endpoint cannot be reached', async () => {
+    // The whole decision path in the real plugin: mode 'decision' puts the
+    // endpoint on rung 1, the POST to a closed loopback port fails immediately,
+    // and the ladder must fall through to the Fast chain and then release —
+    // not abort the turn. Port 1 refuses on loopback, so this needs no network.
+    const ctx = await loaded({
+      ux: { routerLogVerbose: true },
+      routing: {
+        judge: {
+          mode: 'decision',
+          decision: { baseUrl: 'http://127.0.0.1:1', model: 'jev-latest', apiKeyRef: '' },
+        },
+      },
+    })
+    const logged: string[] = []
+    const spy = vi.spyOn(ctx.logger, 'info').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '))
+    })
+    const decision = await preStep(ctx)
+    spy.mockRestore()
+    // The attempt really happened: without this the test would pass on a ladder
+    // that never carried the decision rung at all.
+    expect(logged.join('\n')).toContain('judge decision: request failed')
+    expect(noticeText(decision)).toContain('no judge · not routing')
+    const wire = await request(ctx)
+    expect(wire.provider).toBe('session-provider')
+    expect(wire.model).toBe('session-model')
   })
 
   it('does not start an orchestration loop on a released turn', async () => {
