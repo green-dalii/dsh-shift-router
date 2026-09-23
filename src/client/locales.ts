@@ -42,6 +42,7 @@ export type ShiftRouterCardKey =
   | 'expandAdvanced'
   | 'collapseAdvanced'
   | 'g.judge'
+  | 'g.judgeSource'
   | 'g.window'
   | 'g.cache'
   | 'g.economics'
@@ -52,6 +53,11 @@ export type ShiftRouterCardKey =
   | 'f.judgeTimeout'
   | 'f.judgeMaxTokens'
   | 'f.judgePromptCap'
+  | 'f.judgeMode'
+  | 'f.judgeModels'
+  | 'f.judgeBaseUrl'
+  | 'f.judgeModel'
+  | 'f.judgeApiKeyRef'
   | 'f.reworkPenalty'
   | 'f.downgradeMemory'
   | 'f.economicsMode'
@@ -83,6 +89,11 @@ export type ShiftRouterCardKey =
   | 'h.judgeTimeout'
   | 'h.judgeMaxTokens'
   | 'h.judgePromptCap'
+  | 'h.judgeMode'
+  | 'h.judgeModels'
+  | 'h.judgeBaseUrl'
+  | 'h.judgeModel'
+  | 'h.judgeApiKeyRef'
   | 'h.reworkPenalty'
   | 'h.downgradeMemory'
   | 'h.economicsMode'
@@ -173,6 +184,7 @@ export const en: ShiftRouterCardDict = {
   'expandAdvanced': 'Show advanced settings',
   'collapseAdvanced': 'Hide advanced settings',
   'g.judge': 'Judge',
+  'g.judgeSource': 'Judge source',
   'g.window': 'Decision window',
   'g.cache': 'Cache-aware routing',
   'g.economics': 'Economics',
@@ -183,6 +195,11 @@ export const en: ShiftRouterCardDict = {
   'f.judgeTimeout': 'Judge time limit',
   'f.judgeMaxTokens': 'Judge answer limit',
   'f.judgePromptCap': 'Judge reading limit',
+  'f.judgeMode': 'Where the verdict comes from',
+  'f.judgeModels': 'Dedicated judge models',
+  'f.judgeBaseUrl': 'Decision endpoint URL',
+  'f.judgeModel': 'Decision model',
+  'f.judgeApiKeyRef': 'Credential name for the endpoint',
   'f.reworkPenalty': 'Cost of a wrong downgrade',
   'f.downgradeMemory': 'Fast turns before switching down',
   'f.economicsMode': 'Effort preset',
@@ -211,9 +228,14 @@ export const en: ShiftRouterCardDict = {
   'h.fastModels': 'The models used for routine work, tried in order: the first one that answers wins, the rest are backups. Pick from the models this DSH is configured with, or choose Custom… to type an id.',
   'h.smartModels': 'The models used for complex work, tried in order: the first one that answers wins, the rest are backups. Pick from the models this DSH is configured with, or choose Custom… to type an id.',
   'h.routingMode': 'auto — the router judges every turn (recommended). manual — only your /route-force overrides apply. off — the router watches but never switches.',
-  'h.judgeTimeout': 'How long the judgment call may take. If it runs over, the request carries on with the Fast model instead of waiting.',
+  'h.judgeTimeout': 'How long one judgment attempt may take. A timed-out attempt moves on to the next judge source; if every source fails, the turn runs on your own selected model instead. A decision endpoint is always given at least 15 seconds.',
   'h.judgeMaxTokens': 'How long the judgment call’s answer may be. The default is plenty; raise it only if judgments keep getting cut off.',
   'h.judgePromptCap': 'How much of the recent conversation the judgment call may read. Anything longer is shortened to fit.',
+  'h.judgeMode': 'fast-chain — judge with the Fast tier models (the default, nothing else to configure). custom — judge with the dedicated list below. decision — ask a decision model for a probability instead of prose (Beta; slower, and not billed by the token). A judge you configure that cannot be reached falls back to the Fast tier models, so routing is never lost to a misconfiguration.',
+  'h.judgeModels': 'The models used to judge, tried in order, and only these: the router will not quietly substitute a cheaper one. An unreachable list falls back to the Fast tier models.',
+  'h.judgeBaseUrl': 'The decision service’s address. The router appends /v1/systemone. Leave empty to judge with a model instead.',
+  'h.judgeModel': 'Which decision model to ask. An alias is fine: the answer reports which build actually replied, and a change is logged.',
+  'h.judgeApiKeyRef': 'The NAME of the credential holding this endpoint’s key — never the key itself. It is read from the harness’s credential store before every judgment, so rotating the key takes effect immediately.',
   'h.reworkPenalty': 'How much it costs you when a request goes to the Fast model and turns out to need the Smart one. Higher means the router keeps using the Smart model.',
   'h.downgradeMemory': 'How many clearly-Fast turns in a row are needed before switching down to Fast. Higher keeps you on the Smart model longer; an unclear verdict starts the count again.',
   'h.economicsMode': 'A quick way to set how eager the router is: eco saves money, default is balanced, sport prefers the Smart model. Choosing one replaces the cost setting above.',
@@ -303,6 +325,7 @@ export const zh: ShiftRouterCardDict = {
   'expandAdvanced': '展开高级设置',
   'collapseAdvanced': '收起高级设置',
   'g.judge': '裁判',
+  'g.judgeSource': '裁判来源',
   'g.window': '决策窗口',
   'g.cache': '缓存感知',
   'g.economics': '经济性',
@@ -313,6 +336,11 @@ export const zh: ShiftRouterCardDict = {
   'f.judgeTimeout': '裁判判定时限',
   'f.judgeMaxTokens': '裁判回答长度上限',
   'f.judgePromptCap': '裁判可读内容上限',
+  'f.judgeMode': '判定来自哪里',
+  'f.judgeModels': '专用裁判模型',
+  'f.judgeBaseUrl': '决策端点地址',
+  'f.judgeModel': '决策模型',
+  'f.judgeApiKeyRef': '端点凭据名',
   'f.reworkPenalty': '一次错误降级的代价',
   'f.downgradeMemory': '降级前需连续 Fast 轮数',
   'f.economicsMode': '力度预设',
@@ -341,9 +369,14 @@ export const zh: ShiftRouterCardDict = {
   'h.fastModels': '日常事务使用的模型，按顺序尝试：谁先可用就用谁，后面的作为备份。可从本 DSH 已配置的模型中挑选，也可选「自定义」手填 id。',
   'h.smartModels': '复杂任务使用的模型，按顺序尝试：谁先可用就用谁，后面的作为备份。可从本 DSH 已配置的模型中挑选，也可选「自定义」手填 id。',
   'h.routingMode': 'auto——每轮由路由器判定（推荐）；manual——只应用你用 /route-force 指定的模型；off——只观察、不切换。',
-  'h.judgeTimeout': '判定调用的时限。超时就直接用 Fast 层继续，不再等待判定结果。',
+  'h.judgeTimeout': '单次判定尝试的时限。超时的那次会继续尝试下一个裁判来源；如果所有来源都失败，本轮改用你自己选定的模型。决策端点至少会拿到 15 秒。',
   'h.judgeMaxTokens': '判定结果的最大长度。默认值通常足够；只有判定经常被截断时才需要调大。',
   'h.judgePromptCap': '判定可以读取多少近期对话内容，超出部分会被压缩。',
+  'h.judgeMode': 'fast-chain —— 用 Fast 层模型判定（默认，无需其他配置）。custom —— 用下面的专用模型列表判定。decision —— 向决策模型要一个概率而不是一段文字（Beta；更慢，且不按 token 计费）。你自己配置的裁判如果访问不到，会回落到 Fast 层模型，所以不会因为配置错误而失去路由。',
+  'h.judgeModels': '用于判定的模型，按顺序尝试，且只用这些：路由器不会悄悄换成更便宜的模型。整条链都不可用时回落 Fast 层模型。',
+  'h.judgeBaseUrl': '决策服务的地址，路由器会自动拼接 /v1/systemone。留空则改用模型判定。',
+  'h.judgeModel': '请求哪个决策模型。可以用别名：返回结果会报告实际应答的版本，发生变化时会记日志。',
+  'h.judgeApiKeyRef': '保存该端点密钥的凭据名称，绝不是密钥本身。每次判定前都从 harness 凭据存储读取，因此轮换密钥立即生效。',
   'h.reworkPenalty': '一次请求走了 Fast 层、结果却需要 Smart 层时，你要付出多大代价。数值越大，越倾向于一直用 Smart 层。',
   'h.downgradeMemory': '需要连续多少轮明确判定为 Fast，才降级到 Fast 层。数值越大越久留在 Smart 层；判定不明确会重新计数。',
   'h.economicsMode': '快速设定路由的积极程度：eco 省钱、default 均衡、sport 偏向 Smart 层。选了预设会覆盖上面的代价设置。',

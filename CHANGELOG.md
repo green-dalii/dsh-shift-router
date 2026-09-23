@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The judge availability ladder.** The judge chain is one ordered, deduplicated list: the
   configured source, then the Fast chain. A configured judge that is unusable *or* fails at call time
   now falls through to the Fast chain in the same turn instead of costing that turn its routing.
+- **The Judge's source is editable from both configuration surfaces.** `routing.judge.mode`
+  (enum), `routing.judge.models` (chain editor) and the three `decision.*` fields are now in the
+  `CONFIG_FIELDS` / `CARD_FIELDS` registries, so `/router config set` and the GUI card reach them
+  under a new *Judge source* sub-group. That needed a **`string` leaf type** in both registries —
+  neither had one — and `set` now takes a text leaf verbatim instead of JSON-parsing it (a URL or a
+  credential *name* is text, and JSON-parsing `123` into a number would only make the schema reject
+  it). Verified in a real browser: no overlaps among 176 elements with Advanced open, no text spills,
+  and the open view still shows only the 10 default fields.
 - **A decision model as Judge — `mode: 'decision'` (Jev / System One class, opt-in).** One POST to
   `<routing.judge.decision.baseUrl>/v1/systemone` carries a `choice` question for the tier and a
   `noul` question for orchestration; `probabilities[choice]` is what θ eats, so there is no reply to

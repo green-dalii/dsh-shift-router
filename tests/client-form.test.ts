@@ -80,6 +80,7 @@ describe('path helpers', () => {
 const numberField: CardField = { path: 'a', section: 'a', display: 'a', key: 'a', type: 'number', labelKey: 'x', hintKey: 'y' }
 const boolField: CardField = { path: 'b', section: 'b', display: 'b', key: 'b', type: 'boolean', labelKey: 'x', hintKey: 'y' }
 const enumField: CardField = { path: 'c', section: 'c', display: 'c', key: 'c', type: 'enum', enum: ['auto', 'off'], labelKey: 'x', hintKey: 'y' }
+const stringField: CardField = { path: 'd', section: 'd', display: 'd', key: 'd', type: 'string', labelKey: 'x', hintKey: 'y' }
 
 describe('draft parsing', () => {
   it('formats effective values as control text', () => {
@@ -104,6 +105,17 @@ describe('draft parsing', () => {
   it('parses enums against the allowed set', () => {
     expect(parseDraft('off', enumField)).toEqual({ kind: 'set', value: 'off' })
     expect(parseDraft('manual', enumField)).toBeUndefined()
+  })
+
+  it('keeps a text leaf as text — never as a number', () => {
+    // `routing.judge.decision.*` are strings: a URL, an alias, a credential
+    // NAME. The string branch must not fall through to the numeric default.
+    expect(parseDraft('https://api.example.test', stringField))
+      .toEqual({ kind: 'set', value: 'https://api.example.test' })
+    expect(parseDraft('  123  ', stringField)).toEqual({ kind: 'set', value: '123' })
+    expect(parseDraft('   ', stringField)).toEqual({ kind: 'clear' })
+    expect(formatValue('jev-latest', stringField)).toBe('jev-latest')
+    expect(formatValue(undefined, stringField)).toBe('')
   })
 })
 

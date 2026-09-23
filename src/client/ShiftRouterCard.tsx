@@ -847,6 +847,23 @@ function FieldRow(props: FieldRowProps): ReactNode {
         {field.enum?.map((value) => <option key={value} value={value}>{value}</option>)}
       </select>
     )
+  } else if (field.type === 'string') {
+    // Free text (a URL, a model alias, a credential NAME). Never `type=number`
+    // and never a password field: the credential leaf holds a reference, so
+    // there is no secret here to mask.
+    const text = fieldState?.text ?? ''
+    control = (
+      <input
+        id={id}
+        className="sr-input"
+        style={{ ...input, width: 240 }}
+        type="text"
+        spellCheck={false}
+        value={text}
+        disabled={disabled}
+        onChange={(event) => edit(field.path, event.target.value)}
+      />
+    )
   } else {
     const text = fieldState?.text ?? ''
     const width = field.unit ? 150 : 180

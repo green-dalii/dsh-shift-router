@@ -381,6 +381,30 @@ describe('/router config', () => {
     expect(h.patches).toEqual([{ routing: { economics: { reworkPenalty: 5 } } }])
   })
 
+  it('takes a string leaf verbatim instead of JSON-parsing it', async () => {
+    // A URL or a credential NAME is text. `pathPatch`'s JSON fallback would
+    // make `123` a number, which the schema then rejects — so the leaf's type
+    // decides, not the shape of what was typed.
+    const h = harness()
+    const url = await router(h, 'config set routing.judge.decision.baseUrl https://api.example.test')
+    expect(url.kind).toBe('success')
+    expect(h.patches).toEqual([{ routing: { judge: { decision: { baseUrl: 'https://api.example.test' } } } }])
+
+    const numeric = await router(h, 'config set routing.judge.decision.apiKeyRef 123')
+    expect(numeric.kind).toBe('success')
+    expect(h.config.routing.judge.decision.apiKeyRef).toBe('123')
+  })
+
+  it('lists the Judge source leaves in the editor, mode marked unset', async () => {
+    const h = harness()
+    const text = (await router(h, 'config')).text
+    expect(text).toContain('routing.judge.mode')
+    expect(text).toContain('(fast-chain|custom|decision)')
+    expect(text).toContain('routing.judge.models')
+    expect(text).toContain('routing.judge.decision.baseUrl')
+    expect(text).toContain('routing.judge.decision.apiKeyRef')
+  })
+
   it('unsets a leaf with a path operation (the only way to clear an override)', async () => {
     const h = harness()
     const result = await router(h, 'config unset routing.window.threshold')

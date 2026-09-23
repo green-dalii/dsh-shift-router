@@ -830,8 +830,9 @@ visible rather than about decoration:
   changes routing for a typical deployment: the master switch, the two tier
   chains, the routing mode, the economics knob and its preset, and the
   orchestration mode, round budget, spend cap and audit switch. Everything else —
-  judge limits, window and cache tuning, failover timing, telemetry, prompt
-  ordering and the legacy leftovers — sits behind ONE *Advanced* disclosure,
+  the Judge's limits **and its source**, window and cache tuning, failover
+  timing, telemetry, prompt ordering and the legacy leftovers — sits behind ONE
+  *Advanced* disclosure,
   closed on open, sub-grouped by the setting it belongs to. The visible-by-default
   set is pinned by a test, so clutter cannot creep back in one field at a time.
 - **Copy is written from the user's side.** A label or hint answers "what does

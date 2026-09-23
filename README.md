@@ -18,7 +18,7 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
-[![Coverage](https://img.shields.io/badge/coverage-81.82%25%20lines-green)](.github/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-83.03%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -190,8 +190,8 @@ and which models can take images.
 The package ships a browser-side (client) module that registers a **"Shift-Router"** card in the GUI settings page:
 
 - **Where**: Settings → Plugins → Plugin configuration (that page is provided by the official `dsh-client-ui-settings-plugins`; the card registers into the `settings.plugin.item` slot).
-- **What**: a form over every scalar leaf field (booleans, numbers, enums) **plus the two tier model chains**, grouped into seven sections (General / Models / Routing / Orchestration / Failover / Telemetry / Logs & UX) with sub-groups for the routing section (Judge / Decision window / Cache-aware). Scalar fields use the compact settings-row pattern — label + hint on the left, control right-aligned on the same line — so each field is one tight row instead of three stacked lines. Controls use the host-plane design tokens: toggle switches (contrast-safe in light and dark themes), a styled select for enums, unit suffixes inside numeric inputs (`ms`, `tokens`, `0–1`, …), and an ordered row editor for model chains — the row order is the in-tier fallback order, so the first available model wins and the rest are its fallbacks. The provider/model dropdowns are auto-loaded from **DSH's runtime model catalog** (`llm.models` — the same catalog the DSH settings surface reads): only providers with a currently advertised model list appear, no dormant-directory noise, and nothing is hardcoded, so the card works with any deployment's configured models. A "Custom…" escape covers values outside the catalog. Staged saving, per-field reset to default, and override markers work exactly like the official cards.
-- **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the tier model chains are editable in the card.
+- **What**: a form over every scalar leaf field (booleans, numbers, enums) **plus the model chains** (both tiers, and a dedicated Judge chain), grouped into seven sections (General / Models / Routing / Orchestration / Failover / Telemetry / Logs & UX) with sub-groups for the routing section (Judge / Judge source / Decision window / Cache-aware). Scalar fields use the compact settings-row pattern — label + hint on the left, control right-aligned on the same line — so each field is one tight row instead of three stacked lines. Controls use the host-plane design tokens: toggle switches (contrast-safe in light and dark themes), a styled select for enums, unit suffixes inside numeric inputs (`ms`, `tokens`, `0–1`, …), and an ordered row editor for model chains — the row order is the in-tier fallback order, so the first available model wins and the rest are its fallbacks. The provider/model dropdowns are auto-loaded from **DSH's runtime model catalog** (`llm.models` — the same catalog the DSH settings surface reads): only providers with a currently advertised model list appear, no dormant-directory noise, and nothing is hardcoded, so the card works with any deployment's configured models. A "Custom…" escape covers values outside the catalog. Staged saving, per-field reset to default, and override markers work exactly like the official cards.
+- **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the model chains — both tiers and the Judge's — are editable in the card.
 - **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
 
 #### Legacy harnesses only: the Web settings whitelist (≤ 0.1.0-rc.x)
@@ -301,7 +301,7 @@ with no delegation and no audit.
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (336 tests across 18 files: EV routing / failover signatures / judge parsing + prompt contract / orchestration / config schema + migration / telemetry / route notices / config registries + GUI form model + card UX + model catalog / packaged-install contract)
+npm test            # vitest (397 tests across 22 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
 npm run typecheck
 ```
 

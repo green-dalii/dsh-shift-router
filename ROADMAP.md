@@ -159,6 +159,7 @@ what we deliberately do differently from upstream — is in
 | Resolved-model observability behind an alias (`jev-latest` → `jev-1.13.0`), logged when it moves | ✅ |
 | Decision-protocol wire shapes (request body, response parsing, out-of-set rejection, `noul` threshold) unit-tested against fixtures taken from upstream's implementation | ✅ (live verification is a Planned item) |
 | Release is distinguishable from hold end to end: `RouteDecision.released`, a `no judge · not routing` notice, `/router status` wording, and `agent/request` leaving the wire alone for the whole turn | ✅ |
+| The source is reachable from both configuration surfaces: `routing.judge.mode` / `.models` / `decision.*` are in `CONFIG_FIELDS` **and** `CARD_FIELDS` under a new *Judge source* sub-group, which required adding a `string` leaf type to both registries | ✅ (verified in a real browser: 0 overlaps / 0 text spills with Advanced open) |
 
 ## Planned
 
@@ -178,7 +179,7 @@ what we deliberately do differently from upstream — is in
 | ~~Packaged-install verification gate~~ | ~~P3~~ | ✅ delivered: `tests/packaged-install.test.ts` (built-artifact imports ⊆ `dependencies` ∪ `peerDependencies`, browser requires ⊆ platform seed ∪ `dsh.client`, `files` completeness) + an `npm pack` → install → **boot** scenario in `npm run test:e2e` |
 | Unit tests for `src/index.ts` **event-callback bodies** | P3 | the load-safety and `agent/pre-step` paths are covered; the remaining branches are the `agent/request-error` cooldown ladder and the `agent/request` rewrite |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
-| GUI/CLI: reach the `routing.judge.*` leaves | P3 | **Neither registry lists them yet**, so a decision judge is configured through the settings document only. Both registries are hand-maintained (`CONFIG_FIELDS` / `CARD_FIELDS`) and have no **string** leaf type, which `decision.baseUrl` / `.model` / `.apiKeyRef` need; `mode` (enum) and `models` (chain) can go in as soon as that exists |
+| ~~GUI/CLI: reach the `routing.judge.*` leaves~~ | ~~P3~~ | ✅ delivered in the R12 round: both registries gained the five leaves and the **string** leaf type they needed (ROADMAP row above; verified in a browser) |
 | `mode: 'decision'` **live** verification against TypeSafe | P2 | needs a key; until then the mode ships as "implemented and unit-tested, not live-verified" (ALIGNMENT §R12.4) |
 
 

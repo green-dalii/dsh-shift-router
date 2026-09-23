@@ -106,7 +106,7 @@ export interface CommandDeps {
 export interface ConfigField {
   /** Dotted path inside the shift-router config. */
   path: string
-  type: 'boolean' | 'number' | 'enum' | 'modelList' | 'pricing'
+  type: 'boolean' | 'number' | 'enum' | 'string' | 'modelList' | 'pricing'
   /** Allowed values for `enum` fields. */
   enum?: readonly string[]
   /** Display hint, e.g. "ms", "[0,1]". */
@@ -132,6 +132,14 @@ export const CONFIG_FIELDS: ConfigField[] = [
   { path: 'routing.judgeTimeout', type: 'number', hint: 'ms' },
   { path: 'routing.judgeMaxTokens', type: 'number' },
   { path: 'routing.judgePromptCap', type: 'number' },
+  // The Judge's SOURCE (§6.4/§6.6). `mode` is optional on purpose: it
+  // ships unset so a stored `judge.models` list stays recognisable as the
+  // pre-0.7.0 shape instead of being silently inert.
+  { path: 'routing.judge.mode', type: 'enum', enum: ['fast-chain', 'custom', 'decision'], optional: true },
+  { path: 'routing.judge.models', type: 'modelList' },
+  { path: 'routing.judge.decision.baseUrl', type: 'string', hint: 'url' },
+  { path: 'routing.judge.decision.model', type: 'string' },
+  { path: 'routing.judge.decision.apiKeyRef', type: 'string', hint: 'env var name' },
   { path: 'routing.economics.reworkPenalty', type: 'number', hint: '≥1' },
   { path: 'routing.economics.downgradeMemory', type: 'number', hint: 'turns' },
   { path: 'routing.economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], optional: true },
@@ -174,6 +182,7 @@ export function readPath(obj: unknown, path: string): unknown {
 /** Human-readable display of one field's current value. */
 export function formatFieldValue(value: unknown, type: ConfigField['type']): string {
   if (value === undefined || value === null) return '(unset)'
+  if (type === 'string') return String(value)
   if (type === 'modelList') {
     const list = Array.isArray(value) ? value as { provider?: string; model?: string }[] : []
     if (list.length === 0) return '(none)'
@@ -377,14 +386,24 @@ function parseModelRef(value: string): { provider: string; model: string } | nul
  * The value is parsed as JSON when possible (numbers/booleans/arrays),
  * otherwise treated as a plain string.
  */
-function pathPatch(path: string, rawValue: string): { patch: Record<string, unknown> } | { error: string } {
+function pathPatch(
+  path: string,
+  rawValue: string,
+  type?: ConfigField['type'],
+): { patch: Record<string, unknown> } | { error: string } {
   const segments = path.split('.').filter((s) => s.length > 0)
   if (segments.length === 0) return { error: `invalid path "${path}"` }
   let value: unknown
-  try {
-    value = JSON.parse(rawValue)
-  } catch {
+  if (type === 'string') {
+    // Verbatim: a URL or a credential NAME is text, and JSON.parse would
+    // turn `123` into a number the schema then rejects.
     value = rawValue
+  } else {
+    try {
+      value = JSON.parse(rawValue)
+    } catch {
+      value = rawValue
+    }
   }
   const patch: Record<string, unknown> = {}
   let cursor = patch
@@ -633,7 +652,7 @@ async function handleConfig(
     if (!rawValue) {
       return { kind: 'error', text: `Usage: /router config set ${field.path} <value>` }
     }
-    const built = pathPatch(field.path, rawValue)
+    const built = pathPatch(field.path, rawValue, field.type)
     if ('error' in built) return { kind: 'error', text: `dsh-shift-router: ${built.error}` }
     const error = await deps.updateSettings(built.patch)
     if (error) return { kind: 'error', text: `dsh-shift-router: settings update failed — ${error}` }

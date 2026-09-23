@@ -35,7 +35,7 @@ export interface CardField {
   /** Dotted path of the leaf *within* the section, e.g. `judgeTimeout`. */
   key: string
   /** Value kind, driving the control and the draft parser. */
-  type: 'boolean' | 'number' | 'enum' | 'models'
+  type: 'boolean' | 'number' | 'enum' | 'string' | 'models'
   /** Allowed values for `enum` fields. */
   enum?: readonly string[]
   /** Locale dict key of the field's label. */
@@ -84,6 +84,11 @@ export const CARD_FIELDS: readonly CardField[] = [
   { path: 'routing.judgeTimeout', section: 'routing', display: 'routing', key: 'judgeTimeout', type: 'number', min: 1, max: 120000, unit: 'ms', group: 'g.judge', labelKey: 'f.judgeTimeout', hintKey: 'h.judgeTimeout' , advanced: true },
   { path: 'routing.judgeMaxTokens', section: 'routing', display: 'routing', key: 'judgeMaxTokens', type: 'number', min: 1, max: 100000, unit: 'tokens', group: 'g.judge', labelKey: 'f.judgeMaxTokens', hintKey: 'h.judgeMaxTokens' , advanced: true },
   { path: 'routing.judgePromptCap', section: 'routing', display: 'routing', key: 'judgePromptCap', type: 'number', min: 1, max: 1000000, unit: 'chars', group: 'g.judge', labelKey: 'f.judgePromptCap', hintKey: 'h.judgePromptCap' , advanced: true },
+  { path: 'routing.judge.mode', section: 'routing', display: 'routing', key: 'judge.mode', type: 'enum', enum: ['fast-chain', 'custom', 'decision'], optional: true, group: 'g.judgeSource', labelKey: 'f.judgeMode', hintKey: 'h.judgeMode' , advanced: true },
+  { path: 'routing.judge.models', section: 'routing', display: 'routing', key: 'judge.models', type: 'models', group: 'g.judgeSource', labelKey: 'f.judgeModels', hintKey: 'h.judgeModels' , advanced: true },
+  { path: 'routing.judge.decision.baseUrl', section: 'routing', display: 'routing', key: 'judge.decision.baseUrl', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeBaseUrl', hintKey: 'h.judgeBaseUrl' , advanced: true },
+  { path: 'routing.judge.decision.model', section: 'routing', display: 'routing', key: 'judge.decision.model', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeModel', hintKey: 'h.judgeModel' , advanced: true },
+  { path: 'routing.judge.decision.apiKeyRef', section: 'routing', display: 'routing', key: 'judge.decision.apiKeyRef', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeApiKeyRef', hintKey: 'h.judgeApiKeyRef' , advanced: true },
   { path: 'routing.economics.reworkPenalty', section: 'routing', display: 'routing', key: 'economics.reworkPenalty', type: 'number', min: 1, step: 0.5, group: 'g.economics', labelKey: 'f.reworkPenalty', hintKey: 'h.reworkPenalty' },
   { path: 'routing.economics.downgradeMemory', section: 'routing', display: 'routing', key: 'economics.downgradeMemory', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.economics', labelKey: 'f.downgradeMemory', hintKey: 'h.downgradeMemory' , advanced: true },
   { path: 'routing.economics.mode', section: 'routing', display: 'routing', key: 'economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], group: 'g.economics', optional: true, labelKey: 'f.economicsMode', hintKey: 'h.economicsMode' },
@@ -286,6 +291,7 @@ export function parseDraft(
     if (field.enum?.includes(trimmed)) return { kind: 'set', value: trimmed }
     return undefined
   }
+  if (field.type === 'string') return { kind: 'set', value: trimmed }
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) ? { kind: 'set', value: parsed } : undefined
 }
