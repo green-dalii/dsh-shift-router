@@ -154,17 +154,28 @@ describe('createDecisionCall', () => {
   function setup(overrides: Partial<Parameters<typeof createDecisionCall>[0]> = {}) {
     const fetchImpl = vi.fn(async () => jsonResponse(okBody))
     const resolveKey = vi.fn(async () => 'sk-test')
+    const log = vi.fn()
     const call = createDecisionCall({
       baseUrl: 'https://api.example.test',
       apiKeyRef: 'TYPESAFE_KEY',
       resolveKey,
+      log,
       fetchImpl: fetchImpl as unknown as typeof fetch,
       ...overrides,
     })
-    return { call, fetchImpl, resolveKey }
+    return { call, fetchImpl, resolveKey, log }
   }
 
-  it('POSTs one request carrying both questions, with the referenced key', async () => {
+  /** Every log line the transport emitted, joined for substring assertions. */
+  function logText(log: ReturnType<typeof vi.fn>): string {
+    return log.mock.calls.map((call) => call.map(String).join(' ')).join('\n')
+  }
+
+  it('POSTs one request carrying both questions, authenticated with a bearer token', async () => {
+    // The decision API is not the Anthropic message shape, so the key rides in
+    // `Authorization: Bearer` — NOT `x-api-key` (that branch is for an
+    // anthropic-prefixed apiType). Getting this wrong is a 401 on every call,
+    // which the ladder would paper over as "no judge".
     const { call, fetchImpl, resolveKey } = setup()
     const outcome = await call(ENTRY, 'fix the failing test', new AbortController().signal)
 
@@ -172,7 +183,8 @@ describe('createDecisionCall', () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://api.example.test/v1/systemone')
     expect(init.method).toBe('POST')
-    expect((init.headers as Record<string, string>)['x-api-key']).toBe('sk-test')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-test')
+    expect('x-api-key' in (init.headers as Record<string, string>)).toBe(false)
     const sent = JSON.parse(init.body as string) as Record<string, unknown>
     expect(sent.model).toBe('jev-latest')
     expect(Object.keys(sent.questions as object)).toEqual(['tier', 'orchestrate'])
@@ -191,11 +203,11 @@ describe('createDecisionCall', () => {
     })
   })
 
-  it('omits the key header when no reference is configured', async () => {
+  it('omits the auth header when no reference is configured', async () => {
     const { call, fetchImpl, resolveKey } = setup({ apiKeyRef: '' })
     await call(ENTRY, 'hello', new AbortController().signal)
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
-    expect('x-api-key' in (init.headers as Record<string, string>)).toBe(false)
+    expect('Authorization' in (init.headers as Record<string, string>)).toBe(false)
     expect(resolveKey).not.toHaveBeenCalled()
   })
 
@@ -226,6 +238,37 @@ describe('createDecisionCall', () => {
       const { call } = setup({ fetchImpl: (async () => jsonResponse({}, status)) as unknown as typeof fetch })
       expect(await call(ENTRY, 'hello', new AbortController().signal)).toEqual({ ok: false, code })
     }
+  })
+
+  it('reports the status and a body snippet so a live setup failure is diagnosable', async () => {
+    // The whole point of a Beta path a user wires by hand: when it 401s, the log
+    // has to say so. A silent "no judge" would send them hunting the wrong bug.
+    const { call, log } = setup({
+      fetchImpl: (async () => new Response('{"error":"invalid api key"}', { status: 401 })) as unknown as typeof fetch,
+    })
+    await call(ENTRY, 'hello', new AbortController().signal)
+    const text = logText(log)
+    expect(text).toContain('HTTP 401')
+    expect(text).toContain('/v1/systemone')
+    expect(text).toContain('invalid api key')
+    // …and never the key itself.
+    expect(text).not.toContain('sk-test')
+  })
+
+  it('says what a reply it could not read actually contained', async () => {
+    const notJson = setup({
+      fetchImpl: (async () => new Response('<html>gateway</html>', { status: 200 })) as unknown as typeof fetch,
+    })
+    await notJson.call(ENTRY, 'h', new AbortController().signal)
+    expect(logText(notJson.log)).toContain('gateway')
+
+    const noChoice = setup({
+      fetchImpl: (async () => jsonResponse({ answers: { tier: { choice: 'medium' } } })) as unknown as typeof fetch,
+    })
+    await noChoice.call(ENTRY, 'h', new AbortController().signal)
+    const text = logText(noChoice.log)
+    expect(text).toContain('no usable verdict')
+    expect(text).toContain('medium')
   })
 
   it('does not cool a model for a 4xx it cannot classify, a timeout, or a bad body', async () => {

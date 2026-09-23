@@ -511,6 +511,9 @@ export function judgeTimeoutFor(kind: 'chat' | 'decision', configured: number): 
 /** The decision endpoint's path, appended to `routing.judge.decision.baseUrl`. */
 const DECISION_API_PATH = '/v1/systemone'
 
+/** How much of a failed/deviant reply reaches the log (enough to diagnose). */
+const DECISION_LOG_BODY_CAP = 300
+
 /**
  * Fixed orchestration criteria. Like `JUDGE_PROMPT` these are the *rubric*, not
  * a deployment parameter: which turns deserve orchestration is our opinion, and
@@ -700,7 +703,10 @@ export function createDecisionCall(deps: DecisionCallDeps): DecisionCall {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          ...(key === undefined ? {} : { 'x-api-key': key }),
+          // Bearer, not `x-api-key`: this is the decision API, not the
+          // Anthropic message shape. A wrong header here is a 401 on every
+          // call, which the ladder would quietly report as "no judge".
+          ...(key === undefined ? {} : { Authorization: `Bearer ${key}` }),
         },
         body: JSON.stringify(buildDecisionRequestBody(entry.model, prompt)),
         signal,
@@ -712,19 +718,44 @@ export function createDecisionCall(deps: DecisionCallDeps): DecisionCall {
       return { ok: false, code: null }
     }
 
+    let body = ''
+    try {
+      body = await response.text()
+    } catch {
+      body = ''
+    }
+
     if (!response.ok) {
+      // A Beta path a user wires by hand has to fail loudly: the status and a
+      // bounded slice of the reply are what distinguish "wrong key" from
+      // "wrong URL" from "provider is down". The key itself is never logged.
+      deps.log?.(
+        `judge decision: HTTP ${response.status} from ${url}` +
+          (body ? ` — ${body.slice(0, DECISION_LOG_BODY_CAP)}` : ''),
+      )
       return { ok: false, code: decisionFailureCode(response.status) }
     }
 
     let raw: unknown
     try {
-      raw = await response.json()
+      raw = JSON.parse(body)
     } catch {
+      deps.log?.(
+        `judge decision: reply was not JSON from ${url} — ${body.slice(0, DECISION_LOG_BODY_CAP)}`,
+      )
       return { ok: false, code: null }
     }
 
     const answer = parseDecisionResponse(raw)
-    if (!answer) return { ok: false, code: null }
+    if (!answer) {
+      // The most useful line of all when the protocol itself is wrong: it shows
+      // exactly what the endpoint answered instead of a verdict.
+      deps.log?.(
+        `judge decision: no usable verdict in the reply from ${url} — ` +
+          `${body.slice(0, DECISION_LOG_BODY_CAP)}`,
+      )
+      return { ok: false, code: null }
+    }
 
     const resolvedModel = resolvedModelOf(raw)
     const result: JudgeResult = {

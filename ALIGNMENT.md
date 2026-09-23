@@ -784,7 +784,12 @@ POST」，没有 chat 编码；要把它塞进 seam，就得把结构化问题�
 
 ### R12.2 我们比上游多做的两件事、少做的一件事
 
-- **多做（凭据走 seam）**：上游从 pi 的 models.json / auth 存储取 `apiKey`。本项目把密钥交给
+- **多做（凭据走 seam + 认证头照抄）**：decision 端点的 `apiType` 是 `typesafe-decisions`，不
+  以 `anthropic` 开头，所以上游的传输分支给的是 **`Authorization: Bearer <key>`** 而不是
+  `x-api-key`（v1.7.0 `src/judge.ts` 的 fetch 分支；其 README 的 `models.json` 示例把 `baseUrl`
+  写成 `https://api.typesafe.ai`，与本项目「末尾拼 `/v1/systemone`」一致）。本项目照抄该分支——
+  选错分支是每次调用都 401，而阶梯会把它当成一次安静的中断。上游从 pi 的 models.json / auth 存
+  储取 `apiKey`；本项目把密钥交给
   **harness 凭据 seam**（`ctx.credentials.resolve(CredentialRef)`），**每次调用重新解析、不缓存**，
   所以轮换后的 key 下一次判定即生效；settings 里只存**引用名**，不存密钥，卡片的 `apiKeyRef` 字段
   因此是一个不带秘密的字符串。seam 是可选依赖（`ctx.get('credentials')`）：没有凭据提供方时端点

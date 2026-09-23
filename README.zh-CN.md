@@ -16,7 +16,7 @@
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
 [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#开发)
-[![Coverage](https://img.shields.io/badge/coverage-83.21%25%20lines-green)](.github/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-83.25%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -272,7 +272,7 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（22 个文件、399 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
+npm test            # vitest（22 个文件、401 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
 npm run typecheck
 ```
 

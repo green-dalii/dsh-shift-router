@@ -449,9 +449,19 @@ POST <routing.judge.decision.baseUrl>/v1/systemone
 - **Credentials** come from the credential seam: `apiKeyRef` is a
   `CredentialRef`, resolved **per call** through `ctx.credentials` and never
   cached, so a rotated key reaches the next judgement. An empty or absent ref
-  means the endpoint authenticates ambiently. The seam is an optional
-  dependency: with no credentials provider the endpoint simply does not resolve
-  and the ladder uses rung 2.
+  means the endpoint authenticates ambiently. A reference that cannot be
+  resolved — absent, or rejected by the seam as an invalid name — is a
+  configuration state, not an outage: it cools nothing down. The seam is an
+  optional dependency: with no credentials provider the endpoint simply does not
+  resolve and the ladder uses rung 2.
+- **The key is sent as `Authorization: Bearer <key>`.** The decision API is not
+  the Anthropic message shape, so it does not use `x-api-key`; the two are
+  different branches of the same transport, and picking the wrong one is a 401 on
+  every call that the ladder would otherwise report as a quiet outage.
+- **A failure says why.** A non-2xx status, a non-JSON reply, and a JSON reply
+  carrying no usable choice each log the status and a bounded slice of what
+  actually came back — never the key. Without that, a hand-wired Beta endpoint
+  and a provider outage are indistinguishable from the outside.
 - **The plugin owns this transport**, because the harness LLM seam is
   chat-shaped (`LlmCallConfig` in, `StreamChunk` out) and a decision request has
   no chat encoding — routing it through the seam would mean inventing a private

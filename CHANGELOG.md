@@ -46,7 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call (a rotated key reaches the next verdict, and no secret enters the settings document), and
   `DECISION_MIN_JUDGE_TIMEOUT_MS` floors the call at 15 s, taken from upstream's measured 1.4–6.6 s
   per verdict rather than from the feature list. A decision response reports the resolved model id, so
-  the `jev-latest` alias stays observable and a version move is logged.
+  the `jev-latest` alias stays observable and a version move is logged. Requests authenticate with
+  `Authorization: Bearer` (the decision API is not the Anthropic message shape, so `x-api-key` would
+  be a 401 on every call), and a non-2xx status, an unreadable reply or a reply with no usable choice
+  each log the status and a bounded slice of what came back — never the key.
 
 ### Changed
 
