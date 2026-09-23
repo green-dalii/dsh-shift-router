@@ -24,7 +24,7 @@ a transport layer.
   provider failure signatures.
 - USD budget cap as a product feature (spend is telemetry; the orchestration
   *cap* is a loop guard, not a billing feature).
-- Heuristic Judge fallback — the Judge either returns or the router holds.
+- Heuristic Judge fallback — the Judge either returns a verdict or the router stops routing (rung 3, §6.3).
 - Cross-session persistent routing state — state is per-agent, in-memory.
 - Local ML / ONNX inference.
 - Runtime npm dependencies beyond the harness's own packages.
@@ -62,7 +62,10 @@ assigned them; the router must never re-route a worker.
 - **tier** — `fast` (engineer / execution driver) or `smart` (CTO / judgment driver).
 - **decisive** — a Judge verdict whose confidence passes `minConfidence` and
   whose source is the LLM (not a fallback).
-- **hold** — the router keeps the current tier because it has no usable signal.
+- **hold** — a verdict arrived but is too weak to act on: the router keeps the
+  current tier **and** the wire (§2 step 3).
+- **release** — no verdict arrived at all: the router stops owning the turn and
+  gives the wire back to the session's own model (§2 step 2, §6.3).
 
 ### 1.4 Cordis plugin invariants
 

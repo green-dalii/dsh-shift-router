@@ -35,7 +35,7 @@ shape, not a recommendation.
 The Fast tier runs most turns, so it is judged on three things at once: **cheap, quick, and good
 enough on routine edits** (bug fixes, small refactors, doc updates, tests). It is also the tier the
 **Judge** runs on, so its price and latency are paid on *every* turn whether or not the turn stays on
-Fast ([SPEC §6.4](../SPEC.md#64-judge-model)). Prefer a cheap model whose context window still holds
+Fast ([SPEC §6.4](../SPEC.md#64-judge-source)). Prefer a cheap model whose context window still holds
 your working set, and one that accepts images if anyone pastes screenshots.
 
 | Model (as advertised by OpenRouter) | Context | Input modalities | Price / 1M tokens (in → out) |
