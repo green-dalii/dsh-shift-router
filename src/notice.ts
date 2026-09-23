@@ -54,6 +54,12 @@ export interface RouteNoticeInput {
   reason?: string
   /** The Judge gave no usable signal, so the router kept its position. */
   held: boolean
+  /**
+   * …and it gave the wire back (rung 3, SPEC §6.3): no Judge at all means no
+   * routing, so this is not a switch and not a hold either — nothing was held
+   * back, the turn simply runs on the session's own model.
+   */
+  released?: boolean
   /** The Judge asked for task-level orchestration (only `true` is news). */
   orchestrate?: boolean
   /** Wall time the classification + decision took. */
@@ -127,7 +133,12 @@ export function formatRouteNotice(input: RouteNoticeInput, labels: TierLabels): 
 
   let body: string
   let summary: string
-  if (input.fromModel === null) {
+  if (input.released === true) {
+    // Reported before the first-turn branch: "initial → …" would announce a
+    // route the router deliberately did not choose.
+    body = `no judge · not routing · ${labels[input.fromTier]} · ${fromModel} · ${report} · ${elapsed}`
+    summary = 'shift-router · no judge · not routing'
+  } else if (input.fromModel === null) {
     // The route is being established; the Judge's report carries any hold.
     body = `initial → ${toLabel} · ${toModel} · ${report} · ${elapsed}`
     summary = `shift-router · initial → ${toLabel} · ${toModel}`

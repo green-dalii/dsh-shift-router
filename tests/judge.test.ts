@@ -11,8 +11,24 @@ import {
   parseJudgeAnswer,
   parseOrchestrateFromText,
   type JudgeCallOutcome,
+  type JudgeCalls,
+  type JudgeStreamCall,
 } from '../src/judge.js'
 import type { ModelRef } from '../src/types.js'
+
+/**
+ * `classify()` now dispatches over the availability ladder, so it takes both
+ * callers. These tests all exercise the chat path; the decision path has its
+ * own file (`judge-decision.test.ts`).
+ */
+function chatOnly(chat: JudgeStreamCall): JudgeCalls {
+  return {
+    chat,
+    decision: async () => {
+      throw new Error('decision rung must not be reached by a chat-chain test')
+    },
+  }
+}
 
 describe('extractTier', () => {
   it('parses strict JSON', () => {
@@ -66,13 +82,13 @@ describe('classify', () => {
       if (model === 'm2') return { ok: true, result: { tier: 'smart', source: 'llm', confidence: 0.9 } }
       return { ok: false, code: null }
     }
-    const result = await classify('hello', chain, streamCall, 1000)
+    const result = await classify('hello', chain, chatOnly(streamCall), 1000)
     expect(result).toEqual({ tier: 'smart', source: 'llm', confidence: 0.9 })
     expect(calls).toEqual(['p1/m1', 'p1/m2'])
   })
 
-  it('holds position (fast/fallback) when every model fails', async () => {
-    const result = await classify('hello', chain, async () => ({ ok: false, code: '429' }), 1000)
+  it('reports no verdict (fast/fallback) when every model fails', async () => {
+    const result = await classify('hello', chain, chatOnly(async () => ({ ok: false, code: '429' })), 1000)
     expect(result).toEqual({ tier: 'fast', source: 'fallback' })
   })
 
@@ -82,7 +98,7 @@ describe('classify', () => {
       calls.push(`${provider}/${model}`)
       return { ok: true, result: { tier: 'fast', source: 'llm' } }
     }
-    await classify('hello', chain, streamCall, 1000, (p, m) => m === 'm1')
+    await classify('hello', chain, chatOnly(streamCall), 1000, (p, m) => m === 'm1')
     expect(calls).toEqual(['p1/m2'])
   })
 
@@ -92,50 +108,54 @@ describe('classify', () => {
       if (model === 'm1') return { ok: false, code: '429' }
       return { ok: false, code: null } // network — no onFailure
     }
-    await classify('hello', chain, streamCall, 1000, undefined, (p, m, code) => {
+    await classify('hello', chain, chatOnly(streamCall), 1000, undefined, (p, m, code) => {
       failures.push(`${p}/${m}:${code}`)
     })
     expect(failures).toEqual(['p1/m1:429'])
   })
 
-  it('sorts the chain by priority', async () => {
+  it('walks the chain in the order it was given', async () => {
+    // Priority ordering is `judgeChainFor`'s job, and is tested there: the
+    // ladder's ORDER is what makes a configured judge rung 1, so `classify()`
+    // must not re-sort it out from under the ladder.
     const unsorted: ModelRef[] = [
       { provider: 'p1', model: 'm2', priority: 2 },
       { provider: 'p1', model: 'm1', priority: 1 },
     ]
     const calls: string[] = []
-    await classify('hello', unsorted, async (p, m) => {
+    await classify('hello', unsorted, chatOnly(async (p, m) => {
       calls.push(`${p}/${m}`)
       return { ok: true, result: { tier: 'fast', source: 'llm' } }
-    }, 1000)
-    expect(calls).toEqual(['p1/m1'])
+    }), 1000)
+    expect(calls).toEqual(['p1/m2'])
   })
 
   it('falls back for an empty chain', async () => {
-    const result = await classify('hello', null, async () => ({ ok: false, code: null }), 1000)
+    const result = await classify('hello', null, chatOnly(async () => ({ ok: false, code: null })), 1000)
     expect(result.tier).toBe('fast')
     expect(result.source).toBe('fallback')
   })
 
   it('marks an all-endpoints-failed result as a fallback, never a real verdict', async () => {
-    // The router reads `source === 'fallback'` as a HOLD. If this ever changed
-    // to `source: 'llm'`, two judge outages would silently downgrade a smart
-    // session — the exact upstream bug SPEC §2 step 2 exists to prevent.
+    // The router reads `source === 'fallback'` as rung 3 (a RELEASE). If this
+    // ever changed to `source: 'llm'`, two judge outages would silently
+    // downgrade a smart session — the exact upstream bug SPEC §2 step 2 exists
+    // to prevent.
     const chain: ModelRef[] = [
       { provider: 'p1', model: 'm1', priority: 1 },
       { provider: 'p1', model: 'm2', priority: 2 },
     ]
-    const result = await classify('hello', chain, async () => ({ ok: false, code: '429' }), 1000)
+    const result = await classify('hello', chain, chatOnly(async () => ({ ok: false, code: '429' })), 1000)
     expect(result.source).toBe('fallback')
     expect(result.confidence).toBeUndefined()
   })
 
   it('carries the orchestrate signal through a successful call', async () => {
     const chain: ModelRef[] = [{ provider: 'p1', model: 'm1', priority: 1 }]
-    const result = await classify('hello', chain, async () => ({
+    const result = await classify('hello', chain, chatOnly(async () => ({
       ok: true,
       result: { tier: 'smart', source: 'llm', confidence: 0.9, orchestrate: true },
-    }), 1000)
+    })), 1000)
     expect(result.orchestrate).toBe(true)
   })
 })

@@ -49,11 +49,38 @@ const CacheAwareSchema = z.object({
   sameFamilyThreshold: z.percent(),
 })
 
+const JudgeDecisionSchema = z.object({
+  /**
+   * Empty is the "not configured" state, and it must be a *value* rather than a
+   * required field: the nested object always resolves (so an empty config row
+   * stays a working no-op), and `decision` mode with no URL is simply unusable
+   * — the ladder then uses rung 2 instead of failing the plugin load.
+   */
+  baseUrl: z.string().default(''),
+  model: z.string().default('jev-latest'),
+  /** A credential *reference* (POSIX name); `''` = ambient authentication. */
+  apiKeyRef: z.string().default(''),
+})
+
+const JudgeSchema = z.object({
+  /**
+   * Deliberately **no default**: absence is load-bearing here. A stored
+   * `models` list with no `mode` is the pre-0.7.0 shape and must be inferable as
+   * `custom`; a schema default would fill `fast-chain` in and make the list
+   * silently inert. `normalizeJudgeMode()` supplies the effective value
+   * (`fast-chain`) for every other case, including an unknown one.
+   */
+  mode: z.union(['fast-chain', 'custom', 'decision']),
+  models: z.array(ModelRefSchema).default([]),
+  decision: JudgeDecisionSchema,
+})
+
 const RoutingSchema = z.object({
   mode: z.union(['auto', 'manual', 'off']).default('auto'),
   judgeTimeout: z.natural().min(1).max(120_000).default(5000),
   judgeMaxTokens: z.natural().min(1).max(100_000).default(4000),
   judgePromptCap: z.natural().min(1).max(1_000_000).default(6000),
+  judge: JudgeSchema,
   economics: EconomicsSchema,
   window: WindowSchema,
   cacheAware: CacheAwareSchema,

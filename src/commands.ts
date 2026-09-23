@@ -304,7 +304,7 @@ function buildStatusText(config: ShiftRouterConfig, state: RouterState, deps: Co
   const last = state.lastDecision
   const sLast = last === null
     ? '  (no decision yet this session)'
-    : `  ${last.held ? '🅷 hold' : last.action} → ${last.decisionTier}` +
+    : `  ${last.released ? '🅷 no judge (not routing)' : last.held ? '🅷 hold' : last.action} → ${last.decisionTier}` +
       ` (verdict ${last.verdictTier}` +
       (last.confidence !== undefined ? ` conf=${last.confidence.toFixed(2)}` : '') +
       `)` +

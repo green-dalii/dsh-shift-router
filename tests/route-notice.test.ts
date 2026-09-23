@@ -46,6 +46,47 @@ function input(overrides: Partial<RouteNoticeInput> = {}): RouteNoticeInput {
   }
 }
 
+describe('a released turn (rung 3, SPEC §6.3)', () => {
+  it('says no judge, not "hold" — nothing was held back', () => {
+    const notice = formatRouteNotice(input({
+      action: 'stay',
+      toTier: 'fast',
+      toProvider: 'opencode-go',
+      toModel: 'deepseek-v4-flash',
+      judgeTier: 'fast',
+      judgeSource: 'fallback',
+      confidence: undefined,
+      reason: undefined,
+      held: true,
+      released: true,
+    }), LABELS)
+    expect(notice.text).toContain('no judge · not routing')
+    expect(notice.text).not.toContain('hold')
+    expect(notice.summary).toBe('shift-router · no judge · not routing')
+  })
+
+  it('reports the route it did NOT move, even on a first turn', () => {
+    // Release is checked before the first-turn branch: "initial → Smart" would
+    // announce a route the router deliberately refused to choose.
+    const notice = formatRouteNotice(input({
+      action: 'stay',
+      fromModel: null,
+      fromProvider: null,
+      toModel: null,
+      toProvider: null,
+      toTier: 'fast',
+      judgeSource: 'fallback',
+      confidence: undefined,
+      reason: undefined,
+      held: true,
+      released: true,
+    }), LABELS)
+    expect(notice.text).toContain('no judge · not routing')
+    expect(notice.text).not.toContain('initial')
+    expect(notice.text).toContain('(none)')
+  })
+})
+
 describe('routeChanged', () => {
   it('is true when the tier moves', () => {
     expect(routeChanged(input())).toBe(true)

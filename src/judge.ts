@@ -7,23 +7,38 @@
  * provider failure signatures.
  *
  * On failure the Judge reports `source: 'fallback'`, which the router treats
- * as a HOLD (keep the current tier). The `tier` value carried alongside a
- * fallback is a type-compatible placeholder, never evidence — treating an
- * outage as a decisive `fast` verdict is what silently downgraded Smart
- * sessions upstream.
+ * as rung 3 of the availability ladder: with no judge at all it stops routing
+ * rather than deciding without evidence (SPEC §2 step 2, §6.3). The `tier`
+ * value carried alongside a fallback is a type-compatible placeholder, never
+ * evidence — treating an outage as a decisive `fast` verdict is what silently
+ * downgraded Smart sessions upstream.
  *
- * DSH adaptation: the judge call goes through `ctx.llm.stream()` instead of
- * a hand-built fetch to pi's models-store/auth endpoints. Credentials,
+ * DSH adaptation: a `chat` judge call goes through `ctx.llm.stream()` instead
+ * of a hand-built fetch to pi's models-store/auth endpoints. Credentials,
  * adapters, JSON-mode enforcement, and provider retry are the harness's job.
- * The Judge walks the fast tier chain in priority order, skipping models in
+ * The Judge walks the availability ladder in order, skipping models in
  * cooldown, and marks failover-worthy failures into the shared cooldown map
  * (same policy as the turn path).
+ *
+ * A `decision` judge call (SPEC §6.6) is the one exception, and deliberately
+ * so: the LLM seam is chat-shaped (`LlmCallConfig` in, `StreamChunk` out) and a
+ * decision request has no chat encoding, so routing it through the seam would
+ * mean inventing a private one. The transport lives here instead, with the
+ * credential still taken from the harness credential seam per call.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
-import type { JudgeResult, Tier, ModelRef } from './types.js'
+import type {
+  JudgeChainEntry,
+  JudgeChainInput,
+  JudgeMode,
+  JudgeResult,
+  ModelRef,
+  ShiftRouterConfig,
+  Tier,
+} from './types.js'
 import { detectFailoverError } from './failover.js'
 
 // ─── Judge system prompt ──────────────────────────────────────────
@@ -388,50 +403,389 @@ export function failureCodeFromFailure(failure: LlmFailure): string | null {
   return det ? det.code : null
 }
 
+// ─── Judge source and availability ladder (SPEC §6.3, §6.4) ───────
+
+/**
+ * A decision call is floored at this, measured rather than assumed: live runs
+ * against the TypeSafe decision endpoint returned in **1.4–6.6 s**, dominated
+ * by service-side inference and not by payload size (upstream measured 8 calls
+ * at 458–2265 input tokens, 2026-09-18). The LLM judge's 5 s default would
+ * abort most decision calls, and an aborted judge releases the turn (SPEC
+ * §6.3) — the feature would be present and unusable.
+ */
+export const DECISION_MIN_JUDGE_TIMEOUT_MS = 15_000
+
+/**
+ * Bookkeeping label for the decision endpoint's "provider" slot.
+ *
+ * A decision endpoint is configured by URL, not by a harness provider route, so
+ * it has no route key of its own; the ladder still needs one for dedup and for
+ * cooldown keying. This is a label in our own namespace, never a provider name
+ * a deployment could collide with.
+ */
+export const DECISION_PROVIDER_LABEL = 'decision'
+
+/**
+ * The Judge's effective source mode from whatever shape the config is in
+ * (SPEC §6.4's migration contract):
+ *
+ * - a known mode is honoured as-is;
+ * - `models` present with **no** mode is `custom` — the migration case, where
+ *   the merged default (`fast-chain`) would silently discard the list, so
+ *   inferring `custom` is the only reading that keeps the user's intent;
+ * - anything else (absent, unknown, an empty list) is `fast-chain`, so a typo
+ *   or a hand-edit degrades to what every old config already did instead of
+ *   bricking routing.
+ */
+export function normalizeJudgeMode(judge?: { mode?: string; models?: readonly unknown[] }): JudgeMode {
+  const raw = judge?.mode
+  if (raw === 'fast-chain' || raw === 'custom' || raw === 'decision') return raw
+  if (raw === undefined && (judge?.models?.length ?? 0) > 0) return 'custom'
+  return 'fast-chain'
+}
+
+/** `priority` ascending, stable — the configured order is a fallback order. */
+function byPriority(a: ModelRef, b: ModelRef): number {
+  return a.priority - b.priority
+}
+
+/** Whether an unknown `mode` was reported as `fast-chain` by the normalizer. */
+export function judgeModeWasNormalized(judge?: { mode?: string }): boolean {
+  const raw = judge?.mode
+  return raw !== undefined && normalizeJudgeMode(judge) !== raw
+}
+
+/**
+ * The Judge's availability ladder (SPEC §6.3), as one ordered list.
+ *
+ * Rung 1 is the configured source (`custom`'s chain, or the `decision`
+ * endpoint) and rung 2 is the Fast chain. Concatenating them means a single
+ * `classify()` walk covers *both* ways rung 1 can fail — unresolvable, or
+ * failing at call time (429, 5xx, timeout, cooldown) — instead of losing the
+ * turn's routing to a transient error while a working judge is one rung away.
+ *
+ * `priority` orders entries *within* a rung; the rung order is authoritative.
+ * Rung 1 resolves only what the user configured: substituting a cheaper model
+ * would judge the turn with something they did not choose.
+ */
+export function judgeChainFor(config: ShiftRouterConfig): JudgeChainEntry[] {
+  const fast: JudgeChainEntry[] = [...(config.tiers.fast?.models ?? [])]
+    .sort(byPriority)
+    .map((ref) => ({ ...ref, kind: 'chat' as const }))
+
+  const mode = normalizeJudgeMode(config.routing?.judge)
+  let configured: JudgeChainEntry[] = []
+  if (mode === 'custom') {
+    configured = [...(config.routing.judge?.models ?? [])]
+      .sort(byPriority)
+      .map((ref) => ({ ...ref, kind: 'chat' as const }))
+  } else if (mode === 'decision') {
+    const baseUrl = config.routing.judge?.decision?.baseUrl?.trim() ?? ''
+    if (baseUrl) {
+      const model = config.routing.judge?.decision?.model?.trim() || 'jev-latest'
+      configured = [{ provider: DECISION_PROVIDER_LABEL, model, priority: 1, kind: 'decision' }]
+    }
+  }
+
+  const seen = new Set<string>()
+  const ladder: JudgeChainEntry[] = []
+  for (const entry of [...configured, ...fast]) {
+    const key = `${entry.provider}/${entry.model}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    ladder.push(entry)
+  }
+  return ladder
+}
+
+/**
+ * The per-attempt timeout for one ladder entry. A decision call carries the
+ * measured floor; a chat call is left exactly as configured.
+ */
+export function judgeTimeoutFor(kind: 'chat' | 'decision', configured: number): number {
+  return kind === 'decision' ? Math.max(configured, DECISION_MIN_JUDGE_TIMEOUT_MS) : configured
+}
+
+// ─── Decision protocol (SPEC §6.6) ────────────────────────────────
+
+/** The decision endpoint's path, appended to `routing.judge.decision.baseUrl`. */
+const DECISION_API_PATH = '/v1/systemone'
+
+/**
+ * Fixed orchestration criteria. Like `JUDGE_PROMPT` these are the *rubric*, not
+ * a deployment parameter: which turns deserve orchestration is our opinion, and
+ * a deployment that disagrees edits the tier choices, not this sentence.
+ */
+const DECISION_ORCHESTRATE_INSTRUCTIONS =
+  'This turn should be orchestrated (a Smart main agent planning phases and delegating ' +
+  'to Fast workers) rather than handled inline by a single agent.'
+
+/** The tier rubric sent to a decision model, keyed by the answer it may give. */
+const DECISION_TIER_CRITERIA = {
+  fast: 'Routine, well-specified work: execution, small fixes, following existing patterns.',
+  smart: 'Complex, ambiguous, high-stakes, cross-cutting, or architecture-level work.',
+} as const
+
+const DECISION_ORCHESTRATE_CRITERIA = {
+  true: 'Multi-phase work that benefits from delegation to workers.',
+  false: 'Single-agent work; inline execution is appropriate.',
+} as const
+
+/** `<baseUrl>/v1/systemone`, tolerant of a trailing slash in configuration. */
+export function judgeApiUrl(baseUrl: string): string {
+  return `${baseUrl.trim().replace(/\/+$/, '')}${DECISION_API_PATH}`
+}
+
+/**
+ * The request body: one `choice` question for the tier and one `noul` (numeric,
+ * yes/no) question for orchestration, both in the single POST that is one
+ * judgement. Shape frozen from upstream's `buildDecisionRequestBody()`.
+ */
+export function buildDecisionRequestBody(model: string, prompt: string): Record<string, unknown> {
+  return {
+    model,
+    state: prompt,
+    questions: {
+      tier: { type: 'choice', instructions: JUDGE_PROMPT, criteria: DECISION_TIER_CRITERIA },
+      orchestrate: {
+        type: 'noul',
+        instructions: DECISION_ORCHESTRATE_INSTRUCTIONS,
+        criteria: DECISION_ORCHESTRATE_CRITERIA,
+      },
+    },
+  }
+}
+
+/** Answers ride in an `answers` envelope or as a bare map; both are accepted. */
+function decisionAnswers(raw: unknown): Record<string, unknown> | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const wrapped = record.answers
+  if (wrapped !== null && typeof wrapped === 'object') return wrapped as Record<string, unknown>
+  return record
+}
+
+/** The model version that answered, when the endpoint reports one. */
+export function resolvedModelOf(raw: unknown): string | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined
+  const model = (raw as Record<string, unknown>).model
+  return typeof model === 'string' && model.length > 0 ? model : undefined
+}
+
+/**
+ * Map a decision response onto the Judge's parse contract.
+ *
+ * Returns null — which the caller treats as a failed attempt, so the ladder
+ * keeps walking — whenever no usable tier answer is present. A decision model
+ * must never be guessed at, and an out-of-set choice is not a verdict.
+ *
+ * `confidence` is `probabilities[choice]`, i.e. the probability of the tier the
+ * model actually chose, so `pSmartOf()` (SPEC §3) reads the same evidence and
+ * needs no re-scaling.
+ */
+export function parseDecisionResponse(raw: unknown): ParsedJudgeResponse | null {
+  try {
+    const answers = decisionAnswers(raw)
+    const tierAnswer = answers?.tier
+    if (tierAnswer === null || typeof tierAnswer !== 'object') return null
+    const tier = tierAnswer as Record<string, unknown>
+
+    const choice = typeof tier.choice === 'string' ? tier.choice.toLowerCase() : null
+    if (choice !== 'fast' && choice !== 'smart') return null
+
+    const probabilities = tier.probabilities
+    const probability = probabilities !== null && typeof probabilities === 'object'
+      ? (probabilities as Record<string, unknown>)[choice]
+      : undefined
+    const confidence = typeof probability === 'number'
+      ? probability
+      : typeof tier.confidence === 'number'
+        ? tier.confidence
+        : undefined
+
+    const noulRaw = answers?.orchestrate
+    const noul = typeof noulRaw === 'number'
+      ? noulRaw
+      : noulRaw !== null && typeof noulRaw === 'object'
+        ? (noulRaw as Record<string, unknown>).noul
+        : undefined
+    const orchestrate = typeof noul === 'number' ? noul >= 0.5 : undefined
+
+    return {
+      tier: choice,
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(orchestrate !== undefined ? { orchestrate } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Derive a failover signature from a decision endpoint's HTTP status, in the
+ * same vocabulary the harness failures use: 429 and 402 are the two codes the
+ * router's cooldown ladder and its "insufficient balance" handling recognise,
+ * and 5xx is the server-error family. Anything else (notably 401/403 — a
+ * configuration mistake, not a transient outage) cools nothing, exactly as a
+ * chat attempt's auth failure does not.
+ */
+export function decisionFailureCode(status: number): string | null {
+  if (status === 429) return '429'
+  if (status === 402) return '402'
+  if (status >= 500 && status < 600) return String(status)
+  return null
+}
+
+/** One decision-model attempt against one ladder entry. */
+export interface DecisionCall {
+  (entry: JudgeChainEntry, prompt: string, signal: AbortSignal): Promise<JudgeCallOutcome>
+}
+
+/**
+ * What a decision call needs from its deployment. `baseUrl` and `apiKeyRef` are
+ * configuration; `resolveKey` is the harness credential seam, injected so the
+ * transport stays testable and so the plugin holds no second credential path.
+ */
+export interface DecisionCallDeps {
+  baseUrl: string
+  apiKeyRef: string
+  /**
+   * Resolve a credential reference to its value. Absent when the deployment
+   * mounts no credentials provider — the endpoint then cannot authenticate, so
+   * the call fails and the ladder uses rung 2 rather than the plugin failing to
+   * load.
+   */
+  resolveKey?: (ref: string) => Promise<string | undefined>
+  fetchImpl?: typeof fetch
+  log?: (message: string) => void
+}
+
+/**
+ * Build the decision transport for one configured endpoint.
+ *
+ * Deliberately a direct POST rather than a harness LLM-seam call: the seam is
+ * chat-shaped, so carrying a decision request through it would mean inventing a
+ * private encoding (ALIGNMENT §R12.1). Credentials still come from the seam.
+ */
+export function createDecisionCall(deps: DecisionCallDeps): DecisionCall {
+  const url = judgeApiUrl(deps.baseUrl)
+  const fetchImpl = deps.fetchImpl ?? fetch
+
+  return async (entry, prompt, signal) => {
+    let key: string | undefined
+    if (deps.apiKeyRef) {
+      key = await deps.resolveKey?.(deps.apiKeyRef)
+      if (key === undefined) {
+        // Configured but unavailable: a structural failure, never a cooldown —
+        // the same model will be just as unavailable next turn.
+        deps.log?.(`judge decision: credential "${deps.apiKeyRef}" is not configured`)
+        return { ok: false, code: null }
+      }
+    }
+
+    let response: Response
+    try {
+      response = await fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(key === undefined ? {} : { 'x-api-key': key }),
+        },
+        body: JSON.stringify(buildDecisionRequestBody(entry.model, prompt)),
+        signal,
+      })
+    } catch (error) {
+      // A network error or an abort (the caller's timeout, or the turn's own
+      // signal) is not a failover signature.
+      deps.log?.(`judge decision: request failed — ${error instanceof Error ? error.message : String(error)}`)
+      return { ok: false, code: null }
+    }
+
+    if (!response.ok) {
+      return { ok: false, code: decisionFailureCode(response.status) }
+    }
+
+    let raw: unknown
+    try {
+      raw = await response.json()
+    } catch {
+      return { ok: false, code: null }
+    }
+
+    const answer = parseDecisionResponse(raw)
+    if (!answer) return { ok: false, code: null }
+
+    const resolvedModel = resolvedModelOf(raw)
+    const result: JudgeResult = {
+      tier: answer.tier,
+      source: 'llm',
+      ...(answer.confidence !== undefined ? { confidence: answer.confidence } : {}),
+      ...(answer.orchestrate !== undefined ? { orchestrate: answer.orchestrate } : {}),
+      ...(resolvedModel !== undefined ? { resolvedModel } : {}),
+    }
+    return { ok: true, result }
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────
 
 /**
- * Unified task classifier with fast-tier fallback.
+ * The two callers `classify()` dispatches to. Both are injected so tests can
+ * substitute fakes; index.ts wires the real ones (the harness stream for
+ * `chat`, the decision transport for `decision`).
+ */
+export interface JudgeCalls {
+  chat: JudgeStreamCall
+  decision: DecisionCall
+}
+
+/**
+ * Unified task classifier over the Judge's availability ladder (SPEC §6.3).
  *
- * `chain` is the fast tier's model list (priority order). The Judge walks it:
- * each failed call (failover or not) tries the next model. `isCooldown`
- * skips models in cooldown; `onFailure` (if provided) is invoked with a
- * failover signature code on each failover-worthy failure so the caller can
- * mark it into the shared cooldown map. Network errors, timeouts, and
+ * `chain` is the ladder (see `judgeChainFor`) **in walk order** — the order is
+ * authoritative, because a configured judge is rung 1 whatever its `priority`
+ * says. Each failed attempt (failover or not) tries the next entry, so an
+ * unusable or transiently failing rung 1 falls through to the Fast chain in the
+ * same turn instead of costing the turn its routing.
+ *
+ * `isCooldown` skips entries in cooldown; `onFailure` (if provided) is invoked
+ * with a failover signature code on each failover-worthy failure so the caller
+ * can mark it into the shared cooldown map. Network errors, timeouts, and
  * unparseable responses do NOT call `onFailure` — they are not failover
  * signatures.
  *
  * `externalSignal` (the owning turn's abort signal, when any) is fused with
- * the per-attempt timeout so an aborted turn cancels the judge promptly.
+ * the per-attempt timeout so an aborted turn cancels the judge promptly. A
+ * decision attempt's timeout carries the measured floor (§6.6).
  *
- * When ALL fast-tier models fail the result is `source: 'fallback'`, which the
- * router treats as a HOLD (SPEC §2). The `tier` field in that case is a
- * type-compatible placeholder and must never be read as a verdict — the caller
- * checks `source`.
+ * When EVERY entry fails the result is `source: 'fallback'` — rung 3, which the
+ * router treats as a RELEASE, not a hold (SPEC §2 step 2). The `tier` field in
+ * that case is a type-compatible placeholder and must never be read as a
+ * verdict — the caller checks `source`.
  */
 export async function classify(
   prompt: string,
-  chain: ModelRef[] | null | undefined,
-  streamCall: JudgeStreamCall,
+  chain: readonly JudgeChainInput[] | null | undefined,
+  calls: JudgeCalls,
   timeout = 5000,
   isCooldown?: (provider: string, model: string) => boolean,
   onFailure?: (provider: string, model: string, code: string) => void,
   externalSignal?: AbortSignal,
 ): Promise<JudgeResult> {
-  const list = chain ?? []
-  const sorted = [...list].sort((a, b) => a.priority - b.priority)
+  for (const entry of chain ?? []) {
+    if (isCooldown?.(entry.provider, entry.model)) continue
 
-  for (const ref of sorted) {
-    if (isCooldown?.(ref.provider, ref.model)) continue
-
+    const kind = entry.kind ?? 'chat'
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeout)
+    const timer = setTimeout(() => controller.abort(), judgeTimeoutFor(kind, timeout))
     let outcome: JudgeCallOutcome
     try {
       const fused = externalSignal === undefined
         ? controller.signal
         : AbortSignal.any([controller.signal, externalSignal])
-      outcome = await streamCall(ref.provider, ref.model, prompt, fused)
+      outcome = kind === 'decision'
+        ? await calls.decision(entry as JudgeChainEntry, prompt, fused)
+        : await calls.chat(entry.provider, entry.model, prompt, fused)
     } finally {
       clearTimeout(timer)
     }
@@ -439,7 +793,7 @@ export async function classify(
     if (outcome.ok) return outcome.result
     // Failover-worthy failure (429/5xx/quota) → let caller cool the model.
     if (outcome.code && onFailure) {
-      onFailure(ref.provider, ref.model, outcome.code)
+      onFailure(entry.provider, entry.model, outcome.code)
     }
   }
 

@@ -44,6 +44,14 @@ export interface JudgeResult {
    * caller falls back to the tier-based default.
    */
   orchestrate?: boolean
+  /**
+   * The model that actually answered, as the source reported it. A decision
+   * endpoint resolves an alias (`jev-latest` → `jev-1.13.0`) and reports the
+   * resolved id, which is what keeps an alias observable instead of quietly
+   * shifting the distribution behind θ (SPEC §6.6). Absent from a chat reply,
+   * which has no such field.
+   */
+  resolvedModel?: string
 }
 
 /** A reference to a specific model in a specific provider */
@@ -140,6 +148,13 @@ export interface RoutingConfig {
   /** Max prompt characters sent to the Judge (bounds Judge cost). */
   judgePromptCap: number
   /**
+   * Where the verdict comes from (SPEC §6.4). The nested object owns the
+   * Judge's *source* while the three flat keys above own its *budget* — one
+   * home per fact, and the budget keys keep their pre-0.7.0 names so no
+   * existing config changes meaning.
+   */
+  judge: JudgeConfig
+  /**
    * Expected-cost economics (SPEC §3). `reworkPenalty` encodes how many
    * price-deltas a wrong downgrade costs; θ = 1/reworkPenalty.
    * `downgradeMemory` = consecutive decisive fast decisions required before
@@ -172,6 +187,63 @@ export interface RoutingConfig {
     sameFamilyThreshold?: number
   }
 }
+
+/**
+ * The Judge's verdict source (SPEC §6.4).
+ *
+ * `fast-chain` is the legacy behaviour and the default; `custom` is a dedicated
+ * judge chain; `decision` is a decision model answering with a calibrated
+ * probability (SPEC §6.6) instead of prose.
+ */
+export type JudgeMode = 'fast-chain' | 'custom' | 'decision'
+
+/** Configuration for a `decision`-mode judge endpoint (SPEC §6.6). */
+export interface JudgeDecisionConfig {
+  /** Endpoint base URL; `/v1/systemone` is appended. Empty = not configured. */
+  baseUrl: string
+  /** Model to request. An alias is allowed — the response reports the resolved id. */
+  model: string
+  /**
+   * POSIX name of the credential holding this endpoint's key, resolved through
+   * the harness credential seam on every call. Empty = ambient authentication.
+   * A *reference*, never a secret: the settings document holds no key.
+   */
+  apiKeyRef: string
+}
+
+/**
+ * Where the Judge's verdict may come from (SPEC §6.4). `models` is the
+ * dedicated chain for `custom`; `decision` configures the decision endpoint.
+ * Both are inert under `fast-chain`, which is what an empty config resolves to.
+ */
+export interface JudgeConfig {
+  /**
+   * Absent until the user picks one, and on purpose: see `src/config.ts`. The
+   * effective value always comes from `normalizeJudgeMode()`.
+   */
+  mode?: JudgeMode
+  models: ModelRef[]
+  decision: JudgeDecisionConfig
+}
+
+/**
+ * One entry of the Judge's availability ladder (SPEC §6.3): what `classify()`
+ * walks. The list order is authoritative — a configured judge is rung 1
+ * whatever its `priority` says, because `priority` orders it within its rung.
+ *
+ * `kind` selects the caller: `chat` goes through the harness LLM seam,
+ * `decision` through the decision protocol (§6.6).
+ */
+export interface JudgeChainEntry extends ModelRef {
+  kind: 'chat' | 'decision'
+}
+
+/**
+ * What `classify()` may be handed: a full {@link JudgeChainEntry}, or a bare
+ * model reference (read as `chat`), so a caller with a plain tier chain does
+ * not have to spell out a default it would only repeat.
+ */
+export type JudgeChainInput = ModelRef & { kind?: 'chat' | 'decision' }
 
 /**
  * Task-level orchestration. When active AND the Judge says complex, the main
@@ -356,6 +428,10 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
     judgeTimeout: 5000,
     judgeMaxTokens: 4000,
     judgePromptCap: 6000,
+    judge: {
+      models: [],
+      decision: { baseUrl: '', model: 'jev-latest', apiKeyRef: '' },
+    },
     economics: { reworkPenalty: 3, downgradeMemory: 2 },
     window: { size: 5, minConfidence: 0.5 },
     cacheAware: {
@@ -412,6 +488,8 @@ export interface LastDecision {
   action: RouteAction
   decisionTier: Tier
   held: boolean
+  /** No Judge at all: the router released this turn instead of holding it. */
+  released: boolean
   at: number
 }
 
@@ -462,6 +540,25 @@ export interface RouterState {
   actualModel: string | null
   /** The most recent routing decision (display only). */
   lastDecision: LastDecision | null
+  /**
+   * The model id a decision endpoint reported for the last verdict
+   * (`jev-latest` → `jev-1.13.0`), or null. Kept so a version move behind an
+   * alias is *visible* in verbose logs instead of quietly shifting the
+   * distribution behind θ (SPEC §6.6).
+   */
+  judgeResolvedModel: string | null
+  /**
+   * Whether this session has already been told the Judge is unusable. Rung 3
+   * repeats every turn the Judge stays unavailable, so its notice is emitted
+   * once per session rather than once per turn (SPEC §13.1).
+   */
+  noJudgeNoticed: boolean
+  /**
+   * The current turn was released (rung 3): `agent/request` must leave the wire
+   * alone for every step of it. Set at turn start, so a multi-step turn cannot
+   * be half-released.
+   */
+  releaseTurn: boolean
   /** Result of the last orchestration acceptance audit (C1), or null. */
   lastAudit: OrchestrationAudit | null
   /**

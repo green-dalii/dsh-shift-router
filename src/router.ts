@@ -60,6 +60,9 @@ export function createRouterState(): RouterState {
     actualProvider: null,
     actualModel: null,
     lastDecision: null,
+    judgeResolvedModel: null,
+    noJudgeNoticed: false,
+    releaseTurn: false,
     lastAudit: null,
     tierUsage: {
       fast: emptyTierUsage(),
@@ -305,15 +308,21 @@ export function processRoute(
         modelId: state.manualOverride.modelId,
         tier,
       }
-      return { switchTo, action: 'manual', decisionTier: switchTo.tier, held: false }
+      return { switchTo, action: 'manual', decisionTier: switchTo.tier, held: false, released: false }
     }
     if (state.manualOverride.tier) {
       const m = findBestModelForTier(state.manualOverride.tier, config, modelAvailable)
-      if (m) return { switchTo: m, action: 'manual', decisionTier: m.tier, held: false }
+      if (m) return { switchTo: m, action: 'manual', decisionTier: m.tier, held: false, released: false }
     }
   }
 
-  // 2. Hold: the Judge was unusable, or it is not confident enough to act.
+  // 2a. No Judge at all — rung 3 of the availability ladder (SPEC §6.3). This
+  //     is a RELEASE, not a hold: with no judge there is no router, so the turn
+  //     keeps the wire it already had instead of running on a tier chosen
+  //     without evidence.
+  if (judgeResult.source === 'fallback') return planNoJudge(state, config, now)
+
+  // 2b. Hold: a verdict arrived but is not confident enough to act on.
   if (!isDecisive(judgeResult, config)) {
     pushWindow(state, {
       tier: judgeResult.tier,
@@ -321,7 +330,7 @@ export function processRoute(
       confidence: judgeResult.confidence,
       hold: true,
     }, config)
-    return { switchTo: null, action: 'stay', decisionTier: state.currentTier, held: true }
+    return { switchTo: null, action: 'stay', decisionTier: state.currentTier, held: true, released: false }
   }
 
   // 3. EV decision.
@@ -339,7 +348,7 @@ export function processRoute(
       // Clear the window on upgrade (fresh start for the new tier).
       state.window = []
       state.upgradeCount += 1
-      return { switchTo: m, action: 'upgrade', decisionTier: 'smart', held: false }
+      return { switchTo: m, action: 'upgrade', decisionTier: 'smart', held: false, released: false }
     }
   }
 
@@ -363,12 +372,35 @@ export function processRoute(
       )
       if (m) {
         state.downgradeCount += 1
-        return { switchTo: m, action: 'downgrade', decisionTier: m.tier, held: false }
+        return { switchTo: m, action: 'downgrade', decisionTier: m.tier, held: false, released: false }
       }
     }
   }
 
-  return { switchTo: null, action: 'stay', decisionTier: state.currentTier, held: false }
+  return { switchTo: null, action: 'stay', decisionTier: state.currentTier, held: false, released: false }
+}
+
+/**
+ * Rung 3: the Judge's whole ladder failed, so the router stops routing (SPEC
+ * §6.3).
+ *
+ * The turn runs on the model the session already had, because `agent/request`
+ * applies no switch at all for a released decision — including the first-turn
+ * initial resolution, which would otherwise be a switch made without evidence.
+ * The window still records a hold entry: the turn carried no verdict, so it
+ * must not extend a downgrade streak (or let an older one survive).
+ *
+ * `/route-force` is checked before this branch (step 1), so an explicit user
+ * override keeps working with a dead Judge — the release restores the *user's*
+ * model, it does not overrule them.
+ */
+export function planNoJudge(
+  state: RouterState,
+  config: ShiftRouterConfig,
+  now: number = Date.now(),
+): RouteDecision {
+  pushWindow(state, { tier: 'fast', timestamp: now, hold: true }, config)
+  return { switchTo: null, action: 'stay', decisionTier: state.currentTier, held: true, released: true }
 }
 
 export interface RouteDecision {
@@ -380,8 +412,15 @@ export interface RouteDecision {
    * than re-deriving a tier from the raw verdict.
    */
   decisionTier: Tier
-  /** The Judge was unusable or non-decisive; the router held position. */
+  /** No usable verdict: either too weak to act on, or no Judge at all. */
   held: boolean
+  /**
+   * …and the router also gave the wire back (rung 3, SPEC §2 step 2): nothing
+   * is switched and the turn runs on the session's own selected model.
+   * `released` implies `held`; a weak verdict is held WITHOUT being released,
+   * because a verdict did arrive and the router therefore keeps its position.
+   */
+  released: boolean
 }
 
 /** Record a decision for display (`/router status`, GUI card). */
@@ -396,6 +435,7 @@ export function recordLastDecision(
     action: decision.action,
     decisionTier: decision.decisionTier,
     held: decision.held,
+    released: decision.released,
     at: now,
   }
   if (judgeResult.confidence !== undefined) last.confidence = judgeResult.confidence

@@ -35,6 +35,10 @@ import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-sessio
 import type {} from '@deepseek-ai/dsh-tools'
 import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+// Type-only: the credential seam (`ctx.credentials`) and its branded
+// reference. Never a runtime import — a deployment without the credentials
+// plugin must load this plugin exactly as before.
+import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { Config, deepMergeConfig } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
 import { DEFAULT_CONFIG, TIERS } from './types.js'
@@ -49,7 +53,17 @@ import {
   setManualOverrideModel,
   recordLastDecision,
 } from './router.js'
-import { classify, defaultJudgeStreamCall, streamAssistantText, type JudgeStreamCall } from './judge.js'
+import {
+  classify,
+  createDecisionCall,
+  defaultJudgeStreamCall,
+  judgeChainFor,
+  judgeModeWasNormalized,
+  normalizeJudgeMode,
+  streamAssistantText,
+  type JudgeCalls,
+  type JudgeStreamCall,
+} from './judge.js'
 import {
   markModelFailed,
   clearModelCooldown,
@@ -328,6 +342,39 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   const judgeStreamCall: JudgeStreamCall = (provider, model, prompt, signal) =>
     defaultJudgeStreamCall(ctx, prompt, provider, model, signal, getConfig().routing.judgeMaxTokens)
 
+  /**
+   * Resolve the decision endpoint's key through the harness credential seam
+   * (SPEC §6.6). Optional on purpose: a deployment may mount no credentials
+   * provider, and then a `decision` judge simply cannot authenticate — the
+   * ladder falls to the Fast chain instead of the plugin failing to load.
+   * Resolution is per judgement, so a rotated key reaches the next verdict.
+   */
+  const resolveCredentialValue = async (ref: string): Promise<string | undefined> => {
+    const credentials = ctx.get('credentials')
+    if (!credentials) return undefined
+    const resolved = await credentials.resolve(ref as CredentialRef)
+    return resolved?.value
+  }
+
+  /**
+   * The two callers the ladder walk uses (SPEC §6.3): the harness stream for a
+   * `chat` entry and the decision transport for a `decision` one. The decision
+   * call is built per judgement so a live config edit (base URL, key reference)
+   * takes effect on the next turn without a reload.
+   */
+  const judgeCalls: JudgeCalls = {
+    chat: judgeStreamCall,
+    decision: (entry, prompt, signal) => {
+      const judgeCfg = getConfig().routing.judge
+      return createDecisionCall({
+        baseUrl: judgeCfg.decision.baseUrl,
+        apiKeyRef: judgeCfg.decision.apiKeyRef,
+        resolveKey: resolveCredentialValue,
+        log: vlog,
+      })(entry, prompt, signal)
+    },
+  }
+
   // ── Turn start: classify + route + (maybe) orchestrate ──────────────
   ctx.on('agent/pre-step', async (
     { agent, messages, step, signal },
@@ -373,8 +420,8 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     try {
       judgeResult = await classify(
         prompt,
-        cfg.tiers.fast.models,
-        judgeStreamCall,
+        judgeChainFor(cfg),
+        judgeCalls,
         cfg.routing.judgeTimeout,
         cooldownPredicate(state.modelCooldowns, Date.now()),
         (provider, model, code) => markModelFailed(state.modelCooldowns, provider, model, Date.now(), code, failoverPolicy),
@@ -410,7 +457,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     if (result.switchTo) {
       applyModelSwitch(result.switchTo, state)
       vlog(`decision: ${result.action} → ${result.switchTo.provider}/${result.switchTo.modelId} (${Date.now() - t0}ms)`)
-    } else if (!state.currentModelId && state.currentTier) {
+    } else if (!result.released && !state.currentModelId && state.currentTier) {
       // First turn with no model yet — resolve one for the current tier,
       // skipping models in cooldown (mirrors pi's first-turn behavior).
       const m = await resolveBestModel(state.currentTier, state)
@@ -420,8 +467,29 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       }
     }
     recordLastDecision(state, judgeResult, result)
-    if (result.held) {
-      vlog('decision: HOLD — Judge gave no usable signal, keeping the current tier')
+    // Consumed by `agent/request` for every step of this turn; the next turn's
+    // pre-step overwrites it.
+    state.releaseTurn = result.released
+    if (result.released) {
+      vlog(
+        'decision: RELEASE — every judge rung failed, so this turn runs on the ' +
+          'session\'s own model (no switch, no orchestration)',
+      )
+    } else if (result.held) {
+      vlog('decision: HOLD — the verdict is below minConfidence, keeping the current tier')
+    }
+    // A decision endpoint resolves an alias and reports the real id
+    // (`jev-latest` → `jev-1.13.0`). Logging the move is what makes an alias
+    // safe to default to: without it a vendor-side version change would shift
+    // the distribution behind θ invisibly (SPEC §6.6).
+    if (judgeResult.resolvedModel !== undefined && judgeResult.resolvedModel !== state.judgeResolvedModel) {
+      const previousJudgeModel = state.judgeResolvedModel
+      state.judgeResolvedModel = judgeResult.resolvedModel
+      vlog(
+        previousJudgeModel === null
+          ? `judge model: ${judgeResult.resolvedModel}`
+          : `judge model moved: ${previousJudgeModel} → ${judgeResult.resolvedModel}`,
+      )
     }
 
     // SPEC §13.1 — decide what the session is told. The router overrides the wire
@@ -438,6 +506,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       judgeTier: judgeResult.tier,
       judgeSource: judgeResult.source,
       held: result.held,
+      released: result.released,
       elapsedMs: Date.now() - t0,
       ...(judgeResult.confidence !== undefined ? { confidence: judgeResult.confidence } : {}),
       ...(judgeResult.reason !== undefined ? { reason: judgeResult.reason } : {}),
@@ -468,7 +537,17 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     // A notice is news when the route moved. In verbose mode every judged turn
     // reports, because that is what `ux.routerLogVerbose` promises — a promise a
     // log ring no stock profile exports cannot keep (SPEC §13).
-    if (!routeChanged(notice) && !cfg.ux.routerLogVerbose) return decision
+    //
+    // A RELEASE is the one exception: it repeats every turn the Judge stays
+    // unavailable, so a per-turn line would be noise about a condition that has
+    // not changed. The session hears it once, on the turn routing actually
+    // stopped (SPEC §13.1).
+    if (result.released) {
+      if (state.noJudgeNoticed) return decision
+      state.noJudgeNoticed = true
+    } else if (!routeChanged(notice) && !cfg.ux.routerLogVerbose) {
+      return decision
+    }
     const { text, summary } = formatRouteNotice(notice, {
       fast: tierLabel('fast', cfg),
       smart: tierLabel('smart', cfg),
@@ -520,6 +599,17 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
 
     // Manual mode never auto-switches models; it only honors overrides.
     if (cfg.routing.mode !== 'auto') {
+      recordLastRequest(incoming)
+      return incoming
+    }
+
+    // Rung 3 released this turn (SPEC §2 step 2): with no Judge there is no
+    // router, so the request keeps the model the session already had. This is
+    // what "as if the plugin were not installed" means on the wire — and it is
+    // not a downgrade, because the model is the user's own selection rather
+    // than a tier this plugin chose. Checked after the manual override, so
+    // `/route-force` keeps working with a dead Judge.
+    if (state.releaseTurn) {
       recordLastRequest(incoming)
       return incoming
     }
@@ -1020,6 +1110,33 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // ── Startup diagnostics ────────────────────────────────────────────
   ctx.logger.info('[shift-router] loaded (enabled=%s, orchestration=%s)', getConfig().enabled, getConfig().orchestration.mode)
   if (getConfig().enabled) {
+    // The Judge's source decides what every turn is judged by, so it is stated
+    // at startup rather than discovered in a verbose log. A stored shape that
+    // had to be normalised says so: the migration must be visible, not silent.
+    const judgeCfg = getConfig().routing.judge
+    const judgeMode = normalizeJudgeMode(judgeCfg)
+    ctx.logger.info(
+      '[shift-router] judge source: %s%s',
+      judgeMode,
+      judgeMode === 'fast-chain' ? ' (Fast tier chain)' : judgeMode === 'custom' ? ' (dedicated chain)' : ' (decision endpoint)',
+    )
+    if (judgeModeWasNormalized(judgeCfg)) {
+      ctx.logger.warn(
+        '[shift-router] routing.judge.mode "%s" is not recognised — using %s',
+        judgeCfg?.mode,
+        judgeMode,
+      )
+    } else if (judgeMode === 'custom' && judgeCfg.mode === undefined) {
+      ctx.logger.warn('[shift-router] judge.models present without a mode — migrated to custom')
+    } else if (judgeMode === 'fast-chain' && (judgeCfg.models?.length ?? 0) > 0) {
+      // Inert, not broken: say so rather than let the user wonder why their
+      // dedicated judge chain never runs (the card marks inert fields the same
+      // way, SPEC §12.3).
+      ctx.logger.warn(
+        '[shift-router] routing.judge.models is set but judge.mode is fast-chain — those %d model(s) are unused; set mode to custom to judge with them',
+        judgeCfg.models.length,
+      )
+    }
     const fastKeys = getConfig().tiers.fast.models.map((m) => `${m.provider}/${m.model}`).sort().join(',')
     const smartKeys = getConfig().tiers.smart.models.map((m) => `${m.provider}/${m.model}`).sort().join(',')
     if (fastKeys.length > 0 && fastKeys === smartKeys) {
