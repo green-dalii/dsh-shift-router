@@ -140,6 +140,51 @@ describe('plugin load against a real Cordis context', () => {
   })
 })
 
+describe('the Judge source cannot break the boot', () => {
+  // The live deployment runs `mode: decision` with an endpoint and a credential
+  // name. Nothing about that may fail at LOAD time — resolution, key lookup and
+  // the network call all belong to a turn (SPEC §6.6), and the availability
+  // ladder is what handles them being unavailable.
+  it('loads with a decision judge configured', async () => {
+    const { ctx } = harnessContext()
+    const config = {
+      ...autoConfig(),
+      routing: {
+        mode: 'auto',
+        judge: {
+          mode: 'decision',
+          decision: { baseUrl: 'https://api.example.test', model: 'jev-latest', apiKeyRef: 'TYPESAFE_API_KEY' },
+        },
+      },
+    }
+    await expect(ctx.plugin(plugin, config as never)).resolves.toBeDefined()
+  })
+
+  it('loads when a hand-edited composition sets the Judge block to null', async () => {
+    // `deepMergeConfig` copies an explicit null through, so the diagnostic used
+    // to dereference it during `apply` — the R3 boot-abort class.
+    const { ctx } = harnessContext()
+    await expect(
+      ctx.plugin(plugin, { ...autoConfig(), routing: { mode: 'auto', judge: null } } as never),
+    ).resolves.toBeDefined()
+  })
+
+  it('says which source is in force at startup', async () => {
+    const { ctx } = harnessContext()
+    const info = vi.spyOn(ctx.logger, 'info').mockImplementation(() => undefined)
+    await ctx.plugin(plugin, {
+      ...autoConfig(),
+      routing: { mode: 'auto', judge: { mode: 'decision', decision: { baseUrl: 'https://api.example.test' } } },
+    } as never)
+    // The logger formats with `%s` placeholders, so the mode arrives as an
+    // argument rather than inside the message text.
+    const logged = info.mock.calls.map((call) => call.map(String).join(' ')).join('\n')
+    expect(logged).toContain('judge source:')
+    expect(logged).toContain('decision')
+    info.mockRestore()
+  })
+})
+
 describe('prompt-section placement is configuration, not a literal', () => {
   // Iron rule: can the value be changed in cordis.yml without editing code?
   // DSH allocates prompt order centrally (`SECTION_ORDERS` in dsh-system-prompt)

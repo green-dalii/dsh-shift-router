@@ -365,7 +365,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   const judgeCalls: JudgeCalls = {
     chat: judgeStreamCall,
     decision: (entry, prompt, signal) => {
-      const judgeCfg = getConfig().routing.judge
+      // Optional-chained throughout: `apply` deep-merges the composition over
+    // DEFAULT_CONFIG so this object normally exists, but a hand-edited row can
+    // hand us `judge: null`, and no configuration should be able to abort the
+    // boot from a diagnostic (ALIGNMENT §R3).
+    const judgeCfg = getConfig().routing?.judge
       return createDecisionCall({
         baseUrl: judgeCfg.decision.baseUrl,
         apiKeyRef: judgeCfg.decision.apiKeyRef,
@@ -1126,15 +1130,15 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
         judgeCfg?.mode,
         judgeMode,
       )
-    } else if (judgeMode === 'custom' && judgeCfg.mode === undefined) {
+    } else if (judgeMode === 'custom' && judgeCfg?.mode === undefined) {
       ctx.logger.warn('[shift-router] judge.models present without a mode — migrated to custom')
-    } else if (judgeMode === 'fast-chain' && (judgeCfg.models?.length ?? 0) > 0) {
+    } else if (judgeMode === 'fast-chain' && (judgeCfg?.models?.length ?? 0) > 0) {
       // Inert, not broken: say so rather than let the user wonder why their
       // dedicated judge chain never runs (the card marks inert fields the same
       // way, SPEC §12.3).
       ctx.logger.warn(
         '[shift-router] routing.judge.models is set but judge.mode is fast-chain — those %d model(s) are unused; set mode to custom to judge with them',
-        judgeCfg.models.length,
+        judgeCfg?.models?.length,
       )
     }
     const fastKeys = getConfig().tiers.fast.models.map((m) => `${m.provider}/${m.model}`).sort().join(',')
