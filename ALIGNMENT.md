@@ -816,13 +816,18 @@ POST」，没有 chat 编码；要把它塞进 seam，就得把结构化问题�
 
 ### R12.4 残余不确定性
 
-- **决策协议未在真机验证。** 请求/响应形状、越界 choice 拒绝、`noul` 阈值、超时下限都有单测（fixture
-  按上游 wire 形状写死），但**没有 TypeSafe 密钥**，因此一次真实判定都没跑过。真机验证需要维护者提供
-  key；在此之前 `mode: 'decision'` 的定位是「协议已实现且可单测，未经真机端到端验证」。
-- **`jev-latest` 的默认值依赖上游的别名策略。** 上游的论证是「钉死版本会以最坏方式失败：厂商下线 →
-  裁判永远 hold」，所以默认用别名 + 把解析后的真实 id 记进日志，让版本移动可见。我们沿用该策略，但
-  **没有**核实 TypeSafe 当前是否仍提供 `jev-latest`，也没有核实其计费（上游称仅按输入计费、约
-  $0.0001/次）。
+- ~~决策协议未在真机验证~~ → **已真机验证（§R13.5）**。拿到部署的 key 后跑了 6 次真实判定：
+  HTTP 200、Bearer 被接受、`/v1/systemone` 正确、`jev-latest` 解析为 `jev-1.13.0`，且
+  `parseDecisionResponse` 直接吃下了真实响应。原先「未验证」的定位已作废。
+- ~~`jev-latest` 是否仍提供 / 计费未核实~~ → **已核实（§R13.5）**：别名可用并回报解析后的
+  `jev-1.13.0`；响应带 `usage`（一次小 state 为 input 2275 / output 50），上游 catalog 把 output
+  价定为 0，所以「约 $0.0001/次、成本由输入驱动」与观测一致。
+- **新增的不确定性（由真机测量产生，见 §R13.5）：tier 判定在实测中完全饱和。** 4 个从「显然简单」到
+  「显然复杂」再到「临界」的 prompt 里，`choice` 每次都是硬选择，`probabilities[choice]` 与
+  `confidence` 都是 1（有一次 `confidence` 为 0.99）。因此 decision 模式在实践中是**硬分类器**：
+  `pSmart ∈ {0, 1}`，θ 实际上由 choice 单独决定，`window.minConfidence` 永不触发 hold；只有 `noul`
+  是连续信号。这一条的样本量很小（6 次调用、单部署、单模型版本），但足以说明「Jev 作为 Judge 比
+  LLM 裁判更细腻」这一期待在实测中不成立。
 - **决策模型的准确率结论是上游引用的第三方研究**（2026-09 独立研究：15 项标注任务中 14 项落后于最好
   的 LLM）。我们没有独立复现，因此沿用上游姿态：Beta、非默认、菜单里非首选。
 
@@ -881,6 +886,28 @@ TYPESAFE_API_KEY="$TYPESAFE_API_KEY" python3 - <<'PY'   # ← 该变量在本 sh
 2. 不要用未设置的 shell 变量做密钥中转；要么由人来填，要么先断言变量非空再写入。
 3. 凭据文件被 harness 在**启动时**校验：空值、未知键、非映射根都会让启动失败，不是警告。
 4. 改 `ShiftRouterCard.tsx` 后**必须**跑 `e2e/browser-check.mjs`（本次即为此类）。
+
+### R13.5 真机验证：decision 协议对 TypeSafe Jev 的实际观测
+
+用**已构建的 `dist/judge.js`**（而不是重写一份调用）读取部署凭据、按 `buildDecisionRequestBody()`
+发请求、用 `parseDecisionResponse()` 解析，共 6 次调用：
+
+| 观测项 | 结果 |
+|---|---|
+| HTTP / 认证 | `200`，`Authorization: Bearer` 被接受（`x-api-key` 分支会是 401，见 §R12.2） |
+| URL | `https://api.typesafe.ai/v1/systemone` 正确（`baseUrl` 末尾不重复 `/v1`） |
+| 延迟 | 1.4 s / 1.5 s / 1.8 s / 5.3 s / 5.7 s —— **中位约 5 s，与上游一致** |
+| 别名解析 | 请求 `jev-latest`，响应 `model: jev-1.13.0`；`resolvedModelOf()` 正确取出 |
+| 响应形状 | `answers.tier.{type,choice,confidence,probabilities}` + `answers.orchestrate.{type,noul}`，与冻结的 fixture 完全一致；越界拒绝与 `noul` 阈值逻辑无需改动 |
+| 计费形状 | 响应带 `usage`；一次极短 state 为 `input_tokens: 2275 / output_tokens: 50`（输入被 `JUDGE_PROMPT` 评分标准主导），上游 catalog 把 output 定价为 0 |
+
+**两条对功能有直接影响的结论：**
+
+1. **15 s 下限不是理论值。** 观测到 5.3 s 与 5.7 s 两次调用——我们自己的 `judgeTimeout` 默认 5000 ms
+   会把这两次直接掐断，然后每轮 release。这条参数如果只照抄功能清单而不照抄测量，功能会「在但不可用」。
+2. **`confidence` 与 `probabilities[choice]` 在实测中一致，且都饱和。** 因为两者一致，本文**刻意不做**
+   那个看起来很诱人的改动（把优先级从 `probabilities[choice]` 改成 `confidence`）：它没有任何可观测
+   收益，只会制造与上游的差异。真正值得记录的是饱和本身——见 §R12.4 第三条。
 
 ## 明确不对齐（附理由）
 

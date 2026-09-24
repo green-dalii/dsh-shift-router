@@ -163,6 +163,7 @@ what we deliberately do differently from upstream — is in
 | One sub-form per mode: `visibleWhen` in the field registry gates the Judge's controls, applied identically to the render and the save plan (hidden ⇒ not written, never deleted) | ✅ R13 |
 | Every enum value labelled in both languages, and each Judge mode explained individually | ✅ R13 |
 | The card renders what the controller publishes (`publishedFields`) — the seam where a unit-tested projection and the actual DOM disagreed until a browser run caught it | ✅ R13 (`ALIGNMENT.md` §R13.3) |
+| Live verification of the decision protocol against TypeSafe, with the measurements that make the timeout floor and the Beta posture concrete | ✅ R13 (`ALIGNMENT.md` §R13.5) |
 
 ## Planned
 
@@ -183,7 +184,7 @@ what we deliberately do differently from upstream — is in
 | Unit tests for `src/index.ts` **event-callback bodies** | P3 | the load-safety and `agent/pre-step` paths are covered; the remaining branches are the `agent/request-error` cooldown ladder and the `agent/request` rewrite |
 | Decide the remaining display-only hardcodes (`stats.ts` confidence bucket at 0.7, `/router models` truncation) | P3 | recorded as acceptable in ALIGNMENT §R3.7; either make them config or show raw values |
 | ~~GUI/CLI: reach the `routing.judge.*` leaves~~ | ~~P3~~ | ✅ delivered in the R12 round: both registries gained the five leaves and the **string** leaf type they needed (ROADMAP row above; verified in a browser) |
-| `mode: 'decision'` **live** verification against TypeSafe | P2 | needs a key; until then the mode ships as "implemented and unit-tested, not live-verified" (ALIGNMENT §R12.4) |
+| ~~`mode: 'decision'` **live** verification against TypeSafe~~ | ~~P2~~ | ✅ delivered once a key was available: 6 real verdicts, bearer auth accepted, `jev-latest` → `jev-1.13.0`, reply parsed unchanged. Measured 1.4–5.7 s/verdict (the 15 s floor is load-bearing) and a **saturated** tier answer — hard classifier, not graded (ALIGNMENT §R13.5) |
 
 
 ## Explicitly excluded (by design)

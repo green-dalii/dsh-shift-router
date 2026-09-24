@@ -71,6 +71,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-edited `routing.judge: null` in a composition would have thrown during plugin load (the failure class
   ALIGNMENT §R3 exists to prevent). Every access is optional-chained now.
 
+### Documentation
+
+- **The decision protocol is now verified against the live endpoint**, not only against fixtures: 6 real
+  verdicts, `HTTP 200`, bearer auth accepted, `jev-latest` → `jev-1.13.0`, and `parseDecisionResponse()`
+  consuming the real reply unchanged. Two findings worth knowing before enabling it:
+  the **15 s floor is load-bearing** (two of six calls took 5.3 s and 5.7 s — the 5 s default would have
+  aborted them), and the tier answer came back **fully decided on 4 of 4 prompts**, so `decision` mode
+  behaves as a hard classifier (`pSmart ∈ {0, 1}`) rather than a graded one. `ALIGNMENT.md` §R13.5 has the
+  measurements; the READMEs and the mode's hint now say the same thing.
+
 ### Changed
 
 - **"Judge unavailable" now means *no routing*, not *hold*.** Rung 3 of the ladder **releases** the
