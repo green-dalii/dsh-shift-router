@@ -836,6 +836,21 @@ visible rather than about decoration:
   where they must be readable.
 - **Inert fields are marked.** A `legacy` field is accepted but ignored; the card
   says so instead of presenting it as live configuration.
+- **A control appears when it is relevant** (`visibleWhen` in the field
+  registry). A selector whose options need different inputs shows one sub-form at
+  a time: the Judge's three sources (§6.4) each reveal their own controls and
+  hide the others, so a control that is inert under the current mode is never
+  drawn as if it were live. Relevance is evaluated against **what the control
+  currently displays** — a staged edit wins over the stored value — so choosing a
+  mode reveals its sub-form immediately instead of after a save.
+  The registry, not the component, owns the rule, and the controller applies it
+  to BOTH the render and the save plan: a hidden control is not written, and a
+  value already stored for it is never deleted (switching the mode back restores
+  it).
+- **No enum value reaches a user as a raw config token.** Every value carries a
+  translated label, and where the options have different consequences (the
+  Judge's sources differ in cost, speed and fallback behaviour) each one carries
+  its own explanation, shown in place of the field's general hint.
 - **The collapsed header states the effective configuration** (enabled state,
   routing mode, chain sizes), so the panel answers "what is set?" without being
   expanded.

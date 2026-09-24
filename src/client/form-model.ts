@@ -76,22 +76,52 @@ export interface CardField {
    * visible set is pinned by test.
    */
   advanced?: true
+  /**
+   * Show this control only while another control's current value is one of
+   * `is` (SPEC §12.3).
+   *
+   * The rule lives here rather than in the component because "which sub-form
+   * belongs to which mode" is a fact about the configuration, and BOTH readers
+   * need the same answer: the card, to render the sub-form, and the controller,
+   * to decide what a save would write. A control that is hidden is not rendered,
+   * does not make the card dirty, and is not written — but the value already
+   * stored for it is never deleted, so switching a mode back restores it.
+   *
+   * The compared value is what the *control currently displays* (a staged edit
+   * wins over the stored value), so choosing a mode reveals its sub-form
+   * immediately instead of after a save.
+   */
+  visibleWhen?: { path: string; is: readonly string[] }
+  /**
+   * Locale keys for an enum's values, so the control never shows the raw config
+   * token. Every enum value must have one — `enum` and `optionLabels` are pinned
+   * against each other by test, because a missing label is exactly how
+   * `fast-chain` ended up in front of the user.
+   */
+  optionLabels?: Readonly<Record<string, string>>
+  /**
+   * Locale keys explaining the *selected* enum value, shown in place of
+   * `hintKey`. A three-way choice whose options need different consequences
+   * explained (what each one costs, what falls back to what) cannot say that in
+   * one sentence about the field.
+   */
+  hintByOption?: Readonly<Record<string, string>>
 }
 
 export const CARD_FIELDS: readonly CardField[] = [
   { path: 'enabled', section: 'enabled', display: 'general', key: 'enabled', type: 'boolean', labelKey: 'f.enabled', hintKey: 'h.enabled' },
-  { path: 'routing.mode', section: 'routing', display: 'routing', key: 'mode', type: 'enum', enum: ['auto', 'manual', 'off'], labelKey: 'f.routingMode', hintKey: 'h.routingMode' },
+  { path: 'routing.mode', section: 'routing', display: 'routing', key: 'mode', type: 'enum', enum: ['auto', 'manual', 'off'], optionLabels: { auto: 'o.routingMode.auto', manual: 'o.routingMode.manual', off: 'o.routingMode.off' }, labelKey: 'f.routingMode', hintKey: 'h.routingMode' },
   { path: 'routing.judgeTimeout', section: 'routing', display: 'routing', key: 'judgeTimeout', type: 'number', min: 1, max: 120000, unit: 'ms', group: 'g.judge', labelKey: 'f.judgeTimeout', hintKey: 'h.judgeTimeout' , advanced: true },
   { path: 'routing.judgeMaxTokens', section: 'routing', display: 'routing', key: 'judgeMaxTokens', type: 'number', min: 1, max: 100000, unit: 'tokens', group: 'g.judge', labelKey: 'f.judgeMaxTokens', hintKey: 'h.judgeMaxTokens' , advanced: true },
   { path: 'routing.judgePromptCap', section: 'routing', display: 'routing', key: 'judgePromptCap', type: 'number', min: 1, max: 1000000, unit: 'chars', group: 'g.judge', labelKey: 'f.judgePromptCap', hintKey: 'h.judgePromptCap' , advanced: true },
-  { path: 'routing.judge.mode', section: 'routing', display: 'routing', key: 'judge.mode', type: 'enum', enum: ['fast-chain', 'custom', 'decision'], optional: true, group: 'g.judgeSource', labelKey: 'f.judgeMode', hintKey: 'h.judgeMode' , advanced: true },
-  { path: 'routing.judge.models', section: 'routing', display: 'routing', key: 'judge.models', type: 'models', group: 'g.judgeSource', labelKey: 'f.judgeModels', hintKey: 'h.judgeModels' , advanced: true },
-  { path: 'routing.judge.decision.baseUrl', section: 'routing', display: 'routing', key: 'judge.decision.baseUrl', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeBaseUrl', hintKey: 'h.judgeBaseUrl' , advanced: true },
-  { path: 'routing.judge.decision.model', section: 'routing', display: 'routing', key: 'judge.decision.model', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeModel', hintKey: 'h.judgeModel' , advanced: true },
-  { path: 'routing.judge.decision.apiKeyRef', section: 'routing', display: 'routing', key: 'judge.decision.apiKeyRef', type: 'string', group: 'g.judgeSource', labelKey: 'f.judgeApiKeyRef', hintKey: 'h.judgeApiKeyRef' , advanced: true },
+  { path: 'routing.judge.mode', section: 'routing', display: 'routing', key: 'judge.mode', type: 'enum', enum: ['fast-chain', 'custom', 'decision'], optionLabels: { 'fast-chain': 'o.judgeMode.fast-chain', custom: 'o.judgeMode.custom', decision: 'o.judgeMode.decision' }, hintByOption: { 'fast-chain': 'ho.judgeMode.fast-chain', custom: 'ho.judgeMode.custom', decision: 'ho.judgeMode.decision' }, optional: true, group: 'g.judgeSource', labelKey: 'f.judgeMode', hintKey: 'h.judgeMode' , advanced: true },
+  { path: 'routing.judge.models', section: 'routing', display: 'routing', key: 'judge.models', type: 'models', visibleWhen: { path: 'routing.judge.mode', is: ['custom'] }, group: 'g.judgeSource', labelKey: 'f.judgeModels', hintKey: 'h.judgeModels' , advanced: true },
+  { path: 'routing.judge.decision.baseUrl', section: 'routing', display: 'routing', key: 'judge.decision.baseUrl', type: 'string', visibleWhen: { path: 'routing.judge.mode', is: ['decision'] }, group: 'g.judgeDecision', labelKey: 'f.judgeBaseUrl', hintKey: 'h.judgeBaseUrl' , advanced: true },
+  { path: 'routing.judge.decision.model', section: 'routing', display: 'routing', key: 'judge.decision.model', type: 'string', visibleWhen: { path: 'routing.judge.mode', is: ['decision'] }, group: 'g.judgeDecision', labelKey: 'f.judgeModel', hintKey: 'h.judgeModel' , advanced: true },
+  { path: 'routing.judge.decision.apiKeyRef', section: 'routing', display: 'routing', key: 'judge.decision.apiKeyRef', type: 'string', visibleWhen: { path: 'routing.judge.mode', is: ['decision'] }, group: 'g.judgeDecision', labelKey: 'f.judgeApiKeyRef', hintKey: 'h.judgeApiKeyRef' , advanced: true },
   { path: 'routing.economics.reworkPenalty', section: 'routing', display: 'routing', key: 'economics.reworkPenalty', type: 'number', min: 1, step: 0.5, group: 'g.economics', labelKey: 'f.reworkPenalty', hintKey: 'h.reworkPenalty' },
   { path: 'routing.economics.downgradeMemory', section: 'routing', display: 'routing', key: 'economics.downgradeMemory', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.economics', labelKey: 'f.downgradeMemory', hintKey: 'h.downgradeMemory' , advanced: true },
-  { path: 'routing.economics.mode', section: 'routing', display: 'routing', key: 'economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], group: 'g.economics', optional: true, labelKey: 'f.economicsMode', hintKey: 'h.economicsMode' },
+  { path: 'routing.economics.mode', section: 'routing', display: 'routing', key: 'economics.mode', type: 'enum', enum: ['eco', 'default', 'sport'], optionLabels: { eco: 'o.economicsMode.eco', default: 'o.economicsMode.default', sport: 'o.economicsMode.sport' }, group: 'g.economics', optional: true, labelKey: 'f.economicsMode', hintKey: 'h.economicsMode' },
   { path: 'routing.window.size', section: 'routing', display: 'routing', key: 'window.size', type: 'number', min: 1, max: 100, unit: 'turns', group: 'g.window', labelKey: 'f.windowSize', hintKey: 'h.windowSize' , advanced: true },
   { path: 'routing.window.threshold', section: 'routing', display: 'routing', key: 'window.threshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', optional: true, legacy: true, labelKey: 'f.windowThreshold', hintKey: 'h.windowThreshold' , advanced: true },
   { path: 'routing.window.minConfidence', section: 'routing', display: 'routing', key: 'window.minConfidence', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.window', labelKey: 'f.windowMinConfidence', hintKey: 'h.windowMinConfidence' , advanced: true },
@@ -99,7 +129,7 @@ export const CARD_FIELDS: readonly CardField[] = [
   { path: 'routing.cacheAware.sameFamilyPenalty', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyPenalty', type: 'number', min: 1, step: 0.5, group: 'g.cache', labelKey: 'f.sameFamilyPenalty', hintKey: 'h.sameFamilyPenalty' , advanced: true },
   { path: 'routing.cacheAware.sameFamilyThreshold', section: 'routing', display: 'routing', key: 'cacheAware.sameFamilyThreshold', type: 'number', min: 0, max: 1, step: 0.05, unit: '0–1', group: 'g.cache', optional: true, legacy: true, labelKey: 'f.sameFamilyThreshold', hintKey: 'h.sameFamilyThreshold' , advanced: true },
   { path: 'routing.cacheAware.idleBoundaryMs', section: 'routing', display: 'routing', key: 'cacheAware.idleBoundaryMs', type: 'number', min: 0, step: 1000, unit: 'ms', group: 'g.cache', labelKey: 'f.idleBoundaryMs', hintKey: 'h.idleBoundaryMs' , advanced: true },
-  { path: 'orchestration.mode', section: 'orchestration', display: 'orchestration', key: 'mode', type: 'enum', enum: ['auto', 'off'], labelKey: 'f.orchMode', hintKey: 'h.orchMode' },
+  { path: 'orchestration.mode', section: 'orchestration', display: 'orchestration', key: 'mode', type: 'enum', enum: ['auto', 'off'], optionLabels: { auto: 'o.orchMode.auto', off: 'o.orchMode.off' }, labelKey: 'f.orchMode', hintKey: 'h.orchMode' },
   { path: 'orchestration.maxRounds', section: 'orchestration', display: 'orchestration', key: 'maxRounds', type: 'number', min: 0, max: 100, unit: 'rounds', labelKey: 'f.maxRounds', hintKey: 'h.maxRounds' },
   { path: 'orchestration.escalationThreshold', section: 'orchestration', display: 'orchestration', key: 'escalationThreshold', type: 'number', min: 1, max: 100, unit: '×', labelKey: 'f.escalationThreshold', hintKey: 'h.escalationThreshold' , advanced: true },
   { path: 'orchestration.maxSpendUsd', section: 'orchestration', display: 'orchestration', key: 'maxSpendUsd', type: 'number', min: 0, step: 0.5, unit: 'USD', labelKey: 'f.maxSpendUsd', hintKey: 'h.maxSpendUsd' },
@@ -165,6 +195,50 @@ export interface StagedDraft {
   text?: string
   rows?: ModelRow[]
   clear: boolean
+}
+
+/**
+ * Whether a control is relevant right now.
+ *
+ * Fails closed: a condition naming a control that has no value yet (an unset
+ * optional enum reads as `''`) matches nothing, which is why the Judge's
+ * `fast-chain` default — the empty string — shows no sub-form rather than all
+ * of them. Conditions point at enums the card always renders, so a missing
+ * control means a broken registry, and hiding is the safe answer.
+ *
+ * @param field - the control being asked about.
+ * @param currentValue - what a control currently displays, by path.
+ */
+export function isFieldVisible(
+  field: CardField,
+  currentValue: (path: string) => unknown,
+): boolean {
+  const when = field.visibleWhen
+  if (when === undefined) return true
+  const value = currentValue(when.path)
+  return typeof value === 'string' && when.is.includes(value)
+}
+
+/**
+ * The registry entries for the controls that are currently PUBLISHED.
+ *
+ * The controller owns visibility (it needs the same answer to decide what a save
+ * writes), so the card must render the published set rather than walking the
+ * whole registry — otherwise a control the controller excluded is still drawn,
+ * and the sub-form it belongs to never actually hides. Order follows the
+ * published order, which is registry order.
+ *
+ * @param published - the published field states, in any order.
+ * @param registry - the field registry to resolve against.
+ */
+export function publishedFields(
+  published: readonly { path: string }[],
+  registry: readonly CardField[] = CARD_FIELDS,
+): CardField[] {
+  const byPath = new Map(registry.map((field) => [field.path, field]))
+  return published
+    .map((state) => byPath.get(state.path))
+    .filter((field): field is CardField => field !== undefined)
 }
 
 /** Read a dotted path from an object (undefined when absent). */

@@ -43,6 +43,7 @@ export type ShiftRouterCardKey =
   | 'collapseAdvanced'
   | 'g.judge'
   | 'g.judgeSource'
+  | 'g.judgeDecision'
   | 'g.window'
   | 'g.cache'
   | 'g.economics'
@@ -94,6 +95,20 @@ export type ShiftRouterCardKey =
   | 'h.judgeBaseUrl'
   | 'h.judgeModel'
   | 'h.judgeApiKeyRef'
+  | 'o.routingMode.auto'
+  | 'o.routingMode.manual'
+  | 'o.routingMode.off'
+  | 'o.economicsMode.eco'
+  | 'o.economicsMode.default'
+  | 'o.economicsMode.sport'
+  | 'o.orchMode.auto'
+  | 'o.orchMode.off'
+  | 'o.judgeMode.fast-chain'
+  | 'o.judgeMode.custom'
+  | 'o.judgeMode.decision'
+  | 'ho.judgeMode.fast-chain'
+  | 'ho.judgeMode.custom'
+  | 'ho.judgeMode.decision'
   | 'h.reworkPenalty'
   | 'h.downgradeMemory'
   | 'h.economicsMode'
@@ -185,6 +200,7 @@ export const en: ShiftRouterCardDict = {
   'collapseAdvanced': 'Hide advanced settings',
   'g.judge': 'Judge',
   'g.judgeSource': 'Judge source',
+  'g.judgeDecision': 'Decision endpoint',
   'g.window': 'Decision window',
   'g.cache': 'Cache-aware routing',
   'g.economics': 'Economics',
@@ -231,11 +247,25 @@ export const en: ShiftRouterCardDict = {
   'h.judgeTimeout': 'How long one judgment attempt may take. A timed-out attempt moves on to the next judge source; if every source fails, the turn runs on your own selected model instead. A decision endpoint is always given at least 15 seconds.',
   'h.judgeMaxTokens': 'How long the judgment call’s answer may be. The default is plenty; raise it only if judgments keep getting cut off.',
   'h.judgePromptCap': 'How much of the recent conversation the judgment call may read. Anything longer is shortened to fit.',
-  'h.judgeMode': 'fast-chain — judge with the Fast tier models (the default, nothing else to configure). custom — judge with the dedicated list below. decision — ask a decision model for a probability instead of prose (Beta; slower, and not billed by the token). A judge you configure that cannot be reached falls back to the Fast tier models, so routing is never lost to a misconfiguration.',
+  'h.judgeMode': 'Where the verdict for every turn comes from. Left unset, it is the Fast tier models above — pick an option to see what it needs. A judge you configure that cannot be reached falls back to those models, so a misconfiguration never costs you routing.',
   'h.judgeModels': 'The models used to judge, tried in order, and only these: the router will not quietly substitute a cheaper one. An unreachable list falls back to the Fast tier models.',
   'h.judgeBaseUrl': 'The decision service’s address. The router appends /v1/systemone. Leave empty to judge with a model instead.',
   'h.judgeModel': 'Which decision model to ask. An alias is fine: the answer reports which build actually replied, and a change is logged.',
   'h.judgeApiKeyRef': 'The NAME of the credential holding this endpoint’s key — never the key itself. It is read from the harness’s credential store before every judgment, so rotating the key takes effect immediately.',
+  'o.routingMode.auto': 'Automatic',
+  'o.routingMode.manual': 'Only my own overrides',
+  'o.routingMode.off': 'Off',
+  'o.economicsMode.eco': 'Eco — save money',
+  'o.economicsMode.default': 'Default — balanced',
+  'o.economicsMode.sport': 'Sport — prefer Smart',
+  'o.orchMode.auto': 'Automatic',
+  'o.orchMode.off': 'Off',
+  'o.judgeMode.fast-chain': 'Reuse the Fast tier models',
+  'o.judgeMode.custom': 'A dedicated judge chain',
+  'o.judgeMode.decision': 'A decision model (Beta)',
+  'ho.judgeMode.fast-chain': 'The Fast tier models above judge every turn — no extra model to configure and no extra key. A dedicated chain you configured earlier is kept, but is not used.',
+  'ho.judgeMode.custom': 'The dedicated chain below judges every turn, tried in order. These models only judge; the turn still runs on the tier this router picks. If none of them can be reached, the Fast tier models take over.',
+  'ho.judgeMode.decision': 'A decision model (TypeSafe Jev class, Beta) answers with a probability instead of text, so there is no reply to parse and no “the judge broke because the model added a comma”. Two things to know: it is slow (about 5 s per turn) and it bills input tokens only, roughly $0.0001 a turn. It needs the endpoint and key name below; if it cannot be reached, the Fast tier models take over.',
   'h.reworkPenalty': 'How much it costs you when a request goes to the Fast model and turns out to need the Smart one. Higher means the router keeps using the Smart model.',
   'h.downgradeMemory': 'How many clearly-Fast turns in a row are needed before switching down to Fast. Higher keeps you on the Smart model longer; an unclear verdict starts the count again.',
   'h.economicsMode': 'A quick way to set how eager the router is: eco saves money, default is balanced, sport prefers the Smart model. Choosing one replaces the cost setting above.',
@@ -326,6 +356,7 @@ export const zh: ShiftRouterCardDict = {
   'collapseAdvanced': '收起高级设置',
   'g.judge': '裁判',
   'g.judgeSource': '裁判来源',
+  'g.judgeDecision': '决策端点',
   'g.window': '决策窗口',
   'g.cache': '缓存感知',
   'g.economics': '经济性',
@@ -372,11 +403,25 @@ export const zh: ShiftRouterCardDict = {
   'h.judgeTimeout': '单次判定尝试的时限。超时的那次会继续尝试下一个裁判来源；如果所有来源都失败，本轮改用你自己选定的模型。决策端点至少会拿到 15 秒。',
   'h.judgeMaxTokens': '判定结果的最大长度。默认值通常足够；只有判定经常被截断时才需要调大。',
   'h.judgePromptCap': '判定可以读取多少近期对话内容，超出部分会被压缩。',
-  'h.judgeMode': 'fast-chain —— 用 Fast 层模型判定（默认，无需其他配置）。custom —— 用下面的专用模型列表判定。decision —— 向决策模型要一个概率而不是一段文字（Beta；更慢，且不按 token 计费）。你自己配置的裁判如果访问不到，会回落到 Fast 层模型，所以不会因为配置错误而失去路由。',
+  'h.judgeMode': '每一轮的判定来自哪里。不设置时就是用上面的 Fast 层模型——选择其他选项后会显示它需要什么。你自己配置的裁判如果访问不到，会回落到这些模型，所以不会因为配置错误而失去路由。',
   'h.judgeModels': '用于判定的模型，按顺序尝试，且只用这些：路由器不会悄悄换成更便宜的模型。整条链都不可用时回落 Fast 层模型。',
   'h.judgeBaseUrl': '决策服务的地址，路由器会自动拼接 /v1/systemone。留空则改用模型判定。',
   'h.judgeModel': '请求哪个决策模型。可以用别名：返回结果会报告实际应答的版本，发生变化时会记日志。',
   'h.judgeApiKeyRef': '保存该端点密钥的凭据名称，绝不是密钥本身。每次判定前都从 harness 凭据存储读取，因此轮换密钥立即生效。',
+  'o.routingMode.auto': '自动',
+  'o.routingMode.manual': '仅手动覆盖',
+  'o.routingMode.off': '关闭',
+  'o.economicsMode.eco': 'eco —— 省钱',
+  'o.economicsMode.default': 'default —— 均衡',
+  'o.economicsMode.sport': 'sport —— 偏向 Smart',
+  'o.orchMode.auto': '自动',
+  'o.orchMode.off': '关闭',
+  'o.judgeMode.fast-chain': '复用 Fast 层模型',
+  'o.judgeMode.custom': '专用裁判链',
+  'o.judgeMode.decision': '决策模型（Beta）',
+  'ho.judgeMode.fast-chain': '由上面的 Fast 层模型判定每一轮——不需要额外配模型，也不需要额外的密钥。你之前配置过的专用裁判链会保留，但不会被使用。',
+  'ho.judgeMode.custom': '由下面这条专用裁判链按顺序判定。这些模型只负责判定，本轮仍然跑在路由器挑的那一层上。整条链都访问不到时，改由 Fast 层模型接手。',
+  'ho.judgeMode.decision': '由决策模型（TypeSafe Jev 这一类，Beta）返回一个概率而不是文字，因此没有需要解析的回复，也不存在「模型多加了一个逗号导致判定失败」这一类问题。两点须知：它很慢（每轮约 5 秒），且只按输入计费，约 $0.0001 一轮。它需要下面填写的端点与密钥名；访问不到时由 Fast 层模型接手。',
   'h.reworkPenalty': '一次请求走了 Fast 层、结果却需要 Smart 层时，你要付出多大代价。数值越大，越倾向于一直用 Smart 层。',
   'h.downgradeMemory': '需要连续多少轮明确判定为 Fast，才降级到 Fast 层。数值越大越久留在 Smart 层；判定不明确会重新计数。',
   'h.economicsMode': '快速设定路由的积极程度：eco 省钱、default 均衡、sport 偏向 Smart 层。选了预设会覆盖上面的代价设置。',

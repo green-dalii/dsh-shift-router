@@ -51,6 +51,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be a 401 on every call), and a non-2xx status, an unreadable reply or a reply with no usable choice
   each log the status and a bounded slice of what came back — never the key.
 
+### Fixed
+
+- **The Judge's source now shows one sub-form at a time.** All three sources'
+  controls were rendered at once, which hid *which* controls were live — `judge.models` does nothing under
+  `fast-chain` — and invited input nothing would read. `visibleWhen` in the field registry now gates them:
+  `fast-chain` shows only the selector, `custom` reveals the dedicated chain editor (same shape as the Fast/
+  Smart chains), `decision` reveals the endpoint, model and credential-name controls. Relevance follows
+  **what the control currently displays**, so a mode change takes effect immediately rather than after a save.
+- **Three mode names and the other four enums no longer appear as raw config tokens.** Every value has a
+  translated label (中/EN), and each Judge mode carries its own explanation — what it costs, how fast it is,
+  and what takes over when it cannot be reached — instead of one field-level sentence that only described
+  the default.
+- **A hidden control is not written, and never deleted.** The save plan and the "unsaved changes" state both
+  go through the same visibility rule as the render, so a control the user cannot see cannot be changed by a
+  save they pressed for something else; a value already stored for it survives, so switching the mode back
+  restores it.
+- **The startup diagnostic can no longer abort the boot.** It dereferenced the Judge block directly; a
+  hand-edited `routing.judge: null` in a composition would have thrown during plugin load (the failure class
+  ALIGNMENT §R3 exists to prevent). Every access is optional-chained now.
+
 ### Changed
 
 - **"Judge unavailable" now means *no routing*, not *hold*.** Rung 3 of the ladder **releases** the

@@ -13,6 +13,7 @@ import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-clie
 import {
   CARD_FIELDS,
   buildPlan,
+  isFieldVisible,
   deepEqual,
   formatRows,
   formatValue,
@@ -125,9 +126,36 @@ export class ShiftRouterCardController {
     return this.scope.getSnapshot()
   }
 
+  /**
+   * What a control currently displays: a staged edit wins over the stored value,
+   * which is what makes a mode change reveal its sub-form before a save.
+   *
+   * Scalar-only by design — a condition names an enum (SPEC §6.4), and asking a
+   * model chain for "its value" has no answer.
+   */
+  private displayedValue(path: string, snap: SettingsScopeSnapshot<unknown>): unknown {
+    const field = this.fields.find((candidate) => candidate.path === path)
+    if (field === undefined || field.type === 'models') return undefined
+    const staged = this.staged.get(path)
+    if (staged !== undefined) return staged.text ?? ''
+    return formatValue(readPath(snap.value, path), field)
+  }
+
+  /**
+   * The controls that are relevant right now (SPEC §12.3).
+   *
+   * Both readers of the form go through here — the projection the card renders
+   * and the plan a save applies — so a control the user cannot see can never be
+   * written by a save they pressed for something else.
+   */
+  private visibleFields(snap: SettingsScopeSnapshot<unknown>): readonly CardField[] {
+    return this.fields.filter((field) => isFieldVisible(field, (path) => this.displayedValue(path, snap)))
+  }
+
   private projection(): ShiftRouterCardState {
     const snap = this.snapshot()
-    const plan = buildPlan(this.fields, this.staged, snap)
+    const fields = this.visibleFields(snap)
+    const plan = buildPlan(fields, this.staged, snap)
     return {
       available: snap.status === 'ready',
       writable: snap.writable,
@@ -135,7 +163,7 @@ export class ShiftRouterCardController {
       invalid: plan.invalid,
       saving: this.saving,
       failed: this.failed,
-      fields: this.fields.map((field) => this.fieldState(field)),
+      fields: fields.map((field) => this.fieldState(field)),
       catalog: this.catalog,
     }
   }
@@ -221,7 +249,8 @@ export class ShiftRouterCardController {
    * Drafts survive a failed save so the user can correct them.
    */
   async save(): Promise<void> {
-    const plan = buildPlan(this.fields, this.staged, this.snapshot())
+    const snap = this.snapshot()
+    const plan = buildPlan(this.visibleFields(snap), this.staged, snap)
     if (plan.invalid || plan.patches.length === 0 || this.saving) return
     this.saving = true
     this.failed = false

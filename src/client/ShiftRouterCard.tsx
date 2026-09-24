@@ -23,9 +23,9 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   ADVANCED_SECTION,
-  CARD_FIELDS,
   CARD_SECTIONS,
   advancedGroupKey,
+  publishedFields,
   type CardField,
   type ModelRow,
 } from './form-model.js'
@@ -561,8 +561,12 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
   const problems = chainProblems(chainView(stateByPath))
   // The open card carries only the decisions that change how requests are
   // routed; the tuning knobs live behind one collapsed disclosure (SPEC §12.3).
-  const basicFields = CARD_FIELDS.filter((field) => field.advanced !== true)
-  const advancedFields = CARD_FIELDS.filter((field) => field.advanced === true)
+  // Only the controls the controller published: it decides relevance (SPEC
+  // §12.3 — a mode shows one sub-form), and rendering the raw registry would
+  // draw a control that no save will ever read.
+  const renderable = publishedFields(state.fields)
+  const basicFields = renderable.filter((field) => field.advanced !== true)
+  const advancedFields = renderable.filter((field) => field.advanced === true)
   const advancedChanged = advancedFields.filter((field) => stateByPath.get(field.path)?.overridden === true).length
 
   return (
@@ -788,6 +792,11 @@ function FieldRow(props: FieldRowProps): ReactNode {
   const invalid = fieldState?.invalid ?? false
   const id = `shift-router-${field.path.replaceAll('.', '-')}`
   const theta = thresholdHint(field, stateByPath)
+  // A three-way choice explains the option in force, not the field in general:
+  // "Judge source" means something different under each mode (SPEC §6.4). The
+  // control's own text is the selected value, and an unset optional enum reads
+  // as `''`, which falls back to the field's general hint.
+  const hintKey = field.hintByOption?.[fieldState?.text ?? ''] ?? field.hintKey
 
   if (field.type === 'models') {
     return (
@@ -844,7 +853,13 @@ function FieldRow(props: FieldRowProps): ReactNode {
         disabled={disabled}
         onChange={(event) => edit(field.path, event.target.value)}
       >
-        {field.enum?.map((value) => <option key={value} value={value}>{value}</option>)}
+        {field.enum?.map((value) => (
+          <option key={value} value={value}>
+            {field.optionLabels?.[value] !== undefined
+              ? t(field.optionLabels[value] as ShiftRouterCardKey)
+              : value}
+          </option>
+        ))}
       </select>
     )
   } else if (field.type === 'string') {
@@ -899,11 +914,11 @@ function FieldRow(props: FieldRowProps): ReactNode {
         <p
           className={invalid ? undefined : 'sr-hint'}
           style={invalid ? invalidText : hint}
-          title={invalid ? undefined : t(field.hintKey as ShiftRouterCardKey)}
+          title={invalid ? undefined : t(hintKey as ShiftRouterCardKey)}
         >
           {invalid
             ? t('invalidNumber')
-            : t(field.hintKey as ShiftRouterCardKey)}
+            : t(hintKey as ShiftRouterCardKey)}
         </p>
         {theta !== undefined ? <p style={derivedHint}>{t('thresholdHint', { theta })}</p> : null}
       </div>

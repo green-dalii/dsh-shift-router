@@ -358,6 +358,48 @@ async function main() {
         `the advanced controls obey the same alignment (${structure2.fields} fields)`)
     }
 
+    // ── The Judge source sub-form (SPEC §12.3, §6.4) ──────────────────
+    // A three-way choice that shows all three sub-forms at once hides which
+    // controls are live. These assertions drive the select the way a user does:
+    // if the sub-form only appeared after a save, or showed a raw config token,
+    // this is where it fails. `label[for=…]` marks a rendered field regardless
+    // of which element carries the id (a model-chain field ids its label).
+    const mode = page.locator('#shift-router-routing-judge-mode')
+    check((await mode.count()) > 0, 'the Judge source control is present')
+    if ((await mode.count()) > 0) {
+      const offered = await mode.locator('option').evaluateAll((els) => els.map((el) => ({ text: el.textContent ?? '', value: el.value })))
+      check(offered.length === 3, `the Judge source offers three modes (${offered.length})`)
+      check(
+        offered.every((option) => option.text.trim() !== '' && option.text.trim() !== option.value),
+        'every mode is labelled in the reader’s language, not as a raw config token',
+      )
+
+      const chainLabel = page.locator('label[for="shift-router-routing-judge-models"]')
+      const baseUrl = page.locator('#shift-router-routing-judge-decision-baseUrl')
+
+      await mode.selectOption('custom')
+      await page.waitForTimeout(400)
+      check((await chainLabel.count()) > 0, 'choosing a dedicated chain reveals its editor')
+      check((await baseUrl.count()) === 0, '…and hides the decision endpoint controls')
+
+      await mode.selectOption('decision')
+      await page.waitForTimeout(400)
+      check((await baseUrl.count()) > 0, 'choosing a decision model reveals the endpoint controls')
+      check((await chainLabel.count()) === 0, '…and hides the chain editor')
+      const switched = await page.evaluate(DETECT_OVERLAPS)
+      if (switched.error === undefined) {
+        check(switched.overlaps.length === 0, `the revealed sub-form does not overlap (${switched.boxes} boxes)`)
+        for (const line of switched.overlaps.slice(0, 12)) console.log(`      ${line}`)
+      }
+
+      await mode.selectOption('fast-chain')
+      await page.waitForTimeout(400)
+      check(
+        (await baseUrl.count()) === 0 && (await chainLabel.count()) === 0,
+        'choosing the Fast chain shows no judge sub-form at all',
+      )
+    }
+
     const shots = args.shots
     await page.screenshot({ path: join(shots, 'card-collapsed-light.png'), fullPage: true })
     await page.screenshot({ path: join(shots, 'card-open-light.png'), fullPage: true })

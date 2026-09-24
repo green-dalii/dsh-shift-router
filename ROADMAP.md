@@ -160,6 +160,9 @@ what we deliberately do differently from upstream — is in
 | Decision-protocol wire shapes (request body, response parsing, out-of-set rejection, `noul` threshold) unit-tested against fixtures taken from upstream's implementation | ✅ (live verification is a Planned item) |
 | Release is distinguishable from hold end to end: `RouteDecision.released`, a `no judge · not routing` notice, `/router status` wording, and `agent/request` leaving the wire alone for the whole turn | ✅ |
 | The source is reachable from both configuration surfaces: `routing.judge.mode` / `.models` / `decision.*` are in `CONFIG_FIELDS` **and** `CARD_FIELDS` under a new *Judge source* sub-group, which required adding a `string` leaf type to both registries | ✅ (verified in a real browser: 0 overlaps / 0 text spills with Advanced open) |
+| One sub-form per mode: `visibleWhen` in the field registry gates the Judge's controls, applied identically to the render and the save plan (hidden ⇒ not written, never deleted) | ✅ R13 |
+| Every enum value labelled in both languages, and each Judge mode explained individually | ✅ R13 |
+| The card renders what the controller publishes (`publishedFields`) — the seam where a unit-tested projection and the actual DOM disagreed until a browser run caught it | ✅ R13 (`ALIGNMENT.md` §R13.3) |
 
 ## Planned
 
