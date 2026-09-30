@@ -59,8 +59,26 @@ const PACK_PROFILE = 'shift-router-packed'
 const home = mkdtempSync(join(tmpdir(), 'shift-router-e2e-'))
 const probeOut = join(home, 'settings-probe.json')
 
-/** Run one command, streaming nothing, returning {code, output}. */
-function run(args, { allowFailure = false, env = {} } = {}) {
+/**
+ * Run one command, streaming nothing, returning {code, output}.
+ *
+ * EVERY command is bounded. This used to resolve only on `close`, and a stalled
+ * `dsh plugin add` therefore cost the full CI job limit: run 35823766557 passed
+ * every routing assertion, packed the tarball, then sat on the packed install for
+ * six hours until GitHub cancelled it — one blocked pnpm fetch reported as
+ * "The operation was canceled", with no indication of which step hung.
+ *
+ * A stall is now a one-line diagnosis naming the step, and the run stops there:
+ * continuing would cascade false negatives into every later assertion, which is
+ * the same failure shape `preflight()` was written for.
+ *
+ * @param args - CLI arguments.
+ * @param options.allowFailure - do not fail the run on a non-zero exit.
+ * @param options.env - extra environment.
+ * @param options.budgetMs - wall-clock budget for this one command.
+ * @param options.label - what to call this step in a failure message.
+ */
+function run(args, { allowFailure = false, env = {}, budgetMs = 240_000, label } = {}) {
   return new Promise((done) => {
     const child = spawn(DSH, args, {
       cwd: REPO,
@@ -68,15 +86,35 @@ function run(args, { allowFailure = false, env = {} } = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let output = ''
+    let settled = false
+    const what = label ?? `${DSH} ${args.join(' ')}`
+    const finish = (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      done({ code, output })
+    }
+    const timer = setTimeout(() => {
+      console.error(
+        `✗ ${what} did not finish within ${Math.round(budgetMs / 1000)}s — stopping.\n` +
+          `  This is a stall in an install or boot step, not an assertion failure; the last output was:\n` +
+          `${output.split('\n').slice(-12).map((line) => `  ${line}`).join('\n')}`,
+      )
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 2000).unref()
+      // A stalled step invalidates everything after it, so stop rather than
+      // report a cascade of consequences as if they were independent defects.
+      process.exit(1)
+    }, budgetMs)
     child.stdout.on('data', (chunk) => { output += chunk })
     child.stderr.on('data', (chunk) => { output += chunk })
-    child.on('error', (error) => done({ code: -1, output: `${output}\n${error.message}` }))
+    child.on('error', (error) => finish(-1, `${output}\n${error.message}`))
     child.on('close', (code) => {
       if (code !== 0 && !allowFailure) {
-        console.error(`✗ ${DSH} ${args.join(' ')}\n${output}`)
+        console.error(`✗ ${what}\n${output}`)
         process.exitCode = 1
       }
-      done({ code, output })
+      finish(code)
     })
   })
 }
@@ -207,7 +245,7 @@ try {
   await run(['--profile', PROFILE, '--from-default-profile', 'headless'], { allowFailure: true })
 
   step('installing this checkout as a bundle')
-  const added = await run(['plugin', '--profile', PROFILE, 'add', REPO])
+  const added = await run(['plugin', '--profile', PROFILE, 'add', REPO], { label: 'install this checkout into the scratch profile' })
   assert(added.code === 0, 'dsh plugin add succeeded')
 
   const PROMPT = 'design a migration plan for our billing system'
@@ -277,11 +315,15 @@ try {
   assert(packed.code === 0 && tarball.length > 0, `npm pack produced a tarball (${tarball || 'none'})`)
   const tarballPath = join(packDir, tarball)
 
-  // `web` on purpose: that is the composition the card targets, and the one the
-  // boot regression broke. `--port 0` lets the OS pick a free port, so this
-  // never collides with a running harness.
-  await run(['--profile', PACK_PROFILE, '--from-default-profile', 'web'], { allowFailure: true })
-  const packedAdd = await run(['plugin', '--profile', PACK_PROFILE, 'add', tarballPath])
+  // The card assertions below need the WEB composition, but
+  // `--from-default-profile web` BOOTS that template: it opened a server on the
+  // default port and never exited, so this one-shot step waited forever — run
+  // 35823766557's six-hour stall, inside the packed-artifact step. `--dump-config`
+  // materializes the very same `web` profile and exits without serving, so the
+  // composition is preserved and the step cannot hang. The real boot is below, on
+  // `--port 0` (OS-picked, so it never collides) with `--no-open`.
+  await run(['--profile', PACK_PROFILE, '--from-default-profile', 'web', '--dump-config'], { allowFailure: true })
+  const packedAdd = await run(['plugin', '--profile', PACK_PROFILE, 'add', tarballPath], { label: 'install the packed tarball into the packed profile' })
   assert(packedAdd.code === 0, 'the packed artifact installs as a bundle')
   // The payload must be read while the server is up: `runBounded` kills it on
   // settle, and these two assertions are about what the BROWSER would be given.

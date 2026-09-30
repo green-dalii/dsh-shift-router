@@ -272,7 +272,7 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（23 个文件、424 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
+npm test            # vitest（24 个文件、429 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
 npm run typecheck
 ```
 

@@ -81,6 +81,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaves as a hard classifier (`pSmart ∈ {0, 1}`) rather than a graded one. `ALIGNMENT.md` §R13.5 has the
   measurements; the READMEs and the mode's hint now say the same thing.
 
+- **The CI e2e job can no longer burn six runner-hours.** Run 35823766557 passed every routing
+  assertion, packed the tarball, then sat on the packed-artifact step until GitHub cancelled the job
+  at 6h00m with only "The operation was canceled" and no hint which step hung. Cause: the step
+  derived its profile with `--from-default-profile web`, and that **boots** the `web` template — a
+  server and a browser — so a one-shot step waited for a process that was never going to end (on the
+  default port, so it could also collide with a running harness). Three fixes: the derivation now
+  passes `--dump-config`, which materializes the identical `web` profile and exits; `run()` bounds
+  every one-shot command and names a stalled step instead of waiting it out, then stops rather than
+  cascading false negatives; and the job declares `timeout-minutes: 20` as the backstop that
+  `continue-on-error` never was (it governs blocking, not wall-clock). The e2e script now has its own
+  tests (`tests/e2e-harness.test.ts`), because a script can otherwise hang while 400+ unit tests stay
+  green. Verified: e2e PASSED locally, and it is faster now that one step no longer boots a server.
+
 ### Changed
 
 - **"Judge unavailable" now means *no routing*, not *hold*.** Rung 3 of the ladder **releases** the

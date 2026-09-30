@@ -53,6 +53,14 @@ jobs:
     # cannot fail the build. The e2e is AUTHORITATIVE when run locally against an
     # installed harness — that is how it caught the boot-aborting defect (§R3).
     continue-on-error: true
+    # Backstop, and the reason this is not merely `continue-on-error`: a stall is
+    # a failure mode of this job, and one already happened — run 35823766557 passed
+    # every routing assertion, packed the tarball, then sat on the packed install
+    # until the platform cancelled the job at 6h00m with no clue which step hung.
+    # `e2e/run-e2e.mjs` now bounds every command and names the stalled step; this
+    # is the ceiling under that, so an unbounded wait can never cost 6 runner-hours
+    # again. Measured locally, the whole e2e takes ~90s.
+    timeout-minutes: 20
     # The credential-free e2e needs the `dsh` CLI and pnpm, and it builds a
     # scratch profile by installing real packages. That is exactly the path that
     # once shipped a boot-aborting defect (ALIGNMENT §R3), so it runs on main

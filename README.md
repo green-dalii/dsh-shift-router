@@ -301,7 +301,7 @@ with no delegation and no audit.
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (424 tests across 23 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
+npm test            # vitest (429 tests across 24 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
 npm run typecheck
 ```
 
