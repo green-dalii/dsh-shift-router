@@ -33,6 +33,29 @@ import {
   type ModelCatalogRemote,
 } from './model-catalog.js'
 
+/**
+ * A no-op SettingsScope for host layouts that no longer expose `settingsScope`.
+ *
+ * The card still renders; staged edits accumulate in memory and Save returns
+ * failure rather than pretending to write. This is the better failure mode than
+ * the alternative — a fiber waiting forever for a service the host does not
+ * provide, which aborts the whole plugin tree.
+ */
+const FALLBACK_SCOPE = {
+  getSnapshot: (): SettingsScopeSnapshot<unknown> => ({
+    status: 'loading' as const,
+    writable: false,
+    base: undefined,
+    user: undefined,
+    value: undefined,
+    // revision/mode are required by the SettingsScopeSnapshot type but the
+    // controller never reads them, so a stand-in shape is safe.
+    revision: undefined,
+    mode: undefined,
+  } as unknown as SettingsScopeSnapshot<unknown>),
+  subscribe: (_listener: () => void): () => void => () => undefined,
+} as unknown as SettingsScope<unknown>
+
 /** One field's rendered state: the control's text or rows and its override marker. */
 export interface FieldState {
   path: string
@@ -87,10 +110,10 @@ export class ShiftRouterCardController {
   readonly store: SnapshotStore<ShiftRouterCardState>
 
   constructor(
-    scope: SettingsScope<unknown>,
+    scope: SettingsScope<unknown> | null,
     fields: readonly CardField[] = CARD_FIELDS,
   ) {
-    this.scope = scope
+    this.scope = scope ?? FALLBACK_SCOPE
     this.fields = fields
     this.store = createSnapshotStore(this.projection())
     this.scope.subscribe(() => this.publish())

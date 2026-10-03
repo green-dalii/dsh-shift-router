@@ -1,6 +1,6 @@
 {
   "name": "dsh-shift-router",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Two-tier model router for DeepSeek Harness: an LLM Judge sends each turn to the cheap Fast chain or the Smart chain by expected cost, with multi-model fallback chains, exponential-backoff failover, cache-aware switching and task-level orchestration. A DSH adaptation of pi-shift-router.",
   "keywords": [
     "dsh-plugin",

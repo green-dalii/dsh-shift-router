@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { ShiftRouterCardController } from './controller.js'
 import { CATALOG_REFRESH_EVENTS, type ModelCatalogRemote } from './model-catalog.js'
@@ -53,16 +53,34 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 const NS = 'shift-router'
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'locale', 'settingsScope']
+export const inject = ['slots', 'locale']
 
 /**
  * Mount the shift-router settings card.
  * @param ctx - the browser plugin context (cordis `Context`, augmented by the
  *   client packages: `ctx.slots`, `ctx.locale`, `ctx.settingsScope`).
  */
+function activateSettingsScope(ctx: Context): SettingsScope<unknown> | null {
+  // `ctx.get(name)` returns the service or undefined, and does NOT register the
+  // name on the fiber — that is what makes this safe on hosts that dropped the
+  // service. A `ctx.inject(name)` would deadlock the boot instead.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scope = ctx.get('settingsScope' as any) as { bind?: (spec: unknown) => SettingsScope<unknown> } | undefined
+  if (scope?.bind === undefined) return null
+  try { return scope.bind({ namespace: NS }) } catch { return null }
+}
+
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'shift-router: card dictionaries')
-  const controller = new ShiftRouterCardController(ctx.settingsScope.bind({ namespace: NS }))
+  // The settings namespace provider comes from one of two host layouts:
+  // older CLI shells (rc.2 and earlier) provided `ctx.settingsScope`; the
+  // current `dsh-desktop` electron shell does not, and naming it in the
+  // declared inject list would make the fiber wait forever for a service the
+  // composition does not provide. Resolve at activation time via `ctx.get`
+  // (an optional probe — does NOT add to `fiber.inject`), so the boot never
+  // waits on a name the host has dropped, and the controller falls back to a
+  // no-op scope that renders the card read-only.
+  const controller = new ShiftRouterCardController(activateSettingsScope(ctx))
   // Until the composition provides the catalog remote, the card says so rather
   // than showing a loading state that will never resolve — the failure mode that
   // quietly turned every model control into a text box (ALIGNMENT §R7).

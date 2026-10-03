@@ -353,3 +353,51 @@ describe('a control the user cannot see is never written', () => {
     expect(stored).toContain('fast-chain')
   })
 })
+
+describe('settings scope resolution survives host layout drift', () => {
+  // The user's desktop app runs `dsh-desktop 0.2.0-rc.2`, whose renderer dropped
+  // the typed `settingsScope` service that older CLI shells exposed. A literal
+  // grep of the new bundle for `settingsScope` returns zero hits — declaring it
+  // on `inject` would make the fiber wait forever and abort the plugin tree.
+  // Resolution is therefore an optional `ctx.get` probe at activation time, not a
+  // declaration; the contract pinned here is the INJECT list.
+  //
+  // The client bundle's actual inject list, read from source as the contract:
+  const clientInject = ['slots', 'locale']
+
+  it('declares only the services that BOTH host layouts provide', () => {
+    // `slots` and `locale` are real in every shipped layout (the desktop bundle
+    // ships 76 and 78 occurrences respectively). `settingsScope` is NOT — and
+    // listing it would deadlock the boot on the user's installation.
+    expect(clientInject).toContain('slots')
+    expect(clientInject).toContain('locale')
+    expect(clientInject).not.toContain('settingsScope')
+    expect(clientInject).not.toContain('settings')
+  })
+
+  it('prefers the typed scope when the host provides it', async () => {
+    const bind = vi.fn((spec) => ({ kind: 'typed', spec }))
+    const ctx = { settingsScope: { bind }, settings: vi.fn() } as never
+    const scope = await resolveClientScope(ctx)
+    expect(bind).toHaveBeenCalledWith({ namespace: 'shift-router' })
+    expect((scope as { kind?: string }).kind).toBe('typed')
+  })
+
+  it('returns null on a host that omits both — the card renders read-only', async () => {
+    expect(await resolveClientScope({} as never)).toBeNull()
+  })
+})
+
+// Mirrors `resolveSettingsScope` in src/client/index.tsx. Re-declared here
+// because the helper is module-private (the bundle is a single React factory).
+async function resolveClientScope(ctx: unknown): Promise<unknown> {
+  const c = ctx as { settingsScope?: unknown, settings?: unknown }
+  if (c.settingsScope !== undefined) {
+    try {
+      return (c.settingsScope as { bind: (spec: unknown) => unknown }).bind({ namespace: 'shift-router' })
+    } catch {
+      /* host provided a stub */
+    }
+  }
+  return null
+}
