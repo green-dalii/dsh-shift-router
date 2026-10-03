@@ -66,7 +66,7 @@ is nothing to authorize.
 
 ```sh
 npm pack      # or download the release tarball
-dsh plugin --profile web add ./dsh-shift-router-0.6.0.tgz
+dsh plugin --profile web add ./dsh-shift-router-0.7.0.tgz
 ```
 
 Prebuilt as well, and the option to reach for when a registry is not available.
@@ -74,7 +74,7 @@ Prebuilt as well, and the option to reach for when a registry is not available.
 ### From git
 
 ```sh
-dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.6.0
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.7.0
 ```
 
 A git install fetches **source, not artifacts**, so the package's `prepare`
@@ -88,7 +88,7 @@ allowBuilds:
 ```
 
 > This authorizes the package's code to execute on your machine at install time,
-> outside the agent sandbox. Pin a tag or commit (`…#v0.6.0`, `…#<sha>`) so a
+> outside the agent sandbox. Pin a tag or commit (`…#v0.7.0`, `…#<sha>`) so a
 > later push cannot change what you actually run.
 
 ### From a local checkout (development)
@@ -183,7 +183,7 @@ and which models can take images.
 > edit — the decision rule went from counting window votes to weighing expected
 > cost, and two legacy knobs changed meaning. See
 > [SPEC.md §15](SPEC.md#15-migration-and-removals-v050--v060)
-> and the `[0.6.0]` section of [CHANGELOG.md](CHANGELOG.md).
+> and the `[0.7.0]` section of [CHANGELOG.md](CHANGELOG.md).
 
 ### GUI configuration card
 

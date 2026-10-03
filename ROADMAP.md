@@ -16,8 +16,7 @@ v1.7.0 while this project's own releases continued in parallel.
   Judge sources, the decision (Jev) Judge, and the judge availability ladder.
 - **Aligned through**: upstream **v1.6.0** (`4d1b546`, 2026-09-18) for the P0
   (correctness) + P1 (decision core) scope plus the P2 round — **shipped in
-  v0.6.0** — and the **v1.7.0** round (R12), implemented in the working tree and
-  awaiting its release. What remains is the GUI (card-button) form of
+  v0.6.0** — and the **v1.7.0** round (R12) — **shipped in v0.7.0**. What remains is the GUI (card-button) form of
   worker-route authorisation, the v1.6.0 pricing single-source work, and a
   real-machine check of `mode: 'decision'` (see Planned). The delivery audit is
   in [`ALIGNMENT.md`](ALIGNMENT.md).
@@ -54,6 +53,7 @@ v1.7.0 while this project's own releases continued in parallel.
 | v0.4.0 | **GUI settings card** (client bundle, `settings.plugin.item` slot) + upstream `WEB_SETTINGS_NAMESPACES` whitelist workaround (`scripts/expose-gui-settings.mjs`) | ✅ |
 | v0.5.0 | GUI card redesign per review: Shift-Router title + DSW chevron, grouped row layout, **Fast/Smart model chains in the card with DSH-catalog dropdowns**, dark-theme-safe switches, line-height normalization | ✅ |
 | v0.6.0 | **Upstream P0+P1 alignment** (EV routing, gear presets, strict model authority, doc-aware Judge, Judge-outage hold, failover on 402 / usage-limit / `unsupported_model`) + **GUI card review rounds** (R6 registration, R7 model-catalog remote + copy, R8 layout overlap + information architecture) + **runtime visibility** (R9 route notices written into the session). 336 tests / 18 files; `tsc` host + client, `tsdown` build, and `npm run test:e2e` green | ✅ |
+| v0.7.0 | **Upstream v1.7.0 alignment** — pluggable Judge sources (`fast-chain`/`custom`/`decision`), a decision model (Jev / System One class) as Judge, and the availability ladder ending in *no routing at all*; **card UX**: one sub-form per mode, translated + explained options; **CI**: the e2e can no longer burn 6 runner-hours. 429 tests / 24 files; coverage 84.45% lines; e2e green in CI (1m18s) | ✅ |
 
 ## Installation verification round (delivered)
 

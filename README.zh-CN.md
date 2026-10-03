@@ -60,7 +60,7 @@ dsh plugin --profile web add dsh-shift-router
 
 ```sh
 npm pack      # 或下载 release 里的 tarball
-dsh plugin --profile web add ./dsh-shift-router-0.6.0.tgz
+dsh plugin --profile web add ./dsh-shift-router-0.7.0.tgz
 ```
 
 同样是预构建产物；无法访问 registry 时用这条。
@@ -68,7 +68,7 @@ dsh plugin --profile web add ./dsh-shift-router-0.6.0.tgz
 ### 从 git 安装
 
 ```sh
-dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.6.0
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.7.0
 ```
 
 git 安装拉到的是**源码而非构建产物**，因此由包的 `prepare` 脚本构建 `dist/`。pnpm ≥ 10 默认拒绝 git 依赖的 `prepare`——若第一次 `add` 失败，把 pnpm 打印的确切包键复制进 profile 的 `pnpm-workspace.yaml` 后重新执行：
@@ -78,7 +78,7 @@ allowBuilds:
   dsh-shift-router: true
 ```
 
-> 这等于允许该包的代码在安装时于你的机器上执行，且不在 agent 沙箱内。请锁定 tag 或 commit（`…#v0.6.0`、`…#<sha>`），避免后续 push 悄悄改变你实际运行的内容。
+> 这等于允许该包的代码在安装时于你的机器上执行，且不在 agent 沙箱内。请锁定 tag 或 commit（`…#v0.7.0`、`…#<sha>`），避免后续 push 悄悄改变你实际运行的内容。
 
 ### 从本地检出安装（开发用）
 

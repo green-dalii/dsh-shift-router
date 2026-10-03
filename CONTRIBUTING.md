@@ -218,8 +218,8 @@ every install channel is the same call with a different spec — `dsh plugin
 | Channel | Spec | Build script on the user's machine? |
 |---|---|---|
 | npm (recommended) | `dsh-shift-router` | no — the registry holds the built artifact |
-| tarball | `./dsh-shift-router-0.6.0.tgz` | no |
-| git | `github:green-dalii/dsh-shift-router#v0.6.0` | **yes** — `prepare` runs, and pnpm ≥ 10 needs the user to allow it via the profile's `pnpm-workspace.yaml` `allowBuilds` |
+| tarball | `./dsh-shift-router-0.7.0.tgz` | no |
+| git | `github:green-dalii/dsh-shift-router#v0.7.0` | **yes** — `prepare` runs, and pnpm ≥ 10 needs the user to allow it via the profile's `pnpm-workspace.yaml` `allowBuilds` |
 | local checkout | `/path/to/checkout` | no (the contributor builds it) |
 
 Two rules follow from that table:
