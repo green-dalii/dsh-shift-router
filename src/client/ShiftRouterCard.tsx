@@ -179,6 +179,12 @@ const readOnly: CSSProperties = {
   fontSize: 12,
   lineHeight: 1.4,
 }
+const unavailableTitle: CSSProperties = {
+  color: 'var(--dsw-alias-state-error-primary)',
+  margin: '12px 0 0',
+  fontSize: 13,
+  fontWeight: 600,
+}
 
 // ── Section blocks ────────────────────────────────────────────────────
 const sectionBlock: CSSProperties = {
@@ -553,6 +559,34 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
   const state = props.useShiftRouterCard((snapshot) => snapshot)
   const [open, setOpen] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  // Settings unavailable: the host has dropped `settingsScope` (ALIGNMENT §R14
+  // — the desktop 0.2.0-rc.2 shell is the first to do so). Render a
+  // collapsed read-only card with an explanation so the plugin still
+  // appears in the plugin entry and the user can see what to do.
+  if (state.unavailable) {
+    return (
+      <li style={card}>
+        <div style={header} className="sr-header">
+          <span style={headText}>
+            <span style={name}>{t('title')}</span>
+            <span style={description}>{t('description')}</span>
+          </span>
+          <span style={chevron} aria-hidden="true">
+            <ChevronIcon />
+          </span>
+        </div>
+        <div style={body}>
+          <p style={unavailableTitle} role="status">{t('settingsUnavailable')}</p>
+          <p style={readOnly}>{t('settingsUnavailableBody')}</p>
+        </div>
+      </li>
+    )
+  }
+
+  // Loading (no Host acceptance yet, but the settings service exists):
+  // still hidden — the user gets a card the moment the scope is ready, and
+  // a perma-spinner here would be worse than a brief absence.
   if (!state.available) return null
 
   const stateByPath = new Map(state.fields.map((field) => [field.path, field]))

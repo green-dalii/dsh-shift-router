@@ -328,8 +328,14 @@ describe('route notices enter the session (SPEC §13.1)', () => {
   /** The notices this plugin wrote into the decision. */
   function notices(decision: PreStepDecision): UserMessage[] {
     if (decision.kind !== 'enter') return []
+    // The plugin writes `model-selection` notices (the v4 producer-owned kind
+    // for model-routing changes; see ALIGNMENT §R14). The `[shift-router]`
+    // prefix in the rendered text and the prefixed `summary` make the origin
+    // unambiguous to any consumer that distinguishes model-selection sources.
     return decision.messages.filter(
-      (message) => message.source.kind === 'plugin' && message.source.plugin === 'shift-router',
+      (message) => message.source.kind === 'model-selection'
+        && (message.source as { form?: string }).form === 'notice'
+        && ((message.source as { summary?: string }).summary ?? '').includes('shift-router'),
     )
   }
 

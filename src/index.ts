@@ -24,7 +24,18 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision, RequestErrorAction } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContextFormed, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
+// The 0.1.5-rc.2 dsh-llm types shipped with this project predate the v4
+// session source vocabulary that 0.2.0-rc.2+ enforces on the wire —
+// `kind: 'model-selection'` is the producer-owned kind the running host uses
+// for model-route notices (dsh-agent's own `modelSwitchNotice`), and we emit
+// the same kind for our routing notices. Without this augmentation TS rejects
+// the literal, even though the running host accepts it. (ALIGNMENT §R14.)
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'model-selection': { kind: 'model-selection' } & ContextFormed
+  }
+}
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
@@ -556,13 +567,22 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       fast: tierLabel('fast', cfg),
       smart: tierLabel('smart', cfg),
     })
+    // The router's job IS model selection: pick which model runs this turn.
+    // v4 session admission rejects the v3 `{ kind: 'plugin', plugin: '...' }`
+    // wrapper outright ("format v4 message requires a producer-owned source
+    // kind"). The producer-owned analogue — the one upstream `dsh-agent` uses
+    // for its own model-switch notice (modelSwitchNotice, dsh-agent/lib/index.js)
+    // — is `{ kind: 'model-selection', form: 'notice', summary }`. Sharing the
+    // kind keeps the durable log a single producer-owned vocabulary; the
+    // `summary` and the `[shift-router]`-prefixed text make the origin
+    // unambiguous in any consumer that distinguishes them. (ALIGNMENT §R14.)
     return {
       ...decision,
       messages: [
         ...decision.messages,
         createUserMessage({
           content: [{ type: 'text', text }],
-          source: { kind: 'plugin', plugin: 'shift-router', form: 'notice', summary },
+          source: { kind: 'model-selection', form: 'notice', summary },
         }),
       ],
     }

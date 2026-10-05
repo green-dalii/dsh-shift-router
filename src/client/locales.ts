@@ -13,6 +13,8 @@ export type ShiftRouterCardKey =
   | 'expand'
   | 'collapse'
   | 'readOnly'
+  | 'settingsUnavailable'
+  | 'settingsUnavailableBody'
   | 'overridden'
   | 'reset'
   | 'save'
@@ -170,6 +172,8 @@ export const en: ShiftRouterCardDict = {
   expand: 'Show settings',
   collapse: 'Hide settings',
   readOnly: 'This deployment stores settings read-only.',
+  settingsUnavailable: 'Settings unavailable on this host',
+  settingsUnavailableBody: 'This build of DSH does not expose the settings service to the browser, so the card renders without controls. Edit the shift-router settings through your profile manifest or the host configuration instead.',
   overridden: 'Overridden',
   reset: 'Reset to default',
   save: 'Save',
@@ -326,6 +330,8 @@ export const zh: ShiftRouterCardDict = {
   expand: '展开设置',
   collapse: '收起设置',
   readOnly: '本部署的设置为只读。',
+  settingsUnavailable: '本 host 未提供设置服务',
+  settingsUnavailableBody: '当前版本的 DSH 未把设置服务暴露给浏览器侧，所以卡片以只读形式显示。请通过 profile manifest 或 host 配置修改 shift-router 的设置。',
   overridden: '已覆盖',
   reset: '恢复默认',
   save: '保存',

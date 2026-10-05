@@ -285,6 +285,40 @@ describe('the card shows one Judge sub-form at a time', () => {
   })
 })
 
+/**
+ * v4 hosts that dropped `ctx.settingsScope` (the desktop 0.2.0-rc.2 shell is the
+ * first) get a null `activateSettingsScope()` result, so the controller falls back
+ * to its no-op scope. The card must still render — with `state.unavailable: true`
+ * and `state.available: false` — so the plugin entry shows the card body instead
+ * of vanishing.
+ */
+describe('the card falls back when the host has no settingsScope', () => {
+  it('flags unavailable when the fallback scope answers', () => {
+    const controller = new ShiftRouterCardController(null)
+    const snap = controller.store.getSnapshot()
+    expect(snap.unavailable).toBe(true)
+    expect(snap.available).toBe(false)
+    expect(snap.writable).toBe(false)
+  })
+
+  it('does not claim ready when the fallback scope answers', () => {
+    const controller = new ShiftRouterCardController(null)
+    const snap = controller.store.getSnapshot()
+    // `snap.status === 'ready'` would be a false positive — the card would
+    // try to render the form and every save would silently fail against the
+    // no-op scope. The new flag is what the card keys off.
+    expect(snap.unavailable).toBe(true)
+  })
+
+  it('reports ready when the host exposes a real, writable scope', () => {
+    const controller = new ShiftRouterCardController(fakeScope() as never)
+    const snap = controller.store.getSnapshot()
+    expect(snap.unavailable).toBe(false)
+    expect(snap.available).toBe(true)
+    expect(snap.writable).toBe(true)
+  })
+})
+
 describe('the card renders what the controller publishes', () => {
   it('resolves the registry entries for the published controls, in published order', () => {
     const published = [{ path: 'routing.judge.mode' }, { path: 'tiers.fast.models' }]

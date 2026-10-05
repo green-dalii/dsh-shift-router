@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-04
+
+### Fixed
+
+- **Routing notices no longer crash the v4 session admission.** `src/index.ts` emits
+  the route-changed notice with `source: { kind: 'model-selection', form: 'notice', summary }`
+  — the same producer-owned kind `dsh-agent`'s own `modelSwitchNotice` uses — instead of
+  `{ kind: 'plugin', plugin: 'shift-router' }`. The v3 wrapper is what v4 session-format
+  admission rejects with `"format v4 message requires a producer-owned source kind"` and
+  what made every routed turn on a v4 host abort with `"本轮运行失败"`. The project
+  TypeScript declaration file gets a module augmentation for `'model-selection'` so the
+  source compiles even though the 0.1.5-rc.2 dsh-llm types shipped with this project
+  predate the v4 vocabulary; the running 0.2.0-rc.2 host accepts it (ALIGNMENT §R14).
+- **The GUI card now renders on hosts that dropped `settingsScope`.** `controller.ts`
+  distinguishes `'unavailable'` from `'ready'`/`'loading'` in `SettingsScopeSnapshot.status`
+  and surfaces that as a new `state.unavailable` flag. The `FALLBACK_SCOPE` reports
+  `'unavailable'` (not `'loading'`) when the host has no `ctx.settingsScope` service, and
+  `ShiftRouterCard` renders a collapsed read-only card with a one-line reason instead of
+  returning `null`. On hosts that do provide `settingsScope`, behaviour is unchanged
+  (the existing `'ready'`/`'loading'` path still gates form rendering).
+- **Settings namespace keys now span the new locale keys.** `settingsUnavailable` /
+  `settingsUnavailableBody` carry the English / Simplified-Chinese strings for the
+  unavailable notice above.
+
+### Known install-path issue (NOT a 0.7.2 bug; documented for the maintainer)
+
+- **`dsh-plugin-manager`'s install flow does not honor the registry's latest version
+  when the lockfile already pins an older one.** The UI's "Install" flow runs
+  `pluginManager.installBundle(spec)` where `spec` is the bare package name the
+  maintainer typed (e.g. `dsh-shift-router`), even when `inspect()` already resolved
+  the latest `version` for that name on the registry. The Host then runs
+  `pnpm add <spec>`; with a lockfile pinning an earlier `^`-range hit, `pnpm add`
+  is a no-op and the manager reports "installed" without actually upgrading the
+  bytes on disk. **Reproduction** (verified locally on a clean 0.7.1 profile):
+  `pnpm add dsh-shift-router` on a profile whose lockfile pins `0.7.1` leaves the
+  installed bytes at `0.7.1`. `pnpm update dsh-shift-router` (or `pnpm add
+  dsh-shift-router@0.7.2`) does upgrade. The fix for a host maintainer whose UI
+  shows `0.7.2` but disk is `0.7.1`:
+  - **Option A (UI only):** type `dsh-shift-router@0.7.2` (not just `dsh-shift-router`)
+    into the install dialog — the `@0.7.2` part is appended by the user, not by
+    the manager.
+  - **Option B (shell):** from the desktop profile directory, run
+    `<dsh-runtime-pnpm-bin> update dsh-shift-router --registry
+    https://registry.npmjs.org/`, then restart the desktop shell.
+  This will be fixed upstream in `dsh-plugin-manager`; for now the maintainer
+  works around with Option A or B. (ALIGNMENT §R14.1.)
+
+## [0.7.1] - 2026-10-03
+  `settingsUnavailableBody` carry the English / Simplified-Chinese strings for the
+  unavailable notice above.
+
 ## [0.7.1] - 2026-10-03
 
 ## [0.7.0] - 2026-09-30

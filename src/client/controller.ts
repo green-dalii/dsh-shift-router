@@ -40,10 +40,16 @@ import {
  * failure rather than pretending to write. This is the better failure mode than
  * the alternative — a fiber waiting forever for a service the host does not
  * provide, which aborts the whole plugin tree.
+ *
+ * `status: 'unavailable'` (not `'loading'`): `'loading'` is reserved for the
+ * window between bind and the first Host acceptance — distinguishing it from
+ * "the settings service does not exist on this host" is what lets the card
+ * surface a "settings unavailable on this host" notice instead of an
+ * indefinite spinner.
  */
 const FALLBACK_SCOPE = {
   getSnapshot: (): SettingsScopeSnapshot<unknown> => ({
-    status: 'loading' as const,
+    status: 'unavailable' as const,
     writable: false,
     base: undefined,
     user: undefined,
@@ -72,8 +78,12 @@ export interface FieldState {
 
 /** The card's published snapshot (the store the slot entry injects). */
 export interface ShiftRouterCardState {
+  /** True when the scope is ready; false when it is loading or unavailable. */
   available: boolean
+  /** True when the scope is ready AND writable (the host accepts writes). */
   writable: boolean
+  /** True when no settings service exists on this host — render a notice instead of a form. */
+  unavailable: boolean
   dirty: boolean
   invalid: boolean
   saving: boolean
@@ -181,7 +191,8 @@ export class ShiftRouterCardController {
     const plan = buildPlan(fields, this.staged, snap)
     return {
       available: snap.status === 'ready',
-      writable: snap.writable,
+      writable: snap.status === 'ready' && snap.writable,
+      unavailable: snap.status === 'unavailable',
       dirty: plan.patches.length > 0 || plan.invalid,
       invalid: plan.invalid,
       saving: this.saving,
