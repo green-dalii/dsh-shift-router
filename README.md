@@ -15,10 +15,10 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
-[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#development)
-[![Coverage](https://img.shields.io/badge/coverage-83.25%25%20lines-green)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-436%20passing-brightgreen)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-83.76%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -131,7 +131,7 @@ DeepSeek Harness supports hot reload through `@deepseek-ai/cordis-plugin-hmr`, b
 
 ## Configuration
 
-Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (**Settings → Plugins → Plugin configuration** — the "Shift-Router" card), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
+Configuration lives in the **`shift-router` settings namespace**: edit it in the GUI (sidebar **Plugins** → `dsh-shift-router` → the `shift-router` row → *configure*), with `/router config` commands, or via the profile patch row. All fields have safe defaults.
 
 Tier models are the only thing you must choose: **[docs/MODELS.md](docs/MODELS.md)** covers how
 to pick a Fast and a Smart model (the Fast chain also serves the Judge by default), what makes a good fallback,
@@ -189,7 +189,8 @@ and which models can take images.
 
 The package ships a browser-side (client) module that registers a **"Shift-Router"** card in the GUI settings page:
 
-- **Where**: Settings → Plugins → Plugin configuration (that page is provided by the official `dsh-client-ui-settings-plugins`; the card registers into the `settings.plugin.item` slot).
+- **Where (DSH 0.2.0-rc.2+)**: the sidebar **Plugins** page → the `dsh-shift-router` card → the `shift-router` row → its configure control. The full form also sits on the bundle's own page, so either route reaches it. The card registers into `plugins.row.config` (keyed `dsh-shift-router#shift-router`) and `plugins.bundle.config` (keyed `dsh-shift-router`), both declared by the official `dsh-client-ui-plugin-manager`; the settings transport is `ctx.configForms`.
+- **Where (up to 0.1.5-rc.x)**: Settings → Built-in plugins → the configurable tab, where the card occupies the keyed `settings.plugin.item` cell (`key: 'shift-router'`) and the transport is `ctx.settingsScope`. Each generation declares exactly one of the three slots, so the registrations for the other generation stay inert.
 - **What**: a form over every scalar leaf field (booleans, numbers, enums) **plus the model chains** (both tiers, and a dedicated Judge chain), grouped into seven sections (General / Models / Routing / Orchestration / Failover / Telemetry / Logs & UX) with sub-groups for the routing section (Judge / Judge source / Decision window / Cache-aware). A control appears only while it is relevant — choosing a Judge source reveals that source's own settings and hides the rest — and no dropdown shows a raw config token. Scalar fields use the compact settings-row pattern — label + hint on the left, control right-aligned on the same line — so each field is one tight row instead of three stacked lines. Controls use the host-plane design tokens: toggle switches (contrast-safe in light and dark themes), a styled select for enums, unit suffixes inside numeric inputs (`ms`, `tokens`, `0–1`, …), and an ordered row editor for model chains — the row order is the in-tier fallback order, so the first available model wins and the rest are its fallbacks. The provider/model dropdowns are auto-loaded from **DSH's runtime model catalog** (`llm.models` — the same catalog the DSH settings surface reads): only providers with a currently advertised model list appear, no dormant-directory noise, and nothing is hardcoded, so the card works with any deployment's configured models. A "Custom…" escape covers values outside the catalog. Staged saving, per-field reset to default, and override markers work exactly like the official cards.
 - **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the model chains — both tiers and the Judge's — are editable in the card.
 - **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
@@ -214,7 +215,7 @@ only reachable from a source checkout.
 | `/router on` / `/router off` | Enable / disable (session-scoped) |
 | `/router verbose` / `/router log` | Toggle verbose router logging |
 | `/router orchestrate auto\|off` | Orchestration mode |
-| `/router allow-workers [on\|off]` | Authorise this plugin's Fast-tier routes in the harness `subagent-model-selection` allowlist, so workers can be pinned to Fast (`off` revokes, keeping the routes). Reports exactly what it wrote, or why it could not |
+| `/router allow-workers [on\|off]` | Authorise this plugin's Fast-tier routes in the harness `subagent-model-selection-settings` allowlist, so workers can be pinned to Fast (`off` revokes, keeping the routes). Reports exactly what it wrote, or why it could not |
 | `/router eco` / `/router default` / `/router sport` | Gear presets: set `routing.economics.mode` (persisted) — cheaper ↔ stickier on Smart |
 | `/router config` | Interactive editor: numbered field list with current values + available providers + usage |
 | `/router config get <N\|path>` | Show one field's current value, e.g. `get 4` or `get routing.judgeTimeout` |
@@ -280,7 +281,7 @@ turn: the LLM half runs detached and its verdict appears as `Last audit:` in `/r
 
 Upstream calls the per-worker model pin **mandatory**: a worker that inherits the parent's model runs
 on Smart mid-orchestration, which collapses the economics. In DSH that pin sits behind the harness's
-own allowlist (`subagent-model-selection`, default **off**). `/router allow-workers` writes the Fast
+own allowlist (`subagent-model-selection-settings`, default **off**). `/router allow-workers` writes the Fast
 chain into it for you; when it is not authorised the router says so in a `Worker delegation:` line
 rather than pretending otherwise (SPEC §7.4).
 

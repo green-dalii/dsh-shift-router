@@ -909,6 +909,203 @@ TYPESAFE_API_KEY="$TYPESAFE_API_KEY" python3 - <<'PY'   # ← 该变量在本 sh
    那个看起来很诱人的改动（把优先级从 `probabilities[choice]` 改成 `confidence`）：它没有任何可观测
    收益，只会制造与上游的差异。真正值得记录的是饱和本身——见 §R12.4 第三条。
 
+## R14：v4 会话格式与一次错误的收尾判断
+
+### R14.1 路由通知不再让 v4 会话拒绝
+
+维护者报「每轮路由都失败」。根因是通知的 `source.kind`：我写的是
+`{ kind: 'plugin', plugin: 'shift-router' }`，而 v4 会话格式只接受**生产者自有**的 kind，报错原文
+`format v4 message requires a producer-owned source kind`。改成 `dsh-agent` 自己的
+`modelSwitchNotice` 用的同一个 kind `'model-selection'` 后，真机不再报错。
+
+### R14.2 我在同一轮把 GUI 问题判错了（必须记住）
+
+看到 `ctx.settingsScope` 在 0.2.0-rc.2 客户端包里 0 命中，我判定「这个 shell 没有设置服务」，
+于是给卡片加了 `state.unavailable` 只读态。**这个判断只对了一半**：`settingsScope` 确实没了，
+但真正让卡片消失的不是它，而是**槽位被删**（见 R15）。我交了一个"能解释症状"的改动，却没有
+验证"症状是否因此消失"——维护者随后反馈「重启后仍然看不到配置界面」。
+
+### R14.3 流程缺陷：测试面 ≠ 目标运行时
+
+那一轮的验证 profile 用的是 `~/.dsh/profiles/node_modules`（0.1.5-rc.3），而维护者的桌面跑
+0.2.0-rc.2。0.1.5-rc.3 **有** `settings.plugin.item`，所以我的复现"通过"了。**测试面必须等于
+目标运行时**，否则绿灯只是证明了一个不存在的部署。R15.5 是这条的执行结果。
+
+## R15：0.2.0-rc.2 的扩展点迁移——配置界面为什么真的不可见
+
+### R15.1 两个独立根因
+
+维护者问「是不是方向错了」。回头看，问题有两个，互相独立，缺一不可：
+
+| 编号 | 根因 | 证据 |
+|---|---|---|
+| A | 0.2.0-rc.2 删除了 `settings.plugin.item` 槽位。卡片注册进一个没人声明的槽位；`ctx.slots.inject` 的回调永不运行，所以既无界面也无报错 | `tsc` 原文 `Argument of type '"settings.plugin.item"' is not assignable to parameter of type '"settings.launcher" \| … \| "settings.plugins.tab" \| …'`；全量 grep 打在 0.2.0-rc.2 全部 `@deepseek-ai` 包上 **0 命中** |
+| B | 桌面 profile 把 bundle 关掉了。`dsh.profile.bundles` 只有 2 项，插件根本不在跑 | 真机 UI 原文 `包含的组件 / 共 1 个 · 1 已停用 / shift-router / 已关闭`；`readProfileManifest` 输出 `["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]` |
+
+只修 A，界面仍然不出现（插件没跑）。只修 B，界面出现但卡片仍然注册进已删除的槽位（空页）。
+
+### R15.2 迁移表（读 0.2.0-rc.2 源码得出，不是猜的）
+
+| 项目 | ≤0.1.5-rc.x | 0.2.0-rc.2 |
+|---|---|---|
+| 配置界面位置 | 设置 → 内置插件 → 可配置 | 左侧栏「插件」页（`PANEL_ID = "plugins"`） |
+| 槽位 | `settings.plugin.item`（keyed，键 = 设置命名空间） | `plugins.row.config`（keyed，键 `` `${包名}#${行 id}` ``）+ `plugins.bundle.config`（keyed，键 = 包名） |
+| 传送服务 | `ctx.settingsScope.bind({ namespace })` | `ctx.configForms.get(namespace)` |
+| Host 命名空间 | `settings.register(ns, schema, { base })` | **loader entry id**；`describe()` 只列 `Config` 投影出 volatile 表单的条目 |
+
+两条只从源码才能读出的关键事实：
+
+1. **行是否有「配置」按钮由 key 决定。** `dsh-client-ui-plugin-manager/lib/client.js:3357`：
+   `has: (row) => ledger.rows.has(rowConfigKey(pkg.name, row.rowId))`。所以
+   `dsh-shift-router#shift-router` 这个字面量**就是**那个按钮的存在证明。
+2. **`Config` 不投影 volatile 表单，`describe()` 直接跳过该条目。** `dsh-settings/lib/index.js:423`：
+   `const form = volatileForm(schema); if (form === void 0) return []`。0.1.5-rc.x 的
+   `settings.register(ns, schema)` 没有这个要求，所以这是迁移必须补的一处 schema 改动。
+   根节点是**唯一**的 volatile 节点：schemastery 禁止 volatile 套 volatile
+   （`volatile fields require a fixed object path without an enclosing volatile field`），
+   而卡片本来就是按路径分段写整节，一个引用正合适。
+
+槽位名从**声明方**取，不从本地抄：`plugins.row.config` 来自
+`@deepseek-ai/dsh-client-ui-plugin-manager/client`（type-only 导入），
+`settings.plugin.item` 由 `src/client/legacy-slot.ts` 按 0.1.5-rc.2 声明方的 kind/scope 复述并
+由测试钉住。R6 的教训不是"永不本地声明"，而是"声明所有者声明的那个东西，并且钉住它"。
+
+### R15.3 上游在同一版里还有三处破坏性改动
+
+1. `settingsScope` 服务整个消失（0 命中），由 `configForms` 取代。
+2. `dsh-tool-subagent/model-selection-settings` 删除了
+   `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE` 与 `..._SCHEMA` 两个导出，改用
+   `static Config`；命名空间变成 Web 组合的行 id `subagent-model-selection-settings`
+   （`dsh-web-app/cordis.patch.yml:66`）。我们原来的字面量 `subagent-model-selection`
+   已经不存在，`authorizeWorkerRoutes` 会以"本 profile 未挂载"拒绝。
+3. `SettingsScope` / `SettingsScopeSnapshot` 类型不再从
+   `dsh-client-ui-settings/client` 导出，改为 `ConfigForm` / `ConfigFormSnapshot`
+   （字段逐个相同；只有写方法的返回值从 `Promise<void>` 变成 `Promise<boolean>`，而卡片从不读它）。
+
+### R15.4 peer 范围必须覆盖我们真正构建的那一代
+
+`@deepseek-ai/dsh-llm` 的 peer 原来是 `>=0.1.5-rc.2 <0.2.0`。`0.2.0-rc.2 < 0.2.0` 成立，所以
+兼容门禁在**当前**桌面版放行；但 `0.2.1-alpha.1` 会被判为不兼容，插件管理器会拒绝启用
+bundle——而拒绝原因（"peer 不兼容"）与插件的真实可用性毫无关系。既然本轮已经改为对
+0.2.0-rc.2 构建与验证，就把范围放宽到 `<0.3.0`。非 `dsh-*` 名字（`cordis`）不参与门禁，保持不动。
+
+### R15.5 测试面 = 目标运行时（R14.3 的执行结果）
+
+本轮把**全部 17 个 `@deepseek-ai` devDependency 对齐到 0.2.0-rc.2**。直接原因是 npm 拒绝混装：
+0.2.0 客户端包 peer `@deepseek-ai/dsh-scope@0.2.0-rc.2`，而 0.1.x 宿主包把它钉在 `0.1.5-rc.2`，
+报错原文 `Conflicting peer dependency: @deepseek-ai/dsh-scope@0.2.0-rc.2`。更重要的原因是纪律：
+本地类型面必须等于维护者实际运行的那一代。`cordis`、`dsh-llm`、`schemastery` 现在也是显式
+devDependency，防止传递依赖把树悄悄拉回旧版。
+
+### R15.6 真机验证（0.2.0-rc.2，隔离 home）
+
+用**桌面载体自己的安装域**（桌面 app 内打包的 0.2.0-rc.2）启动一个隔离 profile，插件用
+`link:` 指向本仓库：
+
+| 观测项 | 结果 |
+|---|---|
+| 组合树 | `{"id":"shift-router","name":"dsh-shift-router"}`；`skippedBundles: []` |
+| 兼容门禁 | `compatibility on 0.2.0-rc.2: OK` |
+| bundle 页配置区 | `data-plugin-config` 1 处，6 个控件 |
+| 行页配置区 | 8 个控件，id 形如 `shift-router-routing-economics-reworkPenalty` |
+| 保存往返 | `3 → 7`；保存按钮转灰、无未保存标记、无失败行 |
+| 落盘 | profile patch 出现 `routing.economics.reworkPenalty: 7` |
+| 重载读回 | `7` |
+
+这次验证同时证明了一件不能靠推理确认的事：插件 `link:` 到本仓库后，会优先解析**仓库自己的**
+`node_modules`（`dsh-llm@0.2.0-rc.2`），而不是宿主的同版本副本。跨实例的 `Config`
+（schemastery）能被宿主的 `dsh-settings` 正常 `toJSON()`/重建，因此这套混装是可用配置，
+不是隐患。
+
+### R15.7 硬规则（写给下一个遇到"功能在但界面不出现"的人或 agent）
+
+1. **槽位消失是静默的。** `ctx.slots.inject(name, cb)` 在 `name` 无人声明时**永不回调，也不报错**；
+   直接 `slots.register` 才会抛。所以"升级上游后界面变空"必须先查声明方，而不是查自己的代码。
+2. **升级目标运行时后，先 diff 上游的扩展点，再 diff 自己的实现。** 本次五个破坏性改动
+   （槽位、服务、命名空间模型、命名空间字面量、volatile 要求）全部能从声明方源码读出，
+   一条都不需要猜。
+3. **验证 profile 的依赖版本必须打印出来。** 「我验证过了」如果不写清"对哪一代验证"，
+   就等于没验证（R14.3）。
+4. **`tsc` 是最强的槽位检查器**——前提是类型来自声明方。本轮删掉本地抄写的 `SlotMap`
+   条目后，错误第一次出现在编译器里，而不是维护者的屏幕上。
+
+### R15.8 Volatile 粒度——根节点、按顶层分节，还是逐叶子？
+
+R15.2 决定 `Config` 必须投影出 volatile 表单。**选择哪一级 volatile** 是本轮第一次就
+答错的细节：
+
+| 方案 | 编译期 | 浏览器值 | 写入路径 | headless boot | 评价 |
+|---|---|---|---|---|---|
+| **根节点 `z.object({...}).volatile()`** | OK | 完整 config | OK（远程 settings 走 API 层） | **永远不进 `pre-step`** | 弃 |
+| **逐叶子 `.volatile()`** | OK | 仅叶子，缺中层对象 | `write()` 拒绝 `[section]` 路径（`Config field "routing" is not volatile`） | 同上 | 弃 |
+| **按顶层分节 `enabled/tiers/routing/ux/.../pricing` 各自 `.volatile()`** | OK | 完整 config（`describe()` 输出八把钥匙全有） | OK | OK | **采用** |
+
+第一行是第一次实现：根节点 volatile。`dist/index.js` 跑通真实 web 组合、卡片出现、保存
+3→7 写盘——一切看似正常。提交后才发现 R15.7 的 e2e 在 headless 上 hang，原因是 e2e
+的 settings 探针在 boot 期间写了一次 `ctx.settings.update(...)`。R15.9 解释了那个
+hang 的机制；这条只解释为什么 volatile 不能放在根节点。
+
+**根节点为什么 hang：** `Config` 标 `.volatile()` 后，`Config` 的解析输出从
+`ShiftRouterConfig` 变成 `Volatile<ShiftRouterConfig>`（`createVolatile` 的不可变快照）。
+`entry.fiber.config` 不再是那个对象，而是一个**带 `.get` 方法的引用**。card 的
+`readProvidedConfig` 把它解开成普通对象，所以宿主能跑完 `apply`——但引用本身进入了
+Loader 的运行时依赖图：headless 那一支在某处把 `entry.fiber.config` 当作**普通对象**读，
+撞上引用就停。现场是 `uv__io_poll` 里等待 I/O、`agent/pre-step` 永不触发。
+web 那一支（Playwright 直接命中 serving 的 host）把引用看成 `remote` 上的一个
+属性，从不直接读 `fiber.config`，所以那条路跑得通。换言之：同一份二进制，两条装载
+路径，行为不一致——这是最危险的形状。**根节点 volatile 不能用。**
+
+**逐叶子为什么不行：** card 写入路径是按顶级分节整体写（`form-model.ts` 的 `buildPlan`
+每节出一个 patch；`save()` 一节一写）。`SettingsForms.write` 校验
+`isVolatilePath(schema, ['routing'])`——叶子 volatile 时 `schema.dict['routing']`
+不是 volatile，返回 false，于是 `Config field "routing" is not volatile`，抛出。
+要让叶子行，必须改 `buildPlan` 改成逐叶子 patch——代价大收益小：浏览器拿到的
+也是叶子碎片，card 需要自己拼。
+
+**为什么按顶层分节两条都通：** `isVolatilePath(schema, ['routing'])` 走
+`schema.dict['routing'].meta.volatile`——true；`isVolatilePath(schema, ['routing','judge','mode'])`
+也是 true（嵌套 volatile 的反例不成立，因为 `routing` 节点本身标记了 volatile，
+不再递归）。`volatileForm` 把每个 volatile 分节投成 `plainSchema(child)`——`plainSchema`
+是 `new z(toJSON())` 然后把 `meta.volatile` 删掉——所以 `projectForm` 仍然递归
+出该分节的全字段对象，浏览器拿到的就是完整的 `tiers / routing / ux / …`。和根节点
+volatile 形态上相似，差异是字段级而非整树——`entry.fiber.config` 是个普通对象，
+仅**它的字段值**是引用。这正好在 Loader 容忍的形状里。
+
+R15.2 的「`Config` 必须 volatile」是真，但真在分节不在根。这一行决定了 R15 能否交付。
+
+### R15.9 Boot 期间写设置会死锁——e2e 的真实事故
+
+R15.7 跑 `npm run test:e2e` 时 headless 那一轮 hang 二十分钟。**最终定位到
+`e2e/settings-probe.mjs`**：探针在 boot 期间（`agent/pre-step` 之前）调用
+`ctx.settings.update(NS, …)`。0.2.0-rc.2 把设置文档**和** profile patch 合并成
+同一份文件（`@deepseek-ai/dsh-settings` 的 `write()` 直接 `configEditor.edit(entry, …)`
+写补丁并触发 Loader 重载）。探针在那棵正在加载的树内部发起的写，需要那棵树完成
+**下一次**加载才能返回；那棵树又在等探针先跑完。两边互锁。进程表现为：在 `uv__io_poll`
+里空闲，`pre-step` 永不触发，没有任何错误日志。
+
+证据（五轮 A/B 跑，原文）：
+
+| 跑法 | 插件 volatile？ | 探针写？ | 结果 |
+|---|---|---|---|
+| 无 volatile | 否 | 写 | ✓ turn ran on fake/fake-smart |
+| 无 volatile | 否 | **不**写 | ✓ turn ran, probe writes file |
+| 有 volatile | 是 | 写 | ✗ **hang 240s** |
+| 有 volatile | 是 | **不**写 | ✓ turn ran on fake/fake-smart |
+| 有 volatile | 是 | **不插**探针 | ✓ turn ran on fake/fake-smart |
+
+第五排是和第四排完全等价的对照：探针本身是死锁的输入，不是 volatile 本身。
+第二条把写入路径验证留给了 e2e 的写步骤 / 浏览器检查（已在 R15.6 用真实组合做完整
+3→7 往返）。**结论：**「boot 期间写设置」是上游 0.2.0-rc.2 的固有限制，不是本插件
+的可变性问题——但本插件要写得避开它，所以 e2e 探针改为**只读**。这条要写进 spec/测试的
+口头协议里，否则下个改 e2e 的人会重写一遍。
+
+**给下一个写 e2e 的人：**设置文档的写入只能在两种上下文里发生——(1) 一个已经
+**不在 boot 路径**上、有自己事件循环的进程（比如浏览器对一个正在 serving 的 host
+发 RPC），或 (2) 一个**在 session 之外**、plugin 树已被卸载 / 重建过一次的窗口。
+**绝不要**从一个 `apply()`（无论是 `inject(['settings'])` 子 fiber、还是 boot
+阶段被装载的 probe）里直接 `ctx.settings.update()`。R15.7 的 20 分钟就是这么
+烧掉的。
+
 ## 明确不对齐（附理由）
 
 规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再

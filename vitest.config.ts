@@ -20,7 +20,16 @@ export default defineConfig({
       // e2e/browser-check.mjs covers it in a real browser (SPEC §14), which
       // vitest cannot do. Excluding it keeps the number honest rather than
       // pretending a jsdom render is the same test.
-      exclude: ['src/client/ShiftRouterCard.tsx'],
+      //
+      // The two legacy-* modules hold only type declarations and `declare
+      // module` augmentations for the pre-0.2.0 shell; the compiler emits them
+      // as a bare `export {}`, so v8 scores them 0/0 and reports 0% — a number
+      // no test can move, and one that hides the real figure.
+      exclude: [
+        'src/client/ShiftRouterCard.tsx',
+        'src/client/legacy-scope.ts',
+        'src/client/legacy-slot.ts',
+      ],
       thresholds: {
         // Floor over all shipping source: pinned at today's measurement so it
         // cannot silently regress. Raise it when you raise the coverage.

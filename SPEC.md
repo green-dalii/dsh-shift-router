@@ -46,7 +46,7 @@ a transport layer.
 | Telemetry | `session/event` (`assistant/message`, `assistant/chunk`) |
 | Judge LLM call | `ctx.llm.stream()` |
 | Configuration | `shift-router` settings namespace + `cordis.patch.yml` |
-| Commands / GUI | `ctx.commands.register()`, client card in `settings.plugin.item` |
+| Commands / GUI | `ctx.commands.register()`, client card in `plugins.row.config` / `plugins.bundle.config` (0.2.0-rc.2+) or `settings.plugin.item` (≤0.1.5-rc.x) — §12.1 |
 | Optional capabilities | `ctx.get()` probe / `ctx.inject()` subscription — **never** a bare `ctx.<name>` read (§1.4, §7.4) |
 
 ### 1.2 Routable agents
@@ -135,11 +135,18 @@ the target harness moves. Two consequences worth stating:
   (`settingsNamespace` used to be one); a rename upstream breaks the plugin at
   boot, not at compile time.
 - The client half's contracts are imported from the package that declares them —
-  `ctx.slots` from `dsh-client-ui-renderer/client`, the browser `SettingsScope`
-  from `dsh-client-ui-settings/client`, the card's slot from
-  `dsh-client-ui-settings-plugins/client` — **type-only** where only types are
-  needed, and never re-spelled locally (§12.1). `dsh-client-runtime` does **not**
-  exist at this baseline.
+  `ctx.slots` from `dsh-client-ui-renderer/client`, the card's slots from
+  `dsh-client-ui-plugin-manager/client`, the shared form types
+  (`ConfigForm` / `ConfigFormSnapshot`) from `dsh-client-ui-settings/client` —
+  **type-only** where only types are needed, and never re-spelled locally
+  (§12.1). The one historical exception is `src/client/legacy-slot.ts`, which
+  restates the ≤0.1.5-rc.x cell because that release cannot be installed beside
+  the 0.2.0 packages in one tree; its kind and scope are copied from that
+  declarer and pinned by test. `dsh-client-runtime` does **not** exist at this
+  baseline.
+- **The devDependency generation equals the target runtime generation.** A
+  verification profile whose scope differs from the maintainer's shell proves
+  nothing (ALIGNMENT §R14.3, §R15.5).
 
 ---
 
@@ -555,7 +562,7 @@ Upstream declares tier injection **mandatory**: without it a worker inherits the
 current model, which is Smart mid-orchestration, and the economics collapse. DSH exposes
 the same capability under a **host-owned allowlist** — the `subagent` tool's per-call
 `provider` / `model` / `reasoning_effort` are honoured only when the deployment enables
-the harness's own `subagent-model-selection` setting (default **off**) and lists the exact
+the harness's own `subagent-model-selection-settings` setting (default **off**) and lists the exact
 routes. That owner is mounted by the `web` composition only, so on `headless` the
 capability is **absent**, not disabled. Therefore:
 
@@ -755,7 +762,7 @@ third copy here would only add a surface that drifts, so this section states the
 | `/router on` \| `/router off` | enable/disable routing for this session |
 | `/router verbose` \| `/router log` | toggle `ux.routerLogVerbose`: log-ring detail **and** a route notice on every judged turn (§13.1) |
 | `/router orchestrate [auto\|on\|off]` | orchestration mode |
-| `/router allow-workers [on\|off]` | write/revoke the Fast chain in the host `subagent-model-selection` allowlist (C4(a)) |
+| `/router allow-workers [on\|off]` | write/revoke the Fast chain in the host `subagent-model-selection-settings` allowlist (C4(a)) |
 | `/router eco` \| `/router default` \| `/router sport` | gear presets → `routing.economics.mode`, **persisted** |
 | `/router config …` | numbered registry + `get` / `set` / `unset` / `diff` / `set-fast` / `set-smart` / `reset` |
 | `/route-force <fast\|smart\|auto\|provider/model>` | one-turn override; `auto` clears |
@@ -779,21 +786,47 @@ The card renders every scalar config leaf plus the two tier chains, grouped into
 sections. `pricing` is the only CLI/patch-only surface. The GUI registry and the
 command registry must expose the same set of editable paths (enforced by test).
 
-### 12.1 The card's slot (normative)
+### 12.1 The card's slots (normative)
 
-The card contributes to `settings.plugin.item`, a **`keyed`** slot declared by
-`@deepseek-ai/dsh-client-ui-settings-plugins`. Its *Plugin configuration* tab
-dispatches one key per settings namespace the Host serves, so the cell key IS
-the namespace, and it must be the same literal the host half registers through
-`ctx.settings.register()` (§11): `key: 'shift-router'`. An `id` is not a near
-miss — `SlotCore` throws (`keyed slot "settings.plugin.item" requires
-options.key`), and the tab's projection (`entry.options.key !== undefined &&
-served.has(entry.options.key)`) would drop the entry anyway.
+The card has **one surface per shell generation**, because upstream moved the
+extension point in `0.2.0-rc.2` and deleted the old one in the same release:
 
-The `SlotMap` entry is imported **type-only** from that declarer rather than
-re-declared here (§1.5): a local copy is enforced by the compiler instead of the
-host, so a slot re-spelled as `kind: 'list'` passes every gate while rendering
-nowhere (ALIGNMENT §R6).
+| Shell | Surface | Slot | Key |
+|---|---|---|---|
+| 0.2.0-rc.2+ | sidebar **Plugins** page | `plugins.row.config` | `dsh-shift-router#shift-router` |
+| 0.2.0-rc.2+ | sidebar **Plugins** page, bundle page | `plugins.bundle.config` | `dsh-shift-router` |
+| ≤0.1.5-rc.x | Settings → Built-in plugins → configurable | `settings.plugin.item` | `shift-router` |
+
+All three are **`keyed`** root slots, so the cell key is what makes the entry
+reachable and an `id` is not a near miss — `SlotCore` throws
+(`keyed slot "<name>" requires options.key`) and the owner's projection would
+drop the entry anyway. The row key is not cosmetic: the Plugins page decides
+whether a row grows its configure control from
+`ledger.rows.has(rowConfigKey(pkg.name, row.rowId))`
+(`dsh-client-ui-plugin-manager/lib/client.js:3357`), so `ROW_CONFIG_KEY` in
+`src/client/index.tsx` **is** the affordance's existence proof.
+
+Every registration goes through `ctx.slots.inject()`. That matters for the
+cross-generation pairing: `inject` runs its callback only once a slot is
+declared, so the registrations for the generation that is not running stay
+inert. A direct `slots.register` into an undeclared slot throws instead, and the
+silence of `inject` is exactly why 0.2.0-rc.2's deletion produced no diagnostic
+anywhere (ALIGNMENT §R15).
+
+The `SlotMap` entries come from the **declarer**, never from a local copy:
+
+- `plugins.row.config` and `plugins.bundle.config` — imported type-only from
+  `@deepseek-ai/dsh-client-ui-plugin-manager/client`.
+- `settings.plugin.item` — declared in `src/client/legacy-slot.ts` from the
+  0.1.5-rc.2 declarer's own kind/scope, because that release is not installable
+  beside the 0.2.0 packages in one tree. `tests/client-card-slot.test.ts` drives
+  the harness's real `SlotCore` with that declaration chain, so a wrong kind
+  fails instead of passing (ALIGNMENT §R6).
+
+The settings transport follows the same split (§11): `ctx.configForms.get(ns)` on
+0.2.0-rc.2+, `ctx.settingsScope.bind({ namespace })` on ≤0.1.5-rc.x. The card
+holds one `SettingsScopeBinding` across both, so it has one form and one set of
+drafts regardless of which service arrived.
 
 ### 12.2 Where the model lists come from (normative)
 
@@ -963,9 +996,10 @@ model per request, §1.1), so nothing else would announce it.
   real routed turn whose request must carry the route notice (§13.1). `--dump-config`
   cannot substitute: it composes configuration without instantiating a single plugin.
 - **The card is tested against the real registry and the real catalog.**
-  `tests/client-card-slot.test.ts` declares `settings.plugin.item` as `keyed` through the
-  harness's own `SlotCore` and runs the card's real `apply()` in both load orders — the
-  type-only contract (§12.1) makes `key` vs `id` a compile error as well.
+  `tests/client-card-slot.test.ts` declares `settings.plugin.item` and the two Plugins-page
+  slots as `keyed` through the harness's own `SlotCore`, runs the card's real `apply()` in
+  both load orders on each generation, and asserts that the undeclared generation stays
+  empty — the type-only contract (§12.1) makes `key` vs `id` a compile error as well.
   `tests/model-catalog.test.ts` drives the mapping from the Host catalog, including
   provider failures, the `ok:false` envelope and a thrown transport error.
 - Gates, in order: `npm run typecheck` → `npm run build` → `npm test` → `npm run test:e2e`.

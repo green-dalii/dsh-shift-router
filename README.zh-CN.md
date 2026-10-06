@@ -13,10 +13,10 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
-[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)](#开发)
-[![Coverage](https://img.shields.io/badge/coverage-83.25%25%20lines-green)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-436%20passing-brightgreen)](#开发)
+[![Coverage](https://img.shields.io/badge/coverage-83.76%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -117,7 +117,7 @@ DeepSeek Harness 通过 `@deepseek-ai/cordis-plugin-hmr` 支持热重载，但�
 
 ## 配置
 
-配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **设置 → 插件 → 插件配置**（「Shift-Router」卡片）中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
+配置位于 **`shift-router`** settings 命名空间：可在 GUI 的 **左侧栏「插件」 → `dsh-shift-router` → `shift-router` 行 → 配置**中编辑、用 `/router config` 命令修改，或通过 profile patch 行配置。所有字段都有安全的默认值。
 
 唯一必须由你决定的是档位模型：**[docs/MODELS.zh-CN.md](docs/MODELS.zh-CN.md)** 说明如何挑选
 Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模型适合做回退、以及哪些模型能接收图片。
@@ -170,7 +170,8 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 插件随包构建一个浏览器端（client）模块，在 GUI 的设置页注册一张 **「Shift-Router」** 卡片：
 
-- **位置**：设置 → 插件 → 插件配置（该页由官方 `dsh-client-ui-settings-plugins` 提供，卡片注册进 `settings.plugin.item` 槽位）。
+- **位置（DSH 0.2.0-rc.2 及以后）**：左侧栏 **「插件」** 页 → `dsh-shift-router` 卡片 → `shift-router` 行 → 该行的「配置」按钮。完整表单同时出现在 bundle 自己的页面上，两条路径都能到。卡片注册进 `plugins.row.config`（键 `dsh-shift-router#shift-router`）与 `plugins.bundle.config`（键 `dsh-shift-router`），两者都由官方 `dsh-client-ui-plugin-manager` 声明；设置传输用 `ctx.configForms`。
+- **位置（≤ 0.1.5-rc.x）**：设置 → 内置插件 → 可配置页；卡片占用 keyed 的 `settings.plugin.item` 单元格（`key: 'shift-router'`），传输用 `ctx.settingsScope`。每一代只声明三个槽位里的一个，所以面向另一代的注册保持静止。
 - **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举）**以及模型链**（两层，外加一条专用裁判链），分七个分组（通用 / 模型 / 路由 / 编排 / 故障转移 / 遥测 / 日志与体验），路由分组下再分子组（裁判 / 裁判来源 / 决策窗口 / 缓存感知）。控件只在与当前选择相关时出现——选定裁判来源就只显示该来源自己的设置，其余隐藏——且任何下拉都不会出现原始配置取值。标量字段采用紧凑的「设置行」版式——左侧标签 + 说明，右侧同行右对齐控件——每个字段只占一行，不再上下堆叠三层。控件全部使用宿主平面设计令牌：开关用拨动开关（浅色/深色主题下对比度都清晰）、枚举用带箭头的下拉、数字输入框内嵌单位后缀（`ms`、`tokens`、`0–1` 等）、模型链用有序行编辑器——**行的顺序就是层内回退顺序**：优先命中排在最前的可用模型，其余作为后备。**provider/model 下拉自动载入 DSH 运行时模型目录**（`llm.models`，与设置页模型目录同源）：只列出当前有模型清单的 provider，无休眠目录噪音，且插件不硬编码任何模型，跟随任何部署的 DSH 实际配置。另有「自定义…」入口填写目录之外的取值。分段保存、单字段恢复默认与覆盖标记与官方卡片完全一致。
 - **边界**：仅 `pricing`（可选的 USD 计价表）仍由 `/router config` 或 patch 行编辑；模型链——两层以及裁判那条——都可以在卡片中直接编辑。
 - **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片。
@@ -193,7 +194,7 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 | `/router on` / `/router off` | 启用 / 停用（会话级） |
 | `/router verbose` / `/router log` | 详细日志开关 |
 | `/router orchestrate auto\|off` | 编排模式 |
-| `/router allow-workers [on\|off]` | 把本插件的 Fast 链写入 harness 的 `subagent-model-selection` 白名单，使 worker 可被固定到 Fast（`off` 只撤销授权、保留路由）。会如实回报写入内容或失败原因 |
+| `/router allow-workers [on\|off]` | 把本插件的 Fast 链写入 harness 的 `subagent-model-selection-settings` 白名单，使 worker 可被固定到 Fast（`off` 只撤销授权、保留路由）。会如实回报写入内容或失败原因 |
 | `/router eco` / `/router default` / `/router sport` | 档位预设：设置 `routing.economics.mode`（持久化）——更省 ↔ 更黏在 Smart |
 | `/router config` | 交互式编辑器：带编号的字段列表（含当前值）+ 可用 providers + 用法 |
 | `/router config get <N\|path>` | 显示单个字段当前值，如 `get 4` 或 `get routing.judgeTimeout` |
@@ -253,7 +254,7 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 ### worker 的模型需要授权
 
 上游把「每 worker 的模型钉定」称为**强制**：worker 若继承父会话的模型，编排中途那已是 Smart，
-经济学前提直接崩塌。DSH 里这个钉定居于宿主持有的白名单之后（`subagent-model-selection`，默认
+经济学前提直接崩塌。DSH 里这个钉定居于宿主持有的白名单之后（`subagent-model-selection-settings`，默认
 **关闭**）。`/router allow-workers` 帮你把 Fast 链写进去；未授权时路由器会在
 `Worker delegation:` 行里如实说明，而不是假装可以（SPEC §7.4）。
 

@@ -211,7 +211,7 @@ call would bill at frontier prices — see "What makes a good Fast model" above.
 
 ## Verifying a tier resolves
 
-1. **The card.** Settings → Plugins → Plugin configuration → *Shift-Router*: the dropdowns *are* the
+1. **The card.** Sidebar **Plugins** → `dsh-shift-router` → the `shift-router` row → *configure*: the dropdowns *are* the
    runtime catalog, and the card calls out an empty tier, duplicated routes and an identical
    Fast/Smart primary ([SPEC §12.3](../SPEC.md#123-card-ux-rules-normative)).
 2. **`/router status`** — the configured chains, the current tier and the last decision

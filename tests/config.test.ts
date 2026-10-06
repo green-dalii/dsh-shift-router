@@ -8,13 +8,17 @@
 
 import { describe, expect, it } from 'vitest'
 import { Config } from '../src/config.js'
+import { readConfig } from './config-ref.js'
 
 type StandardResult =
   | { value: unknown }
   | { issues: { message: string }[] }
 
 function validate(value: unknown): StandardResult {
-  return (Config as unknown as { '~standard': { validate(v: unknown): StandardResult } })['~standard'].validate(value)
+  const result = (Config as unknown as { '~standard': { validate(v: unknown): StandardResult } })['~standard'].validate(value)
+  // `Config` is a volatile-root schema: a resolution carries a reference, and
+  // every assertion below reads the plain config through it.
+  return 'issues' in result ? result : { value: readConfig(result.value) }
 }
 
 describe('Config schema', () => {

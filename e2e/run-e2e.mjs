@@ -28,7 +28,9 @@
  *      back from the running server and assert the browser half is actually
  *      OFFERED to the client module loader (a `dsh.client.platform` or id
  *      mistake is otherwise silent: the card simply never loads)
- *   8. assert the `shift-router` settings namespace round-trips a write
+ *   8. assert the Host serves the `shift-router` settings namespace with the
+ *      composed values (a WRITE there deadlocks the boot — see §R15.9; the write
+ *      path is covered by the browser check instead)
  *
  * Usage:
  *   node e2e/run-e2e.mjs            # scratch home under the OS temp dir
@@ -341,11 +343,19 @@ try {
     'the packed install reaches the serving state with the plugin loaded')
   assert(payload.includes('"id":"dsh-shift-router"'),
     'the packed install offers its browser half to the client module loader')
-  assert(payload.includes('@deepseek-ai/dsh-client-ui-settings-plugins/client.js'),
-    'the deployment ships the package that declares the card slot')
+  // The card's two owners on 0.2.0-rc.2: the plugin manager declares the
+  // Plugins-page configuration slots, and the settings domain provides the
+  // `configForms` transport the card binds through.
+  assert(payload.includes('@deepseek-ai/dsh-client-ui-plugin-manager/client.js'),
+    'the deployment ships the package that declares the card slots')
+  assert(payload.includes('@deepseek-ai/dsh-client-ui-settings/client.js'),
+    'the deployment ships the package that provides the card transport')
   rmSync(packDir, { recursive: true, force: true })
 
-  step('checking the settings namespace round-trip')
+  step('checking that the Host serves the shift-router settings namespace')
+  // READ, not write. The settings document IS the profile patch, so a write
+  // from inside the loading tree deadlocks the boot (ALIGNMENT §R15.9); the
+  // write path is covered by the browser check, which saves on a serving Host.
   let probe = null
   try {
     probe = JSON.parse(readFileSync(probeOut, 'utf8'))
@@ -353,7 +363,8 @@ try {
     // left null — reported below
   }
   console.log(`  probe: ${probe ? JSON.stringify(probe) : '(no result file)'}`)
-  assert(probe?.ok === true, `settings round-trip ok (${probe?.detail ?? 'missing'})`)
+  assert(probe?.served === true, `the Host serves the namespace (${probe?.detail ?? 'missing'})`)
+  assert(probe?.ok === true, `the served values are the composed ones (${probe?.detail ?? 'missing'})`)
   // The card's dropdowns read exactly this catalog: if the deployment advertises
   // no models, the card has nothing to offer however well it is wired.
   assert(probe?.models?.includes('fake/fake-smart') && probe?.models?.includes('fake/fake-fast'),

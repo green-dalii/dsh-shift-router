@@ -30,6 +30,7 @@ import {
 } from '../src/client/form-model.js'
 import { CONFIG_FIELDS } from '../src/commands.js'
 import { Config } from '../src/config.js'
+import { readConfig } from './config-ref.js'
 import { en, zh } from '../src/client/locales.js'
 
 // ─── path helpers ────────────────────────────────────────────────────
@@ -394,7 +395,8 @@ function builtConfig(): Record<string, unknown> {
   if ('issues' in out) {
     throw new Error(`the config schema rejected an empty config: ${out.issues.map((issue) => issue.message).join('; ')}`)
   }
-  return out.value as Record<string, unknown>
+  // `Config` is a volatile-root schema, so the resolved value is a reference.
+  return readConfig<Record<string, unknown>>(out.value)
 }
 
 describe('GUI/CLI field registry parity', () => {

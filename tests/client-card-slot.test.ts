@@ -3,22 +3,34 @@
  *
  * WHY THIS FILE EXISTS
  *
- * The card registers into `settings.plugin.item`, a slot whose contract belongs
- * to `dsh-client-ui-settings-plugins`: it is a **keyed** slot, and its cell key
- * is the settings namespace. `SlotCore.register` enforces the kind
+ * The card has two owner contracts, one per shell generation, and BOTH are
+ * keyed slots whose cell key decides whether the card can ever render:
  *
- *     keyed slot "settings.plugin.item" requires options.key
+ *   - 0.2.0-rc.2+ — `plugins.row.config`, declared by
+ *     `@deepseek-ai/dsh-client-ui-plugin-manager` (`lib/client.js:3737`) as a
+ *     child of the `main` Plugins panel, keyed `<package name>#<row id>`. The
+ *     same ledger decides whether the row gets its configure control at all
+ *     (`configured: { has: (row) => ledger.rows.has(rowConfigKey(pkg.name, row.rowId)) }`),
+ *     so a wrong key is invisible rather than broken.
+ *   - up to 0.1.5-rc.x — `settings.plugin.item`, declared by
+ *     `@deepseek-ai/dsh-client-ui-settings-plugins` inside its own
+ *     `configurable` tab, keyed by the settings namespace.
  *
- * and the tab's projection (`entry.options.key !== undefined &&
- * served.has(entry.options.key)`) selects cards by that same key. A list-shaped
- * registration (`id`) therefore both throws and can never render — which is how
- * the card once shipped invisible (ALIGNMENT.md §R6): every test passed because
- * none of them touched a registry with kind rules, and `tsc` passed because this
- * package had re-declared the slot locally as `kind: 'list'`.
+ * `SlotCore.register` enforces the kind ("keyed slot … requires options.key").
+ * A list-shaped registration (`id`) therefore both throws and can never render
+ * — which is how the card once shipped invisible (ALIGNMENT.md §R6): every test
+ * passed because none of them touched a registry with kind rules, and `tsc`
+ * passed because this package had re-declared the slot locally as `kind: 'list'`.
+ *
+ * The mirror-image failure is the one this file now also pins: registering into
+ * a slot the running shell does not declare is a SILENT no-op when the
+ * registration goes through `ctx.slots.inject` (the callback simply never runs),
+ * so 0.2.0-rc.2 dropping `settings.plugin.item` left the card registered
+ * nowhere and the GUI said nothing (ALIGNMENT §R15).
  *
  * So the registry below is the harness's REAL `SlotCore`, and the load order
  * mirrors the deployment: the card plugin is loaded during boot, long before the
- * user opens Settings and the tab declares the slot.
+ * user opens either surface and something declares the slot.
  */
 
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots'
@@ -62,8 +74,24 @@ vi.mock('@deepseek-ai/dsh-client-store', () => ({
   },
 }))
 
-/** The slot the card contributes to (declared by `dsh-client-ui-settings-plugins`). */
-const SLOT = 'settings.plugin.item'
+/** The Plugins-page row slot (0.2.0-rc.2+), declared by the plugin manager. */
+const ROW_SLOT = 'plugins.row.config'
+/** The bundle slot (0.2.0-rc.2+), declared by the plugin manager. */
+const BUNDLE_SLOT = 'plugins.bundle.config'
+/** The historical settings cell (up to 0.1.5-rc.x), declared by the settings tab. */
+const LEGACY_SLOT = 'settings.plugin.item'
+
+/**
+ * The key the Plugins page builds for one row
+ * (`dsh-client-ui-plugin-manager/lib/client.js:27`), restated here so a drift in
+ * the formula fails this suite instead of hiding the configure control.
+ * @param bundle - the bundle's package name.
+ * @param rowId - the row id the bundle's patch declares.
+ * @returns the `plugins.row.config` key.
+ */
+function rowConfigKey(bundle: string, rowId: string): string {
+  return `${bundle}#${rowId}`
+}
 
 /** The settings document the bound scope would serve; the card only reads it at build time. */
 const SNAPSHOT = {
@@ -78,15 +106,48 @@ const SNAPSHOT = {
 type LooseRegister = (options: Record<string, unknown>, component: () => null) => () => void
 
 /**
- * Mount the Settings → Plugins chain as the harness does, one declaration level
- * at a time: `root` → `settings.section` → `settings.plugins.tab`, the tab's own
+ * Declare the layout's `main` panel slot, exactly as `dsh-client-ui-layout`
+ * declares it from its `root` entry (`lib/client.js:602-610`). The Plugins page
+ * is one `keyed` occupant of it.
+ * @param core - the real slot registry.
+ */
+function declareLayoutRoot(core: SlotCore): void {
+  (core.register.bind(core) as unknown as LooseRegister)(
+    { name: 'root', children: { main: { kind: 'keyed', scope: 'root' } } },
+    () => null,
+  )
+}
+
+/**
+ * Mount the plugin manager's `main` panel entry, which declares the three
+ * configuration slots the page renders (`lib/client.js:3719-3740`). Until it
+ * mounts, `plugins.row.config` is undeclared.
+ * @param core - the real slot registry.
+ */
+function mountPluginsPage(core: SlotCore): void {
+  (core.register.bind(core) as unknown as LooseRegister)(
+    {
+      name: 'main',
+      key: 'plugins',
+      children: {
+        [ROW_SLOT]: { kind: 'keyed', scope: 'root' },
+        [BUNDLE_SLOT]: { kind: 'keyed', scope: 'root' },
+      },
+    },
+    () => null,
+  )
+}
+
+/**
+ * Mount the pre-0.2.0 Settings → Plugins chain, one declaration level at a time:
+ * `root` → `settings.section` → `settings.plugins.tab`, the tab's own
  * registration declaring the keyed card slot. `tab: false` stops one level short
  * — the section exists, the user has not opened the tab, so the slot is not
  * declared yet.
  * @param core - the real slot registry.
  * @param options - whether the tab is mounted.
  */
-function mountHostSettings(core: SlotCore, options: { tab: boolean } = { tab: true }): void {
+function mountLegacySettings(core: SlotCore, options: { tab: boolean } = { tab: true }): void {
   const register = core.register.bind(core) as unknown as LooseRegister
   register(
     { name: 'root', children: { 'settings.section': { kind: 'list', scope: 'root' } } },
@@ -100,16 +161,16 @@ function mountHostSettings(core: SlotCore, options: { tab: boolean } = { tab: tr
     },
     () => null,
   )
-  if (options.tab) declareCardSlot(core)
+  if (options.tab) declareLegacyCardSlot(core)
 }
 
 /** Declare the keyed card slot by re-registering the tab that owns it. */
-function declareCardSlot(core: SlotCore): () => void {
+function declareLegacyCardSlot(core: SlotCore): () => void {
   return (core.register.bind(core) as unknown as LooseRegister)(
     {
       name: 'settings.plugins.tab',
       id: 'configurable',
-      children: { [SLOT]: { kind: 'keyed', scope: 'root' } },
+      children: { [LEGACY_SLOT]: { kind: 'keyed', scope: 'root' } },
     },
     () => null,
   )
@@ -136,19 +197,24 @@ const CATALOG_REMOTE: ModelCatalogRemote = {
  * mirrors the runtime service: run the callback now when the slot is already
  * declared, otherwise on the declaration.
  * @param core - the real slot registry.
- * @param options - whether the composition provides the model-catalog remote.
+ * @param options - which services the composition provides and whether it serves
+ *   the settings namespace.
  * @returns the fake context, the effects it installed, and the subscribed events.
  */
-function cardContext(core: SlotCore, options: { remote?: boolean } = { remote: true }): {
-  ctx: Context
-  effects: string[]
-  remoteEvents: string[]
-} {
+function cardContext(core: SlotCore, options: {
+  remote?: boolean
+  configForms?: boolean
+  settingsScope?: boolean
+  serves?: boolean
+} = {}): { ctx: Context, effects: string[], remoteEvents: string[], served: number } {
   const effects: string[] = []
   const remoteEvents: string[] = []
+  const state = { served: 0 }
   const boundScope = {
     subscribe: () => () => {},
     getSnapshot: () => SNAPSHOT,
+    set: async () => undefined,
+    unset: async () => undefined,
   }
   const slots = {
     register: (options: Record<string, unknown>, component: unknown) =>
@@ -175,7 +241,7 @@ function cardContext(core: SlotCore, options: { remote?: boolean } = { remote: t
       }
     },
   }
-  const effect = (callback: () => () => void, label: string) => {
+  const effect = (callback: () => (() => void) | void, label: string) => {
     effects.push(label)
     return callback()
   }
@@ -191,85 +257,118 @@ function cardContext(core: SlotCore, options: { remote?: boolean } = { remote: t
       },
     },
   }
+  // `ConfigForms` as 0.2.0-rc.2 declares it: `get(namespace)` for the form and
+  // `whileServed(namespaces, register)` to keep a page alive only while the Host
+  // serves the namespace.
+  const configForms = {
+    get: () => boundScope,
+    whileServed: (namespaces: readonly string[], register: (served: ReadonlySet<string>) => () => void) => {
+      if (options.serves === false) return () => {}
+      state.served += 1
+      return register(new Set(namespaces))
+    },
+  }
   const ctx = {
     effect,
     get: () => undefined,
     inject: (deps: readonly string[], callback: (scope: unknown) => void) => {
-      if (options.remote === true) callback(remoteContext)
+      const providesRemote = deps.includes('remote') && options.remote !== false
+      const providesForms = deps.includes('configForms') && options.configForms !== false
+      const providesScope = deps.includes('settingsScope') && options.settingsScope !== false
+      if (providesRemote) callback(remoteContext)
+      if (providesForms) callback({ effect, slots, configForms })
+      if (providesScope) callback({ effect, slots, settingsScope: { bind: () => boundScope } })
       return () => {}
     },
     on: () => () => {},
     locale: { register: () => () => {} },
-    settingsScope: { bind: () => boundScope },
     slots,
   }
-  return { ctx: ctx as unknown as Context, effects, remoteEvents }
+  return { ctx: ctx as unknown as Context, effects, remoteEvents, served: state.served }
 }
 
-/** The card's published state, reached through the face the slot injects. */
-function cardFace(core: SlotCore): { getSnapshot(): { catalog: ModelCatalog } } {
-  const face = core.entries(SLOT)[0]?.inject?.() as
+/** The card's published state, reached through the face a slot injects. */
+function cardFace(core: SlotCore, slot: string): { getSnapshot(): { catalog: ModelCatalog } } {
+  const face = core.entries(slot)[0]?.inject?.() as
     | { hooks: { shiftRouterCard: { getSnapshot(): { catalog: ModelCatalog } } } }
     | undefined
-  if (face === undefined) throw new Error('the card was not registered')
+  if (face === undefined) throw new Error(`the card was not registered into ${slot}`)
   return face.hooks.shiftRouterCard
 }
 
-/** The tab's own selection rule, copied from `ConfigurablePluginsTabController`. */
-function selectedCards(core: SlotCore, served: readonly string[]) {
-  const live = new Set(served)
-  return core
-    .entries(SLOT)
-    .filter((entry) => entry.options.key !== undefined && live.has(entry.options.key))
-}
-
-describe('the card registers into the keyed settings slot', () => {
-  it('loads before the Settings panel declares the slot (the real order)', () => {
+describe('the card registers into the Plugins page configuration slots', () => {
+  it('loads before the Plugins page declares its slots (the real order)', () => {
     const core = new SlotCore()
-    // The card plugin is loaded at boot: the tab exists, but the user has not
-    // opened Settings, so nothing has declared the card slot yet.
-    mountHostSettings(core, { tab: false })
+    // The card plugin loads at boot: the layout declares `main`, but the user
+    // has not opened the Plugins page, so nothing has declared the slots yet.
+    declareLayoutRoot(core)
     card.apply(cardContext(core).ctx)
-    expect(core.entries(SLOT)).toHaveLength(0)
-    expect(core.specDynamic(SLOT)).toBeUndefined()
+    expect(core.entries(ROW_SLOT)).toHaveLength(0)
+    expect(core.specDynamic(ROW_SLOT)).toBeUndefined()
 
-    // Opening Setup → Plugins mounts the tab, which declares the card slot.
-    declareCardSlot(core)
+    // Opening the Plugins page mounts the manager's panel entry, which
+    // declares its configuration slots.
+    mountPluginsPage(core)
 
-    const [entry] = core.entriesOfSlot(SLOT)
-    expect(entry?.options.key).toBe('shift-router')
-    expect(entry?.component).toBe(ShiftRouterCard)
+    const [row] = core.entriesOfSlot(ROW_SLOT)
+    expect(row?.options.key).toBe('dsh-shift-router#shift-router')
+    expect(row?.component).toBe(ShiftRouterCard)
   })
 
-  it('registers immediately when the slot is already declared', () => {
+  it('keys the row cell exactly as the manager builds the key', () => {
     const core = new SlotCore()
-    mountHostSettings(core)
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
     card.apply(cardContext(core).ctx)
 
-    expect(core.entries(SLOT)).toHaveLength(1)
-    expect(core.entries(SLOT)[0]?.options.key).toBe('shift-router')
-    expect(core.specDynamic(SLOT)?.kind).toBe('keyed')
+    // The bundle name is the npm package name and the row id is the one
+    // `cordis.patch.yml` declares; the manager's own formula is restated above.
+    expect(card.ROW_CONFIG_KEY).toBe(rowConfigKey('dsh-shift-router', 'shift-router'))
+    expect(core.entries(ROW_SLOT)[0]?.options.key).toBe(card.ROW_CONFIG_KEY)
+    expect(core.specDynamic(ROW_SLOT)?.kind).toBe('keyed')
   })
 
-  it('keys the cell on the host settings namespace and is selected by it', () => {
+  it('keys the bundle cell on the package name', () => {
     const core = new SlotCore()
-    mountHostSettings(core)
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
     card.apply(cardContext(core).ctx)
+    expect(core.entries(BUNDLE_SLOT)[0]?.options.key).toBe('dsh-shift-router')
+    expect(core.entries(BUNDLE_SLOT)[0]?.component).toBe(ShiftRouterCard)
+  })
 
-    expect(ROUTER_SETTINGS_NAMESPACE).toBe('shift-router')
-    // The tab dispatches one key per namespace the Host serves: `shift-router`
-    // must select exactly this card, and an unrelated served namespace must not.
-    expect(selectedCards(core, [ROUTER_SETTINGS_NAMESPACE])).toHaveLength(1)
-    expect(selectedCards(core, ['bash', 'agent-loop'])).toHaveLength(0)
+  it('registers nothing while the Host does not serve the namespace', () => {
+    // `whileServed` is the contract the official pages use: a deployment that
+    // never composed the owning Host row shows no configure control and no dead
+    // page. Both slots must honour it.
+    const core = new SlotCore()
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
+    card.apply(cardContext(core, { serves: false }).ctx)
+    expect(core.entries(ROW_SLOT)).toHaveLength(0)
+    expect(core.entries(BUNDLE_SLOT)).toHaveLength(0)
+  })
+
+  it('enforces the keyed kind, so a list-shaped registration cannot hide', () => {
+    const core = new SlotCore()
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
+    // The real registry is what makes the historical bug fail: an `id`-keyed
+    // registration into a keyed slot throws instead of rendering nowhere.
+    expect(() => core.register({ name: ROW_SLOT, id: 'shift-router' } as never, (() => null) as never))
+      .toThrow(/keyed slot/)
+    expect(() => core.register({ name: BUNDLE_SLOT, id: 'dsh-shift-router' } as never, (() => null) as never))
+      .toThrow(/keyed slot/)
   })
 
   it('exposes the card face and its dictionary namespace', () => {
     const core = new SlotCore()
-    mountHostSettings(core)
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
     const { ctx, effects } = cardContext(core)
     card.apply(ctx)
 
-    const entry = core.entries(SLOT)[0]
+    const entry = core.entries(ROW_SLOT)[0]
     expect(entry?.locale).toBe('shift-router')
     const face = entry?.inject?.() as { edit?: unknown } | undefined
     expect(typeof face?.edit).toBe('function')
@@ -279,13 +378,14 @@ describe('the card registers into the keyed settings slot', () => {
 
   it('loads the deployment catalog and subscribes to its refresh events', async () => {
     const core = new SlotCore()
-    mountHostSettings(core)
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
     const { ctx, remoteEvents } = cardContext(core)
     card.apply(ctx)
 
     // The card's own state is the observable: the dropdowns become real only
     // once the Host answered.
-    const face = cardFace(core)
+    const face = cardFace(core, ROW_SLOT)
     expect(face.getSnapshot().catalog.providers).toEqual([])
     await vi.waitFor(() => expect(face.getSnapshot().catalog.status).toBe('ready'))
     expect(face.getSnapshot().catalog.providers).toEqual([{ id: 'p', name: 'P' }])
@@ -300,14 +400,50 @@ describe('the card registers into the keyed settings slot', () => {
     // The catalog is an enhancement: a shell without it must keep a usable card
     // (manual entry with a stated reason), never lose the card entirely.
     const core = new SlotCore()
-    mountHostSettings(core)
+    declareLayoutRoot(core)
+    mountPluginsPage(core)
     const { ctx, remoteEvents } = cardContext(core, { remote: false })
     expect(() => card.apply(ctx)).not.toThrow()
-    expect(core.entries(SLOT)).toHaveLength(1)
+    expect(core.entries(ROW_SLOT)).toHaveLength(1)
     expect(remoteEvents).toEqual([])
-    expect(cardFace(core).getSnapshot().catalog).toMatchObject({
+    expect(cardFace(core, ROW_SLOT).getSnapshot().catalog).toMatchObject({
       status: 'failed',
       error: CATALOG_UNAVAILABLE,
     })
+  })
+})
+
+describe('the card also registers into the pre-0.2.0 settings cell', () => {
+  it('loads before the Settings panel declares the slot (the real order)', () => {
+    const core = new SlotCore()
+    mountLegacySettings(core, { tab: false })
+    card.apply(cardContext(core, { configForms: false }).ctx)
+    expect(core.entries(LEGACY_SLOT)).toHaveLength(0)
+    expect(core.specDynamic(LEGACY_SLOT)).toBeUndefined()
+
+    declareLegacyCardSlot(core)
+
+    const [entry] = core.entriesOfSlot(LEGACY_SLOT)
+    expect(entry?.options.key).toBe('shift-router')
+    expect(entry?.component).toBe(ShiftRouterCard)
+  })
+
+  it('keys the cell on the host settings namespace and is selected by it', () => {
+    const core = new SlotCore()
+    mountLegacySettings(core)
+    card.apply(cardContext(core, { configForms: false }).ctx)
+
+    expect(ROUTER_SETTINGS_NAMESPACE).toBe('shift-router')
+    expect(core.specDynamic(LEGACY_SLOT)?.kind).toBe('keyed')
+    expect(core.entries(LEGACY_SLOT)[0]?.options.key).toBe(ROUTER_SETTINGS_NAMESPACE)
+  })
+
+  it('does not reach the legacy surface on a shell that provides only configForms', () => {
+    // The two generations are mutually exclusive: 0.2.0-rc.2 has no
+    // `settingsScope` at all, so this registration never runs there.
+    const core = new SlotCore()
+    mountLegacySettings(core)
+    card.apply(cardContext(core, { settingsScope: false }).ctx)
+    expect(core.entries(LEGACY_SLOT)).toHaveLength(0)
   })
 })

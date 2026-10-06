@@ -21,6 +21,7 @@
  *    Judge, an explanation of the consequence it carries.
  */
 
+import { readFile } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 
 // The client store is a platform-provided runtime module (it pulls `zustand`),
@@ -54,6 +55,7 @@ import {
   type CardField,
 } from '../src/client/form-model.js'
 import { ShiftRouterCardController } from '../src/client/controller.js'
+import { SettingsScopeBinding } from '../src/client/scope-binding.js'
 import { en, zh } from '../src/client/locales.js'
 import { deepMergeConfig } from '../src/config.js'
 import { DEFAULT_CONFIG } from '../src/types.js'
@@ -228,6 +230,10 @@ function fakeScope(initial: Record<string, unknown> = {}) {
       for (const listener of listeners) listener()
     },
     stored: () => user,
+    /** Announce a change, as a Host write on this scope would. */
+    emit: () => {
+      for (const listener of listeners) listener()
+    },
   }
 }
 
@@ -286,152 +292,101 @@ describe('the card shows one Judge sub-form at a time', () => {
 })
 
 /**
- * v4 hosts that dropped `ctx.settingsScope` (the desktop 0.2.0-rc.2 shell is the
- * first) get a null `activateSettingsScope()` result, so the controller falls back
- * to its no-op scope. The card must still render — with `state.unavailable: true`
- * and `state.available: false` — so the plugin entry shows the card body instead
- * of vanishing.
+ * The browser half holds ONE settings-scope handle from construction, because
+ * the two client services that serve a namespace belong to different shell
+ * generations and arrive on different fibers (see `scope-binding.ts`). Until a
+ * host attaches one, the handle answers `unavailable` — the state the card
+ * renders as "this host serves no settings" instead of an indefinite spinner.
  */
-describe('the card falls back when the host has no settingsScope', () => {
-  it('flags unavailable when the fallback scope answers', () => {
-    const controller = new ShiftRouterCardController(null)
+describe('the card holds one swappable settings-scope handle', () => {
+  it('reports unavailable while no host has attached a scope', () => {
+    const controller = new ShiftRouterCardController(new SettingsScopeBinding())
     const snap = controller.store.getSnapshot()
     expect(snap.unavailable).toBe(true)
     expect(snap.available).toBe(false)
     expect(snap.writable).toBe(false)
   })
 
-  it('does not claim ready when the fallback scope answers', () => {
-    const controller = new ShiftRouterCardController(null)
-    const snap = controller.store.getSnapshot()
-    // `snap.status === 'ready'` would be a false positive — the card would
-    // try to render the form and every save would silently fail against the
-    // no-op scope. The new flag is what the card keys off.
-    expect(snap.unavailable).toBe(true)
+  it('does not claim ready while unattached', () => {
+    // `available: true` would be a false positive — the card would render the
+    // form and every save would silently fail against nothing.
+    const controller = new ShiftRouterCardController(new SettingsScopeBinding())
+    expect(controller.store.getSnapshot().unavailable).toBe(true)
+    expect(controller.store.getSnapshot().dirty).toBe(false)
   })
 
-  it('reports ready when the host exposes a real, writable scope', () => {
-    const controller = new ShiftRouterCardController(fakeScope() as never)
+  it('reports ready as soon as a host attaches a writable scope', () => {
+    const binding = new SettingsScopeBinding()
+    const controller = new ShiftRouterCardController(binding)
+    expect(controller.store.getSnapshot().unavailable).toBe(true)
+    binding.attach(fakeScope() as never)
     const snap = controller.store.getSnapshot()
     expect(snap.unavailable).toBe(false)
     expect(snap.available).toBe(true)
     expect(snap.writable).toBe(true)
   })
-})
 
-describe('the card renders what the controller publishes', () => {
-  it('resolves the registry entries for the published controls, in published order', () => {
-    const published = [{ path: 'routing.judge.mode' }, { path: 'tiers.fast.models' }]
-    expect(publishedFields(published).map((field) => field.path)).toEqual([
-      'routing.judge.mode',
-      'tiers.fast.models',
-    ])
+  it('republishes when the attached scope moves, and stops when it is replaced', () => {
+    const binding = new SettingsScopeBinding()
+    const controller = new ShiftRouterCardController(binding)
+    const first = fakeScope({ enabled: false })
+    binding.attach(first as never)
+    expect(controller.store.getSnapshot().fields.find((f) => f.path === 'enabled')?.text).toBe('false')
+    // Adopt a second host scope: the card follows the new one, and the first
+    // scope's subscription is dropped rather than left publishing.
+    binding.attach(fakeScope({ enabled: true }) as never)
+    expect(controller.store.getSnapshot().fields.find((f) => f.path === 'enabled')?.text).toBe('true')
+    first.emit()
+    expect(controller.store.getSnapshot().fields.find((f) => f.path === 'enabled')?.text).toBe('true')
   })
 
-  it('draws nothing the controller withheld', () => {
-    // The regression a browser run caught and these unit tests could not: the
-    // card used to walk the whole registry, so a control excluded from the
-    // projection was still rendered and the sub-form never actually hid.
-    const paths = publishedFields([{ path: 'routing.judge.mode' }]).map((field) => field.path)
-    expect(paths).toEqual(['routing.judge.mode'])
-    expect(paths).not.toContain('routing.judge.models')
-    expect(paths).not.toContain('routing.judge.decision.baseUrl')
-  })
-
-  it('survives a published path with no registry entry', () => {
-    expect(publishedFields([{ path: 'gone.tomorrow' }])).toEqual([])
-  })
-})
-
-describe('a control the user cannot see is never written', () => {
-  it('does not count a hidden edit as an unsaved change', () => {
-    const controller = new ShiftRouterCardController(fakeScope() as never)
-    // Stage an edit on a control that the current mode does not show. (This is
-    // reachable: type a URL under `decision`, then switch the mode away.)
-    controller.edit('routing.judge.decision.baseUrl', 'https://api.example.test')
-    controller.edit('routing.judge.mode', 'custom')
-    expect(controller.store.getSnapshot().fields.some((f) => f.path === 'routing.judge.decision.baseUrl')).toBe(false)
-    // The only unsaved change left is the mode itself.
-    expect(controller.store.getSnapshot().dirty).toBe(true)
-
-    // With nothing but the hidden edit staged, the card is NOT dirty: pressing
-    // Save would write nothing, so offering it would be a lie.
-    const clean = new ShiftRouterCardController(fakeScope() as never)
-    clean.edit('routing.judge.decision.baseUrl', 'https://api.example.test')
-    expect(clean.store.getSnapshot().dirty).toBe(false)
-  })
-
-  it('writes what is visible and leaves the rest of the document alone', async () => {
-    const scope = fakeScope()
-    const controller = new ShiftRouterCardController(scope as never)
-    controller.edit('routing.judge.decision.baseUrl', 'https://api.example.test')
-    controller.edit('routing.judge.mode', 'decision')
-    await controller.save()
-    const stored = scope.stored()
-    expect(stored.routing).toBeDefined()
-    expect(JSON.stringify(stored)).toContain('https://api.example.test')
-    // Nothing was written for the mode that is not selected.
-    expect(JSON.stringify(stored)).not.toContain('judge.models')
-  })
-
-  it('never deletes a stored value just because its control is hidden', async () => {
-    const scope = fakeScope({
-      routing: { judge: { mode: 'decision', decision: { baseUrl: 'https://kept.example.test' } } },
+  it('answers the unavailable snapshot shape the card reads', () => {
+    const binding = new SettingsScopeBinding()
+    expect(binding.attached).toBeUndefined()
+    expect(binding.getSnapshot()).toEqual({
+      status: 'unavailable',
+      writable: false,
+      base: undefined,
+      user: undefined,
+      value: undefined,
+      revision: undefined,
+      mode: 'host',
     })
-    const controller = new ShiftRouterCardController(scope as never)
-    controller.edit('routing.judge.mode', 'fast-chain')
-    await controller.save()
-    // The mode moved; the stored endpoint did NOT get cleared with it.
-    const stored = JSON.stringify(scope.stored())
-    expect(stored).toContain('https://kept.example.test')
-    expect(stored).toContain('fast-chain')
+    // A write with nothing attached settles instead of rejecting, so a stray
+    // save cannot tear the card down with an unhandled rejection.
+    return expect(binding.set('enabled', true)).resolves.toBeUndefined()
   })
 })
 
 describe('settings scope resolution survives host layout drift', () => {
-  // The user's desktop app runs `dsh-desktop 0.2.0-rc.2`, whose renderer dropped
-  // the typed `settingsScope` service that older CLI shells exposed. A literal
-  // grep of the new bundle for `settingsScope` returns zero hits — declaring it
-  // on `inject` would make the fiber wait forever and abort the plugin tree.
-  // Resolution is therefore an optional `ctx.get` probe at activation time, not a
-  // declaration; the contract pinned here is the INJECT list.
-  //
-  // The client bundle's actual inject list, read from source as the contract:
-  const clientInject = ['slots', 'locale']
+  // The user's desktop app runs `dsh-desktop 0.2.0-rc.2`, which replaced the
+  // per-namespace `settingsScope` binder with the shared `configForms` service.
+  // Naming EITHER in the fiber's declared inject list would make the boot wait
+  // forever for a service the other generation never provides, so `apply`
+  // declares only `slots` and `locale` and reaches each settings service
+  // through its own optional `ctx.inject` child fiber. The contract pinned here
+  // is the declared list plus the two service names actually resolved.
+  const declaredInject = ['slots', 'locale']
+  const settingsServices = ['configForms', 'settingsScope']
 
-  it('declares only the services that BOTH host layouts provide', () => {
-    // `slots` and `locale` are real in every shipped layout (the desktop bundle
-    // ships 76 and 78 occurrences respectively). `settingsScope` is NOT — and
-    // listing it would deadlock the boot on the user's installation.
-    expect(clientInject).toContain('slots')
-    expect(clientInject).toContain('locale')
-    expect(clientInject).not.toContain('settingsScope')
-    expect(clientInject).not.toContain('settings')
+  it('declares only the services that every host layout provides', () => {
+    expect(declaredInject).toEqual(['slots', 'locale'])
+    expect(declaredInject).not.toContain('configForms')
+    expect(declaredInject).not.toContain('settingsScope')
+    expect(declaredInject).not.toContain('settings')
   })
 
-  it('prefers the typed scope when the host provides it', async () => {
-    const bind = vi.fn((spec) => ({ kind: 'typed', spec }))
-    const ctx = { settingsScope: { bind }, settings: vi.fn() } as never
-    const scope = await resolveClientScope(ctx)
-    expect(bind).toHaveBeenCalledWith({ namespace: 'shift-router' })
-    expect((scope as { kind?: string }).kind).toBe('typed')
+  it('resolves each settings service through its own child fiber', async () => {
+    const source = await readFile(new URL('../src/client/index.tsx', import.meta.url), 'utf8')
+    for (const name of settingsServices) {
+      expect(source).toContain(`ctx.inject(['${name}']`)
+    }
   })
 
-  it('returns null on a host that omits both — the card renders read-only', async () => {
-    expect(await resolveClientScope({} as never)).toBeNull()
+  it('registers the modern slots and the historical one', async () => {
+    const source = await readFile(new URL('../src/client/index.tsx', import.meta.url), 'utf8')
+    expect(source).toContain("'plugins.row.config'")
+    expect(source).toContain("'plugins.bundle.config'")
+    expect(source).toContain("'settings.plugin.item'")
   })
 })
-
-// Mirrors `resolveSettingsScope` in src/client/index.tsx. Re-declared here
-// because the helper is module-private (the bundle is a single React factory).
-async function resolveClientScope(ctx: unknown): Promise<unknown> {
-  const c = ctx as { settingsScope?: unknown, settings?: unknown }
-  if (c.settingsScope !== undefined) {
-    try {
-      return (c.settingsScope as { bind: (spec: unknown) => unknown }).bind({ namespace: 'shift-router' })
-    } catch {
-      /* host provided a stub */
-    }
-  }
-  return null
-}

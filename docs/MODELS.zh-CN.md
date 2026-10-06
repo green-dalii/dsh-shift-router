@@ -196,7 +196,7 @@ shift-router:
 
 ## 如何验证一档真的能解析
 
-1. **卡片。** 设置 → 插件 → 插件配置 → *Shift-Router*：下拉**就是**运行时目录；空档、重复路由、
+1. **卡片。** 左侧栏 **「插件」** → `dsh-shift-router` → `shift-router` 行 → 配置：下拉**就是**运行时目录；空档、重复路由、
    Fast/Smart 主项相同都会被卡片直接指出（[SPEC §12.3](../SPEC.md#123-card-ux-rules-normative)）。
 2. **`/router status`** —— 已配置的链、当前档位，以及上一次判定
    （[SPEC §11](../SPEC.md#11-commands)）。

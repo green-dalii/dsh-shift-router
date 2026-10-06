@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-06
+
+Baseline: DSH `0.2.0-rc.2` (the desktop carrier). This release is the first to be
+built, tested and verified against that runtime instead of against `0.1.5-rc.3`.
+
+### Fixed
+
+- **The configuration page appears on DSH 0.2.0-rc.2.** 0.2.0-rc.2 deleted the
+  `settings.plugin.item` slot that the card registered into, so
+  `ctx.slots.inject()` never ran its callback: no card, no error, nothing in any
+  log. The card now registers into the two slots that release declares on the
+  sidebar **Plugins** page — `plugins.row.config` (keyed `dsh-shift-router#shift-router`,
+  which is what makes the row grow its configure control) and
+  `plugins.bundle.config` (keyed `dsh-shift-router`) — and keeps the historical
+  `settings.plugin.item` registration for shells up to `0.1.5-rc.x`. Each
+  generation declares exactly one of the three, and `inject` makes the other
+  registrations inert rather than fatal. (ALIGNMENT §R15.)
+- **The settings transport follows the same split.** 0.2.0-rc.2 also removed the
+  per-namespace `ctx.settingsScope` service (a literal grep over its client
+  packages returns zero hits) in favour of the shared `ctx.configForms`. A new
+  `SettingsScopeBinding` holds whichever service a shell provides, so the card
+  has one scope handle and one set of drafts across both generations.
+- **The Host half serves a settings namespace again.** 0.2.0-rc.2 renamed the
+  namespace model: a namespace is now the **loader entry id** of the row that
+  mounts the plugin, and `SettingsForms.describe()` lists an entry only when its
+  `Config` projects a **volatile** form. `Config` therefore marks its root
+  `.volatile()`, and `src/index.ts` reads and writes through
+  `ctx.settings.describe()/update()/replace()/mutate()` instead of the removed
+  `settings.register(scope)`. Without this the page would have rendered with no
+  fields and every save would have been rejected.
+- **The worker-route allowlist targets the namespace upstream now uses.** The
+  owning package dropped its `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE` and
+  `..._SCHEMA` exports; the namespace is the Web composition's row id,
+  `subagent-model-selection-settings` (`dsh-web-app/cordis.patch.yml:66`).
+  `authorizeWorkerRoutes` wrote to `subagent-model-selection`, which no longer
+  exists, so it refused with "this profile does not mount …". The literal and the
+  user-facing copy both follow the new name; `tests/commands.test.ts` pins it
+  against the owning module's exported `name`.
+
+### Changed
+
+- **Every `@deepseek-ai` devDependency is aligned to `0.2.0-rc.2`.** npm refuses
+  to mix the two generations in one tree (`dsh-scope@0.2.0-rc.2` is a peer of the
+  0.2.0 client packages, and the 0.1.x host packages pin `0.1.5-rc.2`). This is
+  also the fix for the process failure behind this round: the suite was green
+  against `0.1.5-rc.3` while the desktop ran `0.2.0-rc.2`, so nothing could see
+  the removed slot (ALIGNMENT §R15.5). `@deepseek-ai/cordis`, `dsh-llm` and
+  `schemastery` are now explicit devDependencies so the tree cannot drift back.
+- **The `@deepseek-ai/dsh-llm` peer range widens to `>=0.1.5-rc.2 <0.3.0`.**
+  The old `<0.2.0` excluded the 0.2.0 line that this plugin now builds against,
+  and it would have made the plugin manager refuse to enable the bundle on the
+  next desktop release — a rejection with no visible relation to the plugin's
+  actual compatibility. The compatibility gate skips non-`dsh-*` names, so
+  `@deepseek-ai/cordis` keeps its `^4.0.2`.
+- **The card honours the `view` owner prop.** The Plugins page asks a
+  configuration entry for `'summary'` (a row's one-liner) or `'page'` (the form,
+  inside chrome the page already drew), so the card now renders a one-line summary
+  or a header-less form instead of always drawing its own collapsible header.
+
+### Verified
+
+- A real `0.2.0-rc.2` composition booted from the desktop carrier's own
+  installation scope, with the plugin linked from this checkout: the bundle page
+  renders one configuration section with 6 controls, the row page one with 8, and
+  a save of `routing.economics.reworkPenalty` `3 → 7` landed in the profile patch
+  as `reworkPenalty: 7` and read back as `7` after a reload. (ALIGNMENT §R15.6.)
+
 ## [0.7.2] - 2026-10-04
 
 ### Fixed

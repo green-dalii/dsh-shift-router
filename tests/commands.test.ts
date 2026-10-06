@@ -132,22 +132,32 @@ describe('flattenLeaves', () => {
 describe('host worker-route namespace (C4(a))', () => {
   // The plugin writes the HOST's namespace by literal, because the owning
   // package is a type-only devDependency and a runtime value import would make
-  // it load-bearing. These two assertions are what keep that literal honest:
-  // a rename or a schema change upstream fails here instead of silently
+  // it load-bearing. These assertions are what keep that literal honest: a
+  // rename or a schema change upstream fails here instead of silently
   // authorising nothing.
-  it('matches the namespace the owning package exports', async () => {
+  //
+  // 0.2.0-rc.2 removed the module-level `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE`
+  // and `..._SCHEMA` exports: a namespace is now the loader entry id of the row
+  // that mounts the plugin, and the schema is the plugin's own `static Config`.
+  // The module's `name` export is the string the Web composition uses as that
+  // row id (`dsh-web-app/cordis.patch.yml:66`), so pinning it pins the id.
+  it('matches the loader entry id the owning plugin declares', async () => {
     const mod = await import('@deepseek-ai/dsh-tool-subagent/model-selection-settings')
-    expect(mod.SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE).toBe('subagent-model-selection')
+    expect(mod.name).toBe('subagent-model-selection-settings')
   })
 
-  it('writes a patch the owning package schema accepts', async () => {
+  it('writes a patch the owning plugin Config accepts', async () => {
     const mod = await import('@deepseek-ai/dsh-tool-subagent/model-selection-settings')
-    const schema = mod.SUBAGENT_MODEL_SELECTION_SETTINGS_SCHEMA as unknown as {
+    const schema = mod.SubagentModelSelectionConfig.Config as unknown as {
       '~standard': { validate(v: unknown): { value?: unknown; issues?: unknown[] } }
     }
     const candidate = { enabled: true, allowedModels: [{ provider: 'p', model: 'fake-fast' }] }
     const result = schema['~standard'].validate(candidate)
     expect(result.issues).toBeUndefined()
-    expect(result.value).toEqual(candidate)
+    // The owning schema marks both fields volatile, so each resolves to a
+    // reference; read through them and compare the plain values.
+    const value = result.value as { enabled: { get(): unknown }, allowedModels: { get(): unknown } }
+    expect(value.enabled.get()).toBe(true)
+    expect(value.allowedModels.get()).toEqual([{ provider: 'p', model: 'fake-fast' }])
   })
 })

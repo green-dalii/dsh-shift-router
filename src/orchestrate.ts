@@ -14,7 +14,7 @@
  *
  * Worker model injection (upstream calls it mandatory): DSH's `subagent` tool
  * accepts per-call `provider`/`model`, but only inside the host-owned
- * `subagent-model-selection` allowlist (default off). The prompt therefore
+ * `subagent-model-selection-settings` allowlist (default off). The prompt therefore
  * states that condition factually instead of asserting a guarantee the plugin
  * cannot keep; index.ts warns when the allowlist is not available.
  */
@@ -66,7 +66,7 @@ You can pass \`provider\` and \`model\` to the \`subagent\` tool, and you should
 whenever a Fast-tier route is available — without it a worker inherits **your
 own model**, and you are the Smart tier, so the cost story collapses. But the
 harness only honours those fields for routes the deployment has authorised
-(its \`subagent-model-selection\` allowlist). If the call is rejected on those
+(its \`subagent-model-selection-settings\` allowlist). If the call is rejected on those
 fields, or you are unsure whether it took effect, delegate without them and
 **say so in your CTO summary** — an honest note about the worker model is
 worth more than a silent assumption that it was Fast.
@@ -423,7 +423,7 @@ export function formatWorkerModelSelection(selection: WorkerModelSelection | und
     : selection.enabled
       ? 'enabled but no routes authorised'
       : 'off'
-  return `⚠ not model-selectable (harness "subagent-model-selection" is ${state}) `
+  return `⚠ not model-selectable (harness "subagent-model-selection-settings" is ${state}) `
     + `— workers inherit the Smart model`
 }
 
@@ -431,7 +431,7 @@ export function formatWorkerModelSelection(selection: WorkerModelSelection | und
  * The warning to log for the worker-model self-check (SPEC §7.4), or null when
  * nothing should be said.
  *
- * `undefined` means the harness exposes no `subagent-model-selection` service.
+ * `undefined` means the harness exposes no `subagent-model-selection-settings` service.
  * That is NOT "unknown": without that service there is no model-selectable
  * delegation at all (the settings surface is mounted by the `web` composition,
  * not by `headless`), so it is precisely a case worth warning about — but only
@@ -450,7 +450,7 @@ export function workerModelSelectionWarning(
       ? 'enabled but with no authorised routes'
       : 'disabled'
   return `orchestration is on but model-selectable subagent delegation is ${state} `
-    + `(mount or enable the harness "subagent-model-selection" setting and list the Fast-tier routes in allowedModels) — `
+    + `(mount or enable the harness "subagent-model-selection-settings" setting and list the Fast-tier routes in allowedModels) — `
     + `workers will otherwise inherit the Smart model, so delegation loses its cost advantage`
 }
 

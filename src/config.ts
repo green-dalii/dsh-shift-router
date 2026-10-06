@@ -165,17 +165,44 @@ function applyPartial(target: Record<string, unknown>, source: Record<string, un
  * an empty config row resolves to a fully working no-op (missing nested
  * objects are filled by their leaf defaults — no `.default({})` hacks
  * needed). Numeric fields are range-constrained so bad config fails load.
+ *
+ * Every TOP-LEVEL field is marked `.volatile()` because that is what puts this
+ * entry into the Host settings document at all: `@deepseek-ai/dsh-settings`
+ * 0.2.0-rc.2 serves a namespace only when its `Config` projects a **volatile**
+ * form (`volatileForm(schema)` returns undefined for a schema with no volatile
+ * node, and `describe()` then omits the entry). 0.1.5-rc.x had no such
+ * requirement — its `settings.register(ns, schema, { base })` made the whole
+ * namespace a form — so this is the one schema change that migration needs.
+ *
+ * The granularity is deliberate, and it is one level, not the root and not the
+ * leaves:
+ *
+ * - **Not the root.** A volatile root makes `entry.fiber.config` a reference
+ *   instead of the config object. The loader and the session path accept that
+ *   at boot — `apply` still runs to completion — but the first turn never
+ *   starts: the process ends up idle with the pre-step hook untouched. See
+ *   ALIGNMENT §R15.8 for the measurement.
+ * - **Not the leaves.** The card writes one whole top-level section per save
+ *   (`form-model.ts` builds a patch per section), and `SettingsForms.write`
+ *   rejects any path whose node is not volatile
+ *   (`Config field "routing" is not volatile`). A leaf-only form would carry
+ *   only the leaves, so the section path would fail the check.
+ * - **Sections** satisfy both: `isVolatilePath()` accepts `[section]` and
+ *   everything under it, `projectForm` still projects the section's full nested
+ *   object, and no volatile node sits inside another (schemastery rejects that:
+ *   "volatile fields require a fixed object path without an enclosing volatile
+ *   field").
  */
-export const Config: z<ShiftRouterConfig> = z.object({
-  enabled: z.boolean().default(true),
+export const Config = z.object({
+  enabled: z.boolean().default(true).volatile(),
   tiers: z.object({
     fast: TierConfigSchema,
     smart: TierConfigSchema,
-  }),
-  routing: RoutingSchema,
-  ux: UXSchema,
-  orchestration: OrchestrationSchema,
-  failover: FailoverSchema,
-  telemetry: TelemetrySchema,
-  pricing: z.array(PricingSchema).default([]),
+  }).volatile(),
+  routing: RoutingSchema.volatile(),
+  ux: UXSchema.volatile(),
+  orchestration: OrchestrationSchema.volatile(),
+  failover: FailoverSchema.volatile(),
+  telemetry: TelemetrySchema.volatile(),
+  pricing: z.array(PricingSchema).default([]).volatile(),
 })

@@ -9,7 +9,7 @@
  */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   CARD_FIELDS,
   buildPlan,
@@ -34,33 +34,40 @@ import {
 } from './model-catalog.js'
 
 /**
- * A no-op SettingsScope for host layouts that no longer expose `settingsScope`.
+ * The settings-scope surface this card uses.
  *
- * The card still renders; staged edits accumulate in memory and Save returns
- * failure rather than pretending to write. This is the better failure mode than
- * the alternative — a fiber waiting forever for a service the host does not
- * provide, which aborts the whole plugin tree.
- *
- * `status: 'unavailable'` (not `'loading'`): `'loading'` is reserved for the
- * window between bind and the first Host acceptance — distinguishing it from
- * "the settings service does not exist on this host" is what lets the card
- * surface a "settings unavailable on this host" notice instead of an
- * indefinite spinner.
+ * Declared narrowly instead of naming one host type, because the two client
+ * services that serve a namespace across the supported shells are different
+ * types: `SettingsScope` (`ctx.settingsScope`, up to 0.1.5-rc.x) settles its
+ * writes with `Promise<void>`, and `ConfigForm` (`ctx.configForms`, 0.2.0-rc.2
+ * onward) settles them with `Promise<boolean>`. The card reads neither — it
+ * re-reads the Host's accepted user layer and verifies the leaves it wrote (see
+ * {@link ShiftRouterCardController.applyPatch}) — so the write result is
+ * `unknown` and either implementation satisfies this shape structurally.
  */
-const FALLBACK_SCOPE = {
-  getSnapshot: (): SettingsScopeSnapshot<unknown> => ({
-    status: 'unavailable' as const,
-    writable: false,
-    base: undefined,
-    user: undefined,
-    value: undefined,
-    // revision/mode are required by the SettingsScopeSnapshot type but the
-    // controller never reads them, so a stand-in shape is safe.
-    revision: undefined,
-    mode: undefined,
-  } as unknown as SettingsScopeSnapshot<unknown>),
-  subscribe: (_listener: () => void): () => void => () => undefined,
-} as unknown as SettingsScope<unknown>
+export interface CardScope {
+  /** @returns the current sync snapshot (stable reference until the next change). */
+  getSnapshot(): ConfigFormSnapshot<unknown>
+  /**
+   * Observe snapshot replacements.
+   * @param listener - invoked after each snapshot change.
+   * @returns the disposer removing this listener.
+   */
+  subscribe(listener: () => void): () => void
+  /**
+   * Queue one field write.
+   * @param field - scalar field inside the namespace section.
+   * @param value - JSON-shaped value selected by the user.
+   * @returns the host's settlement; the card never reads it.
+   */
+  set(field: string, value: unknown): Promise<unknown>
+  /**
+   * Queue one field clear, so the field re-inherits the composition layer.
+   * @param field - scalar field inside the namespace section.
+   * @returns the host's settlement; the card never reads it.
+   */
+  unset(field: string): Promise<unknown>
+}
 
 /** One field's rendered state: the control's text or rows and its override marker. */
 export interface FieldState {
@@ -109,7 +116,7 @@ export interface ShiftRouterCardFace {
 
 /** Bridges one `shift-router` scope onto a staged form and its store. */
 export class ShiftRouterCardController {
-  private readonly scope: SettingsScope<unknown>
+  private readonly scope: CardScope
   private readonly fields: readonly CardField[]
   private readonly staged = new Map<string, StagedDraft>()
   private catalog: ModelCatalog = EMPTY_CATALOG
@@ -120,10 +127,10 @@ export class ShiftRouterCardController {
   readonly store: SnapshotStore<ShiftRouterCardState>
 
   constructor(
-    scope: SettingsScope<unknown> | null,
+    scope: CardScope,
     fields: readonly CardField[] = CARD_FIELDS,
   ) {
-    this.scope = scope ?? FALLBACK_SCOPE
+    this.scope = scope
     this.fields = fields
     this.store = createSnapshotStore(this.projection())
     this.scope.subscribe(() => this.publish())
@@ -155,7 +162,7 @@ export class ShiftRouterCardController {
     this.publish()
   }
 
-  private snapshot(): SettingsScopeSnapshot<unknown> {
+  private snapshot(): ConfigFormSnapshot<unknown> {
     return this.scope.getSnapshot()
   }
 
@@ -166,7 +173,7 @@ export class ShiftRouterCardController {
    * Scalar-only by design — a condition names an enum (SPEC §6.4), and asking a
    * model chain for "its value" has no answer.
    */
-  private displayedValue(path: string, snap: SettingsScopeSnapshot<unknown>): unknown {
+  private displayedValue(path: string, snap: ConfigFormSnapshot<unknown>): unknown {
     const field = this.fields.find((candidate) => candidate.path === path)
     if (field === undefined || field.type === 'models') return undefined
     const staged = this.staged.get(path)
@@ -181,7 +188,7 @@ export class ShiftRouterCardController {
    * and the plan a save applies — so a control the user cannot see can never be
    * written by a save they pressed for something else.
    */
-  private visibleFields(snap: SettingsScopeSnapshot<unknown>): readonly CardField[] {
+  private visibleFields(snap: ConfigFormSnapshot<unknown>): readonly CardField[] {
     return this.fields.filter((field) => isFieldVisible(field, (path) => this.displayedValue(path, snap)))
   }
 

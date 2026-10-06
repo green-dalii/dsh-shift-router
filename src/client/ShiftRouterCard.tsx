@@ -1,14 +1,21 @@
 /**
  * dsh-shift-router — GUI settings card
  *
- * One card inside the Settings → Plugins → Plugin configuration section. It
- * edits the `shift-router` settings namespace: scalar leaves and the two tier
- * model chains are staged as drafts and written on save (see `controller.ts`
- * / `form-model.ts`). The section host (`dsh-client-ui-settings-plugins`)
- * stacks whatever cards register into the `settings.plugin.item` slot and
- * supplies the Save/Discard chrome contract; this card draws its own body
- * with the same DSW design tokens and interaction states as the host-plane
- * cards.
+ * One card for the `shift-router` settings namespace. It edits the namespace's
+ * scalar leaves and the two tier model chains: staged as drafts and written on
+ * save (see `controller.ts` / `form-model.ts`).
+ *
+ * Two owner contracts render it, one per shell generation:
+ *
+ *   - `plugins.row.config` / `plugins.bundle.config` (0.2.0-rc.2+). The owner
+ *     asks for a `view`: `'summary'` is the one-liner the Plugins page draws
+ *     before the entry is opened (a row's description fallback, or an official
+ *     card's subtitle), and `'page'` is the form itself, inside the page's own
+ *     chrome — the owner already drew the title, icon, and crumb, so this card
+ *     draws no header and no collapse.
+ *   - the keyed `settings.plugin.item` cell (up to 0.1.5-rc.x). The owner
+ *     supplies no `view`, and the card draws its own collapsible header, as the
+ *     cards beside it in that tab do.
  *
  * Layout: one settings row per scalar field — label + hint on the left,
  * control right-aligned on the same line (the classic settings-form pattern)
@@ -20,7 +27,8 @@
 
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { InjectFace, PropsLocale, PropsRuntime, Translate } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, Translate } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PluginConfigViewProps } from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import {
   ADVANCED_SECTION,
   CARD_SECTIONS,
@@ -29,7 +37,7 @@ import {
   type CardField,
   type ModelRow,
 } from './form-model.js'
-import type { FieldState, ShiftRouterCardFace } from './controller.js'
+import type { FieldState, ShiftRouterCardFace, ShiftRouterCardState } from './controller.js'
 import { CATALOG_UNAVAILABLE, type CatalogEntry, type ModelCatalog } from './model-catalog.js'
 import {
   chainProblems,
@@ -41,8 +49,16 @@ import {
 } from './card-ux.js'
 import type { ShiftRouterCardKey } from './locales.js'
 
-/** Composed props the section host injects into this card. */
-export type ShiftRouterCardProps = PropsRuntime<'settings.plugin.item'> &
+/**
+ * Composed props both owner contracts inject into this card.
+ *
+ * `Partial<PluginConfigViewProps>` because only the 0.2.0-rc.2 slots supply a
+ * `view`; the legacy cell renders the same component with the owner props of a
+ * tab, which this card ignores. The type is the declarer's own export rather
+ * than a local restatement, so a change to the view contract breaks the build
+ * here instead of silently degrading the card.
+ */
+export type ShiftRouterCardProps = Partial<PluginConfigViewProps> &
   PropsLocale<'shift-router'> &
   InjectFace<ShiftRouterCardFace>
 
@@ -550,21 +566,53 @@ function ChevronIcon(): ReactNode {
 }
 
 /**
+ * The one-liner the Plugins page draws for this entry before it is opened
+ * (`view: 'summary'`) — a row's missing-description fallback, or an official
+ * card's subtitle.
+ * @param state - the card's published snapshot.
+ * @param t - the card's dictionary.
+ * @returns inline nodes, or nothing while the namespace is still loading.
+ */
+function summaryLine(state: ShiftRouterCardState, t: Translate<ShiftRouterCardKey>): ReactNode {
+  if (state.unavailable) return t('settingsUnavailable')
+  if (!state.available) return null
+  const facts = summaryFacts(new Map(state.fields.map((field) => [field.path, field])))
+  const parts = [
+    facts.enabled ? t('summaryMode', { mode: facts.mode ?? 'auto' }) : t('summaryDisabled'),
+    t('summaryChains', { fast: facts.fast, smart: facts.smart }),
+  ]
+  return <span>{parts.join(' · ')}</span>
+}
+
+/**
  * Render one plugin card editing the shift-router settings.
- * @param props - locale copy, the card snapshot, and its form actions.
- * @returns the card, or nothing while the namespace is unavailable.
+ * @param props - locale copy, the card snapshot, its form actions, and the view
+ *   the owning surface asked for (`'page'`, `'summary'`, or none on the legacy
+ *   settings cell).
+ * @returns the card, a one-liner for `summary`, or nothing while the namespace
+ *   has not been accepted yet.
  */
 export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
-  const { t, edit, editRows, resetField, save, discard } = props
+  const { t, edit, editRows, resetField, save, discard, view } = props
   const state = props.useShiftRouterCard((snapshot) => snapshot)
   const [open, setOpen] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // Settings unavailable: the host has dropped `settingsScope` (ALIGNMENT §R14
-  // — the desktop 0.2.0-rc.2 shell is the first to do so). Render a
-  // collapsed read-only card with an explanation so the plugin still
-  // appears in the plugin entry and the user can see what to do.
+  // The page asked for its one-liner only: no chrome, no controls.
+  if (view === 'summary') return summaryLine(state, t)
+
+  // Settings unavailable: this host serves no settings service for the
+  // namespace. Render a read-only notice instead of a form, so the user reads
+  // what to do rather than facing dead controls. `page` drops the collapse
+  // header (the page drew its own); the legacy cell keeps it.
   if (state.unavailable) {
+    const notice = (
+      <>
+        <p style={unavailableTitle} role="status">{t('settingsUnavailable')}</p>
+        <p style={readOnly}>{t('settingsUnavailableBody')}</p>
+      </>
+    )
+    if (view === 'page') return <div style={{ ...card, background: 'transparent' }}>{notice}</div>
     return (
       <li style={card}>
         <div style={header} className="sr-header">
@@ -576,10 +624,7 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
             <ChevronIcon />
           </span>
         </div>
-        <div style={body}>
-          <p style={unavailableTitle} role="status">{t('settingsUnavailable')}</p>
-          <p style={readOnly}>{t('settingsUnavailableBody')}</p>
-        </div>
+        <div style={body}>{notice}</div>
       </li>
     )
   }
@@ -603,113 +648,127 @@ export function ShiftRouterCard(props: ShiftRouterCardProps): ReactNode {
   const advancedFields = renderable.filter((field) => field.advanced === true)
   const advancedChanged = advancedFields.filter((field) => stateByPath.get(field.path)?.overridden === true).length
 
+  const headerNode = (
+    <button
+      type="button"
+      className="sr-header"
+      style={header}
+      aria-expanded={open}
+      aria-label={`${t(open ? 'collapse' : 'expand')}: ${t('title')}`}
+      onClick={() => setOpen(!open)}
+    >
+      <span style={headText}>
+        <span style={name}>{t('title')}</span>
+        <span style={description}>{t('description')}</span>
+        {/* The collapsed card answers "what is set?" without being expanded. */}
+        <span style={summary}>
+          <span style={summaryChip}>
+            {facts.enabled ? t('summaryMode', { mode: facts.mode ?? 'auto' }) : t('summaryDisabled')}
+          </span>
+          <span style={summaryChip}>{t('summaryChains', { fast: facts.fast, smart: facts.smart })}</span>
+        </span>
+      </span>
+      {state.dirty ? <span style={pending}>{t('unsaved')}</span> : null}
+      <span style={{ ...chevron, transform: open ? 'rotate(180deg)' : undefined }}>
+        <ChevronIcon />
+      </span>
+    </button>
+  )
+
+  // The form body, drawn by both surfaces: `page` shows it directly, and
+  // the legacy settings cell keeps it behind its collapse header.
+  const bodyNode = (
+    <div style={body}>
+      {!state.writable ? (
+        <p style={readOnly} role="status">{t('readOnly')}</p>
+      ) : null}
+      {CARD_SECTIONS.map((section) => {
+        const sectionFields = basicFields.filter((field) => field.display === section.id)
+        if (sectionFields.length === 0) return null
+        return (
+          <section key={section.id} style={sectionBlock}>
+            <header style={sectionHead}>
+              <h3 style={sectionTitle}>{t(section.labelKey as ShiftRouterCardKey)}</h3>
+              {section.summaryKey ? (
+                <p style={sectionSummary}>{t(section.summaryKey as ShiftRouterCardKey)}</p>
+              ) : null}
+            </header>
+            <div style={sectionBody}>
+              {section.id === 'models' ? (
+                <ChainNotices problems={problems} catalog={state.catalog} t={t} />
+              ) : null}
+              <SectionFields
+                fields={sectionFields}
+                stateByPath={stateByPath}
+                catalog={state.catalog}
+                t={t}
+                disabled={!state.writable}
+                edit={edit}
+                editRows={editRows}
+                resetField={resetField}
+              />
+            </div>
+          </section>
+        )
+      })}
+      {advancedFields.length > 0 ? (
+        <section style={sectionBlock}>
+          <button
+            type="button"
+            className="sr-advanced"
+            style={advancedHeader}
+            aria-expanded={showAdvanced}
+            aria-label={`${t(showAdvanced ? 'collapseAdvanced' : 'expandAdvanced')}: ${t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}`}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            <span style={sectionTitle}>{t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}</span>
+            <span style={badge}>{t('advancedCount', { n: advancedFields.length })}</span>
+            {advancedChanged > 0 ? (
+              <span style={badge}>{t('advancedChanged', { n: advancedChanged })}</span>
+            ) : null}
+            <span style={{ ...chevron, transform: showAdvanced ? 'rotate(180deg)' : undefined }}>
+              <ChevronIcon />
+            </span>
+          </button>
+          <p style={sectionSummary}>{t(ADVANCED_SECTION.summaryKey as ShiftRouterCardKey)}</p>
+          {showAdvanced ? (
+            <div style={sectionBody}>
+              <AdvancedFields
+                fields={advancedFields}
+                stateByPath={stateByPath}
+                catalog={state.catalog}
+                t={t}
+                disabled={!state.writable}
+                edit={edit}
+                editRows={editRows}
+                resetField={resetField}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      <div style={footer}>
+        {state.failed ? <p style={failed} role="status">{t('saveFailed')}</p> : null}
+        <button type="button" className="sr-discard" style={btnDiscard} disabled={!state.dirty || state.saving} onClick={discard}>
+          {t('discard')}
+        </button>
+        <button type="button" className="sr-save" style={btnSave} disabled={blocked} onClick={() => void save()}>
+          {t(state.saving ? 'saving' : 'save')}
+        </button>
+      </div>
+    </div>
+  )
+
+  if (view === 'page') {
+    // The Plugins page drew the title, icon, and crumb; only the form goes
+    // here, on a transparent frame so the fields sit on the page surface.
+    return <div style={{ ...card, background: 'transparent' }}>{bodyNode}</div>
+  }
+
   return (
     <li style={card} className={open ? 'sr-card sr-cardOpen' : 'sr-card'}>
-      <button
-        type="button"
-        className="sr-header"
-        style={header}
-        aria-expanded={open}
-        aria-label={`${t(open ? 'collapse' : 'expand')}: ${t('title')}`}
-        onClick={() => setOpen(!open)}
-      >
-        <span style={headText}>
-          <span style={name}>{t('title')}</span>
-          <span style={description}>{t('description')}</span>
-          {/* The collapsed card answers "what is set?" without being expanded. */}
-          <span style={summary}>
-            <span style={summaryChip}>
-              {facts.enabled ? t('summaryMode', { mode: facts.mode ?? 'auto' }) : t('summaryDisabled')}
-            </span>
-            <span style={summaryChip}>{t('summaryChains', { fast: facts.fast, smart: facts.smart })}</span>
-          </span>
-        </span>
-        {state.dirty ? <span style={pending}>{t('unsaved')}</span> : null}
-        <span style={{ ...chevron, transform: open ? 'rotate(180deg)' : undefined }}>
-          <ChevronIcon />
-        </span>
-      </button>
-      {open ? (
-        <div style={body}>
-          {!state.writable ? (
-            <p style={readOnly} role="status">{t('readOnly')}</p>
-          ) : null}
-          {CARD_SECTIONS.map((section) => {
-            const sectionFields = basicFields.filter((field) => field.display === section.id)
-            if (sectionFields.length === 0) return null
-            return (
-              <section key={section.id} style={sectionBlock}>
-                <header style={sectionHead}>
-                  <h3 style={sectionTitle}>{t(section.labelKey as ShiftRouterCardKey)}</h3>
-                  {section.summaryKey ? (
-                    <p style={sectionSummary}>{t(section.summaryKey as ShiftRouterCardKey)}</p>
-                  ) : null}
-                </header>
-                <div style={sectionBody}>
-                  {section.id === 'models' ? (
-                    <ChainNotices problems={problems} catalog={state.catalog} t={t} />
-                  ) : null}
-                  <SectionFields
-                    fields={sectionFields}
-                    stateByPath={stateByPath}
-                    catalog={state.catalog}
-                    t={t}
-                    disabled={!state.writable}
-                    edit={edit}
-                    editRows={editRows}
-                    resetField={resetField}
-                  />
-                </div>
-              </section>
-            )
-          })}
-          {advancedFields.length > 0 ? (
-            <section style={sectionBlock}>
-              <button
-                type="button"
-                className="sr-advanced"
-                style={advancedHeader}
-                aria-expanded={showAdvanced}
-                aria-label={`${t(showAdvanced ? 'collapseAdvanced' : 'expandAdvanced')}: ${t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}`}
-                onClick={() => setShowAdvanced(!showAdvanced)}
-              >
-                <span style={sectionTitle}>{t(ADVANCED_SECTION.labelKey as ShiftRouterCardKey)}</span>
-                <span style={badge}>{t('advancedCount', { n: advancedFields.length })}</span>
-                {advancedChanged > 0 ? (
-                  <span style={badge}>{t('advancedChanged', { n: advancedChanged })}</span>
-                ) : null}
-                <span style={{ ...chevron, transform: showAdvanced ? 'rotate(180deg)' : undefined }}>
-                  <ChevronIcon />
-                </span>
-              </button>
-              <p style={sectionSummary}>{t(ADVANCED_SECTION.summaryKey as ShiftRouterCardKey)}</p>
-              {showAdvanced ? (
-                <div style={sectionBody}>
-                  <AdvancedFields
-                    fields={advancedFields}
-                    stateByPath={stateByPath}
-                    catalog={state.catalog}
-                    t={t}
-                    disabled={!state.writable}
-                    edit={edit}
-                    editRows={editRows}
-                    resetField={resetField}
-                  />
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-          <div style={footer}>
-            {state.failed ? <p style={failed} role="status">{t('saveFailed')}</p> : null}
-            <button type="button" className="sr-discard" style={btnDiscard} disabled={!state.dirty || state.saving} onClick={discard}>
-              {t('discard')}
-            </button>
-            <button type="button" className="sr-save" style={btnSave} disabled={blocked} onClick={() => void save()}>
-              {t(state.saving ? 'saving' : 'save')}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {headerNode}
+      {open ? bodyNode : null}
     </li>
   )
 }

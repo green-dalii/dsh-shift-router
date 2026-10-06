@@ -62,7 +62,7 @@ export interface CommandDeps {
   workerModelSelection(): WorkerModelSelection | undefined
   /**
    * Authorise this plugin's Fast-tier routes in the HOST's
-   * `subagent-model-selection` namespace (C4(a)), so the orchestrator can pin
+   * `subagent-model-selection-settings` namespace (C4(a)), so the orchestrator can pin
    * workers to Fast instead of letting them inherit the Smart model.
    *
    * `enabled: false` revokes authorisation without dropping the route list.

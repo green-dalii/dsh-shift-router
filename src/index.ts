@@ -38,11 +38,15 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 import type SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 // Type-only: pull in the Context augmentations (`ctx.tools`, `ctx.systemPrompt`)
 // and tool-pipeline event types so the plugin compiles against the running
 // harness's service surface.
+// Type-only: the Loader's event map, which owns `loader/volatile-update` — the
+// Host's notification that a volatile config reference moved. Declared by
+// `cordis-plugin-loader`, the package that emits it; naming the event without
+// this import leaves `ctx.on` with no matching overload.
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -118,11 +122,15 @@ export { Config }
 export const inject = ['llm', 'tools', 'commands', 'agents', 'systemPrompt'] as const
 
 /**
- * Settings namespace shown in the GUI settings panel.
+ * Settings namespace: the profile entry id, which is also the namespace the
+ * GUI settings card binds.
  *
- * A plain literal: since `@deepseek-ai/dsh-settings` 0.1.5 the namespace is a
- * branded string (`SettingsNamespace`) that `register()` validates, and the
- * `settingsNamespace()` constructor no longer exists.
+ * A plain literal. Since `@deepseek-ai/dsh-settings` 0.2.0-rc.2 the namespace
+ * IS the loader entry id — `SettingsForms.describe()` reports
+ * `ns: entry.options.id`, `write()` finds the entry by that exact id, and the
+ * per-namespace `settings.register()` binder is gone. `Config` is exported
+ * from this module, so the entry's schema is discovered from the fiber; the
+ * cordis.patch row declares `id: shift-router` to match.
  */
 export const ROUTER_SETTINGS_NAMESPACE = 'shift-router'
 
@@ -132,12 +140,21 @@ const SUBAGENT_TOOL = 'subagent'
 /**
  * Host settings namespace holding the worker-route allowlist (C4(a)).
  *
- * Deliberately a literal: the owning package exports
- * `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE`, but it is a devDependency
- * (type-only), and a runtime value import would make it load-bearing. A test
- * pins this literal against that exported constant so drift fails loudly.
+ * `@deepseek-ai/dsh-tool-subagent` 0.2.0-rc.2 renamed this namespace: the old
+ * module-level `SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE` constant and its
+ * `installSection()` call are gone, and a namespace is now the *loader entry
+ * id* of the row that mounts the plugin. In the Web composition that row is
+ *
+ *     # dsh-web-app/cordis.patch.yml:66
+ *     - id: subagent-model-selection-settings
+ *       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+ *
+ * and the module declares the same string as its own plugin `name`, so the two
+ * agree by construction. A literal, deliberately: the owning package is a
+ * devDependency, and a runtime value import would make it load-bearing. A test
+ * pins this literal against the module's exported `name` so drift fails loudly.
  */
-const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection'
+const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection-settings'
 
 /**
  * A top-level agent is routable; subagents (orchestration workers) keep their
@@ -161,11 +178,56 @@ function messagesToText(messages: readonly UserMessage[], cap: number): string {
   return texts.join('\n').slice(0, cap)
 }
 
-export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
+/**
+ * Read the config the loader handed `apply`, unwrapping every volatile
+ * reference.
+ *
+ * `Config` marks its top-level fields `.volatile()` (see `config.ts`), which is
+ * what puts this entry into the Host settings document on
+ * `@deepseek-ai/dsh-settings` 0.2.0-rc.2 — and which makes each of those fields
+ * arrive as a `Volatile` reference rather than a value. A reference is LIVE: the
+ * runtime updates it in place when the profile patch changes, so reading it
+ * again is how a Host-side write becomes visible without a reload.
+ *
+ * The walk is structural on purpose. `@deepseek-ai/cosmokit` owns the `Volatile`
+ * protocol and its `isVolatile` test, but this package neither depends on nor
+ * peers that module, and a runtime import of a transitive would make the plugin
+ * load-bearing on a package it does not declare. The schema has no field named
+ * `get`, so the discriminator cannot collide with configuration.
+ *
+ * Unwrapping is not optional: a reference is an object carrying a function, so
+ * leaving one in the config makes the next `structuredClone` in `refreshConfig()`
+ * throw `DataCloneError`.
+ * @param value - the second `apply` argument, as the loader resolved it.
+ * @returns a detached plain config; undefined when nothing was provided.
+ */
+function readProvidedConfig(value: unknown): ShiftRouterConfig | undefined {
+  if (value === undefined) return undefined
+  const walk = (node: unknown): unknown => {
+    if (typeof node !== 'object' || node === null) return node
+    const get = (node as { get?: unknown }).get
+    if (typeof get === 'function') return walk((get as () => unknown).call(node))
+    if (Array.isArray(node)) return node.map(walk)
+    const out: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(node)) out[key] = walk(child)
+    return out
+  }
+  return walk(value) as ShiftRouterConfig
+}
+
+/**
+ * The config `apply` receives. The loader resolves the exported `Config`, so a
+ * volatile field arrives as a `Volatile` reference and a plain one as its value;
+ * {@link readProvidedConfig} normalises both.
+ */
+export type ProvidedConfig = ShiftRouterConfig | Record<string, unknown>
+
+export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   // Normalize: whatever the loader/settings resolved (possibly undefined when
   // the row carries no config), deep-merge over the defaults so every nested
-  // field exists (mirrors pi's loadConfig merge).
-  const config: ShiftRouterConfig = deepMergeConfig(DEFAULT_CONFIG, rawConfig ?? {})
+  // field exists (mirrors pi's loadConfig merge). Volatile fields arrive as live
+  // references, so read through them first.
+  const config: ShiftRouterConfig = deepMergeConfig(DEFAULT_CONFIG, readProvidedConfig(rawConfig) ?? {})
 
   // ── Effective config: cordis.yml entry + GUI settings overrides ──────
   // The loader/settings may hand us a DEEP-FROZEN config object, so commands
@@ -173,14 +235,8 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // refreshed from the config source whenever settings attach/change; runtime
   // toggles are session-scoped (they do not rewrite cordis.yml), exactly like
   // the original pi plugin's in-memory mutations.
-  //
-  // The settings namespace is registered manually (instead of
-  // installSettingsSection) so `/router config` can edit configuration
-  // through the SettingsScope handle — DSH's native, persisted config surface
-  // (the same namespace renders as a form in the GUI settings panel).
   let configSource: () => ShiftRouterConfig = () => config
   let effectiveConfig: ShiftRouterConfig = structuredClone(config)
-  let settingsScope: SettingsScope<ShiftRouterConfig> | undefined
   let settingsProvider: SettingsProvider | undefined
   // Model availability memo: "does a registered adapter resolve this
   // provider/model?" — checked once per config and cached. Declared before
@@ -195,9 +251,17 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   }
   ctx.inject(['settings'], (sctx) => {
     settingsProvider = sctx.settings
-    const scope = sctx.settings.register(ROUTER_SETTINGS_NAMESPACE, Config, { base: config })
-    settingsScope = scope
-    configSource = () => scope.get()
+    // The live read is the loader's own config object, re-read through its
+    // volatile references: a GUI write lands in the profile patch and this
+    // activation's runtime updates those references in place, so this is always
+    // the accepted document — no cached copy and no separate watch handle
+    // (0.2.0-rc.2 removed the scope binder that carried both).
+    if (rawConfig !== undefined) {
+      configSource = () => {
+        const out = deepMergeConfig(DEFAULT_CONFIG, readProvidedConfig(rawConfig) ?? {})
+        return out
+      }
+    }
     refreshConfig()
     sctx.effect(() => () => {
       // Settings provider detached (disposal/reload): fall back to the
@@ -207,7 +271,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
     })
     // Watch disposal is registered as an effect so it is torn down with the
     // plugin fiber (HMR reload) instead of relying on implicit cleanup.
-    sctx.effect(() => scope.watch(() => {
+    sctx.effect(() => ctx.on('loader/volatile-update', () => {
       refreshConfig()
       if (effectiveConfig.ux.routerLogVerbose) {
         ctx.logger.info('[shift-router] configuration changed')
@@ -216,17 +280,23 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   })
   const getConfig = (): ShiftRouterConfig => effectiveConfig
 
+  /** The revision the settings document currently stands at for this namespace. */
+  function settingsRevision(): number | undefined {
+    if (settingsProvider === undefined) return undefined
+    return settingsProvider.describe({}).find((d) => d.ns === ROUTER_SETTINGS_NAMESPACE)?.revision
+  }
+
   /**
    * Persist a partial patch into the shift-router settings namespace.
    * Returns null on success, or a human-readable failure reason (so commands
    * can surface the schema's rejection message instead of a generic error).
    */
   async function updateSettings(patch: Record<string, unknown>): Promise<string | null> {
-    if (settingsScope === undefined) {
+    if (settingsProvider === undefined) {
       return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
     }
     try {
-      await settingsScope.update(patch)
+      await settingsProvider.update(ROUTER_SETTINGS_NAMESPACE, patch, settingsRevision())
       return null
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -240,11 +310,11 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
    * Returns null on success, or a human-readable failure reason.
    */
   async function resetSettings(): Promise<string | null> {
-    if (settingsScope === undefined) {
+    if (settingsProvider === undefined) {
       return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
     }
     try {
-      await settingsScope.replace({})
+      await settingsProvider.replace(ROUTER_SETTINGS_NAMESPACE, {}, settingsRevision())
       return null
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -263,7 +333,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       return 'settings service is unavailable — edit the profile cordis.patch.yml row instead'
     }
     try {
-      await settingsProvider.mutate(ROUTER_SETTINGS_NAMESPACE, ops)
+      await settingsProvider.mutate(ROUTER_SETTINGS_NAMESPACE, ops, settingsRevision())
       return null
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -1052,10 +1122,10 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
       if (settings === undefined) {
         return { ok: false, reason: 'the settings service is unavailable in this composition' }
       }
-      if (settings.get(SUBAGENT_MODEL_SELECTION_NS) === undefined) {
+      if (!settings.describe({}).some((d) => d.ns === SUBAGENT_MODEL_SELECTION_NS)) {
         return {
           ok: false,
-          reason: 'this profile does not mount the harness "subagent-model-selection" namespace (the web composition does; headless does not)',
+          reason: 'this profile does not mount the harness "subagent-model-selection-settings" namespace (the web composition does; headless does not)',
         }
       }
       const routes: { provider: string; model: string }[] = []
@@ -1099,7 +1169,7 @@ export function apply(ctx: Context, rawConfig?: ShiftRouterConfig): void {
   // ── Worker-model self-check (SPEC §7.4) ───────────────────────────
   // Upstream calls per-worker tier injection mandatory. In DSH the `subagent`
   // tool's per-call provider/model only takes effect inside the host-owned
-  // `subagent-model-selection` allowlist (default off, and mounted by the
+  // `subagent-model-selection-settings` allowlist (default off, and mounted by the
   // `web` composition only). We cannot enable that setting from here, so the
   // honest move is to tell the user what to turn on instead of letting workers
   // silently inherit the Smart model.

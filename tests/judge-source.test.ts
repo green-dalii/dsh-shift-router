@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Config, deepMergeConfig } from '../src/config.js'
+import { readConfig } from './config-ref.js'
 import {
   DECISION_MIN_JUDGE_TIMEOUT_MS,
   judgeChainFor,
@@ -35,7 +36,10 @@ type StandardResult =
   | { issues: { message: string }[] }
 
 function validate(value: unknown): StandardResult {
-  return (Config as unknown as { '~standard': { validate(v: unknown): StandardResult } })['~standard'].validate(value)
+  const result = (Config as unknown as { '~standard': { validate(v: unknown): StandardResult } })['~standard'].validate(value)
+  // `Config` is a volatile-root schema: a resolution carries a reference, and
+  // every assertion below reads the plain config through it.
+  return 'issues' in result ? result : { value: readConfig(result.value) }
 }
 
 describe('routing.judge schema', () => {
@@ -63,7 +67,10 @@ describe('routing.judge schema', () => {
     // list: `normalizeJudgeMode` alone passing does not prove the built config
     // still holds the same information.
     const out = validate({ routing: { judge: { models: [{ provider: 'jc', model: 'judge-1', priority: 1 }] } } })
-    const built = (out as { value: ShiftRouterConfig }).value
+    // `Config` is volatile-rooted, so the resolved snapshot is deeply frozen:
+    // clone it before standing in a tier chain, exactly as the plugin's own
+    // `deepMergeConfig` does.
+    const built = structuredClone((out as { value: ShiftRouterConfig }).value)
     built.tiers.fast.models = [{ provider: 'p1', model: 'fast-1', priority: 1 }]
     expect(judgeChainFor(built).map((e) => `${e.provider}/${e.model}`)).toEqual(['jc/judge-1', 'p1/fast-1'])
   })
@@ -77,7 +84,10 @@ describe('routing.judge schema', () => {
         },
       },
     })
-    const built = (out as { value: ShiftRouterConfig }).value
+    // `Config` is volatile-rooted, so the resolved snapshot is deeply frozen:
+    // clone it before standing in a tier chain, exactly as the plugin's own
+    // `deepMergeConfig` does.
+    const built = structuredClone((out as { value: ShiftRouterConfig }).value)
     built.tiers.fast.models = [{ provider: 'p1', model: 'fast-1', priority: 1 }]
     expect(judgeChainFor(built)[0]).toEqual({
       provider: 'decision',
