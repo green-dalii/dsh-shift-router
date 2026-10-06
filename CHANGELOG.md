@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-10-06
+
+Baseline: DSH `0.2.0-rc.2`. A hotfix for what 0.7.3 can do to an installation
+whose carrier is older than the library it needs.
+
+### Fixed
+
+- **`Config` no longer asserts that schemastery offers `.volatile()`.** 0.7.3 marks
+  every top-level section `.volatile()`, and that method exists only from
+  `@deepseek-ai/schemastery` **3.18.4** — the library the 0.2.0-rc.2 carrier ships;
+  the 0.1.5-rc.2 carrier ships 3.18.2, where the method does not exist. Calling a
+  missing method **during module evaluation** fails the whole plugin tree, so on that
+  carrier installing 0.7.3 did not merely lose the settings page — the plugin did not
+  boot at all. `supportsVolatile()` now probes the prototype (a pure predicate,
+  unit-tested for truthy / missing / null / undefined inputs): a library that offers
+  the method gets the volatile form the Host serves, and one that does not keeps a
+  plain schema. On the desktop carrier the two branches are byte-identical in
+  behaviour, so 0.7.4 changes nothing for the installation this release targets
+  (ALIGNMENT §R15.10).
+- The card's `supportsVolatile` degradation is now observable from the suite
+  (three tests), because a crash during module evaluation is invisible to every
+  unit test and to `tsc` — the devDependency tree always carries the newer library.
+
+### Changed
+
+- CI's e2e installs `@deepseek-ai/dsh@0.2.0-rc.2` — the generation this release
+  declares as its baseline — instead of `0.1.5-rc.2`. Its install-isolation step
+  packs the tarball into a profile resolved by the harness, so pinning an older
+  carrier validated an installation nobody runs while the one that matters went
+  unchecked (ALIGNMENT §R14.3, again).
+- `package-lock.json` re-resolved cold, which records the nine platform-optional
+  children of `node-addon-require-builtin@0.1.7`; an incremental `npm install`
+  had left them out and npm from node 24 refuses that lockfile. The recovery
+  order that keeps them is in ALIGNMENT §R15.10.
+
 ## [Unreleased]
 
 ## [0.7.3] - 2026-10-06
