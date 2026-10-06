@@ -6,8 +6,9 @@
  * fails at load instead of silently misbehaving.
  */
 
+import z from '@deepseek-ai/schemastery'
 import { describe, expect, it } from 'vitest'
-import { Config } from '../src/config.js'
+import { Config, supportsVolatile } from '../src/config.js'
 import { readConfig } from './config-ref.js'
 
 type StandardResult =
@@ -16,8 +17,9 @@ type StandardResult =
 
 function validate(value: unknown): StandardResult {
   const result = (Config as unknown as { '~standard': { validate(v: unknown): StandardResult } })['~standard'].validate(value)
-  // `Config` is a volatile-root schema: a resolution carries a reference, and
-  // every assertion below reads the plain config through it.
+  // `Config` marks its top-level fields `.volatile()`, so a resolution is a
+  // plain object whose FIELDS are references; every assertion below reads the
+  // plain config through them.
   return 'issues' in result ? result : { value: readConfig(result.value) }
 }
 
@@ -151,3 +153,42 @@ describe('orchestration cost knobs (C3/C5)', () => {
     expect(result.issues?.length).toBeGreaterThan(0)
   })
 })
+
+
+/**
+ * `Config` calls `.volatile()` only when the schemastery it is compiled against
+ * offers it, because a missing method during module evaluation fails the whole
+ * plugin tree — CI's packed-install step caught exactly that, and neither the
+ * unit suite nor `tsc` saw it (the devDependency tree always carries the newer
+ * library). Three assertions pin the degradation:
+ *
+ * - the predicate itself, for both truthy and missing inputs;
+ * - that the library in THIS tree does offer `.volatile()` — so the volatile
+ *   branch is what the shipped schema actually took, which is what puts the
+ *   namespace into the Host settings document on 0.2.0-rc.2;
+ * - that the resolution really does carry a reference per top-level field.
+ */
+describe('the volatile feature probe', () => {
+  it('probes a prototype instead of assuming a version number', () => {
+    expect(supportsVolatile({ volatile(): unknown { return null } })).toBe(true)
+    expect(supportsVolatile({})).toBe(false)
+    expect(supportsVolatile(undefined)).toBe(false)
+    expect(supportsVolatile(null)).toBe(false)
+  })
+
+  it('takes the volatile branch in this tree, where the library offers it', () => {
+    // The same library and the same probe the schema build reads, so a silent
+    // version drift in this tree shows up as a red test rather than as a
+    // settings page that quietly stops being served.
+    expect(supportsVolatile((z as unknown as { prototype?: unknown }).prototype)).toBe(true)
+  })
+
+  it('resolves a reference per top-level field on this library', () => {
+    const out = (Config['~standard'] as unknown as { validate(v: unknown): { value?: unknown } }).validate({})
+    const value = out.value as Record<string, unknown>
+    for (const field of ['enabled', 'tiers', 'routing', 'ux', 'orchestration', 'failover', 'telemetry', 'pricing']) {
+      expect(typeof (value[field] as { get?: unknown })?.get, field).toBe('function')
+    }
+  })
+})
+

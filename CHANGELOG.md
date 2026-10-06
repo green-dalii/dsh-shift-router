@@ -66,6 +66,33 @@ built, tested and verified against that runtime instead of against `0.1.5-rc.3`.
   inside chrome the page already drew), so the card now renders a one-line summary
   or a header-less form instead of always drawing its own collapsible header.
 
+### Fixed in review
+
+- **The plugin tree no longer crashes on a schemastery without `.volatile()`.**
+  `Config` marks its top-level sections `.volatile()`, which is `@deepseek-ai/schemastery`
+  **3.18.4** and not 3.18.2 — and on a carrier that ships the older library the call
+  threw during module evaluation, so the packed install aborted the whole plugin tree
+  (`npm ci` and every unit test stayed green, because only the devDependency tree
+  carries the newer library). `supportsVolatile()` probes the prototype instead of a
+  version number, and a library without the method keeps a plain schema — the
+  legitimate degradation, since that generation's `dsh-settings` serves no namespace
+  anyway. Verified by re-running the e2e against both carriers: on `0.1.5-rc.2`
+  `the packed install does not abort the plugin tree` now passes.
+
+### Changed
+
+- **CI's e2e installs the harness generation this release declares as its baseline.**
+  The workflow pinned `@deepseek-ai/dsh@0.1.5-rc.2`, so the install-isolation step
+  validated a composition nobody runs while the desktop carrier (0.2.0-rc.2, now
+  pinned instead) is where this release's contract lives. Same blind spot as
+  ALIGNMENT §R14.3, in CI form.
+- **`package-lock.json` re-resolved cold.** An incremental `npm install` left the
+  platform-optional children of `node-addon-require-builtin@0.1.7` out of the
+  lockfile; npm from node 24 rejects that in `npm ci` (`Missing: … from lock file`)
+  while npm 11.6.0 accepts it, so the gates job on node 24 failed in 7 s. A cold
+  re-resolve records all 10 entries and both accept. The correct recovery order for
+  this repository is in ALIGNMENT §R15.10 — a scripted `npm install` re-prunes them.
+
 ### Verified
 
 - A real `0.2.0-rc.2` composition booted from the desktop carrier's own

@@ -1106,6 +1106,54 @@ R15.7 跑 `npm run test:e2e` 时 headless 那一轮 hang 二十分钟。**最终
 阶段被装载的 probe）里直接 `ctx.settings.update()`。R15.7 的 20 分钟就是这么
 烧掉的。
 
+### R15.10 CI 的两侧都要对齐目标运行时（推完才看 CI，必须记一笔）
+
+我推完 `2cd6799` 之后**没有看 CI**。维护者看到红灯后立刻问我。这是流程错误：push 之后
+先看门禁，再宣布完成。
+
+红灯有两层，两层都红，但性质不同：
+
+**第一层（阻塞）：`gates (node 24)` 在 `npm ci` 一步 7 秒就挂。** 原文 `Missing:
+node-addon-require-builtin-darwin-arm64@0.1.7 from lock file`（9 个平台变体全列）。同一次
+run 里 `gates (node 22.19)` 与 `e2e` 的 `npm ci` 都通过——所以是 **npm 版本差异**，不是
+包问题。用 npx 精确复现：本机 npm `11.6.0` 接受，`11.10.0` 拒绝（同一条错误原文）。CI 的
+node 24 在 setup-node 取到的是当前 24.x 自带的新 npm。
+
+根因在 lockfile 的生成方式：`node-addon-require-builtin@0.1.7` 被 `dsh-app-boot@0.2.0-rc.2`
+硬依赖，并因本仓的 peer 链被打上 `peer: true`；它的 9 个平台 optionalDependencies
+（三平台都在 npmjs 上，可验证）**没有**成为 lockfile 的条目。最小样例（把同一个包作为直接
+依赖安装）能记录全部 10 条——差异就是那个 peer 标记。而我此前的增量 `npm install` 一直
+沿用这个不完整条目，没有重新推导。**冷启动重新解析即修复**：`rm -rf node_modules
+package-lock.json` + `npm install --ignore-scripts` → 10 条全在，`npm ci` 在 11.6/11.10 都
+通过（exit 0）。
+
+**复活的坑必须记牢：带 `prepare` 的 `npm install` 会把那 9 条再裁掉一次。** 实测：冷启动
+记 10 条 → `npm install --no-audit --no-fund`（跑 prepare）→ 变回 1 条。所以本仓库的正确
+依赖复原顺序是：
+
+    rm -rf node_modules package-lock.json
+    npm install --ignore-scripts
+    npm run build        # 手动，不要让 npm替你跑 prepare
+
+**第二层（非阻塞）：`e2e` 在「packed artifact」一步失败。** 那一步把 tarball 装进一个
+`web` profile——那里的 schemastery 是 **3.18.2**，而 `.volatile()` 在 3.18.4 才出现
+（实测 `typeof prototype.volatile`: 3.18.2 → `undefined`，3.18.4 → `function`）。
+于是 3.18.2 上 `z.object({...}).volatile()` 在**模块求值期**抛出，整个插件树崩，
+后四条断言全连坐。注意这是「装包隔离」这一步的正当职责：它正是用来抓"未声明的
+运行时依赖"的，这次抓到的真实形态是"schema 调用了库的新方法"。
+
+修法是**探测，不是换版本**。`supportsVolatile()`（纯谓词，可测）探测
+`schemastery` 原型上是否存在 `volatile`；没有就保持普通 schema。这是合法降级：
+旧 carrier 的 `dsh-settings` 本来就不服务随机命名空间，卡片走旧槽位
+（`legacy-slot.ts`）；路由器不受影响。修完之后在同一钉死的旧版本上复跑 e2e：
+「the packed install does not abort the plugin tree」✓ —— 崩溃消失，剩下两条失败是
+那一代的**合法差异**（`dsh-client-ui-plugin-manager` 在 0.2.0 才出现）。
+
+**同一轮还改了 CI 的 e2e 版本钉死**: `@deepseek-ai/dsh@0.1.5-rc.2` → `0.2.0-rc.2`。
+理由：e2e 的价值是"对**用户会装**的那代组合做装包隔离"，而 README/SPEC/ROADMAP 现在
+声明的基线就是 0.2.0-rc.2（那个版本可从 npmjs 完整装出，实测 608 个包）。旧钉死意味着
+我们对用户不测、对旧版测，正是 R14.3 的盲点在 CI 里重演。
+
 ## 明确不对齐（附理由）
 
 规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再

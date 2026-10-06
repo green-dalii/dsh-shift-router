@@ -193,16 +193,69 @@ function applyPartial(target: Record<string, unknown>, source: Record<string, un
  *   "volatile fields require a fixed object path without an enclosing volatile
  *   field").
  */
+
+/**
+ * Whether this schemastery can carry a volatile form at all.
+ *
+ * `@deepseek-ai/schemastery` grew `.volatile()` in 3.18.4, which is what the
+ * 0.2.0-rc.2 carrier ships; 3.18.2, which the 0.1.5-rc.2 carrier ships, does
+ * not. Calling a missing method while the module evaluates would fail the
+ * WHOLE plugin tree instead of just the settings page — the packed install in
+ * CI failed exactly that way, and not a single unit test or `tsc` saw it,
+ * because the devDependency tree always carries the newer library.
+ *
+ * So probe the method and degrade: on a library without it the schema stays
+ * plain. That is the right degradation, because `@deepseek-ai/dsh-settings` on
+ * that generation serves no namespace unless a section is installed anyway —
+ * the card's legacy surface is what covers those shells (`legacy-slot.ts`), and
+ * the router itself is unaffected.
+ */
+/**
+ * Whether a schemastery module offers `.volatile()`.
+ *
+ * Probing a prototype rather than assuming a version number keeps this honest
+ * when the carrier moves again, and it is what makes the degradation testable:
+ * {@link supportsVolatile} is a pure predicate over the object it is handed, so
+ * a test can drive both branches without swapping the library.
+ * @param target - the schema constructor's prototype, or anything.
+ * @returns true only when the prototype really has a callable `volatile`.
+ */
+export function supportsVolatile(target: unknown): boolean {
+  if (target === undefined || target === null) return false
+  return typeof (target as { volatile?: unknown }).volatile === 'function'
+}
+
+const CAN_VOLATILE = supportsVolatile((z as unknown as { prototype?: unknown }).prototype)
+
+/**
+ * Mark one top-level SECTION volatile, or leave it plain.
+ *
+ * The mark is what makes `entry.fiber.config`'s field a live reference, and the
+ * granularity is a section because that is what both consumers need: the Host's
+ * `isVolatilePath()` accepts `[section]` and everything under it (so the card's
+ * per-section writes are accepted), and `projectForm` still projects the
+ * section's whole nested object (so the browser gets every field, not only the
+ * leaves). Marking the ROOT instead hangs the headless first turn, and marking
+ * leaves only makes the section path fail the check — both are in
+ * ALIGNMENT §R15.8 with the measurements.
+ *
+ * A library without `.volatile()` keeps every field plain, which is the right
+ * degradation: on a carrier whose `dsh-settings` serves no namespace, the card
+ * falls back to its legacy surface rather than losing the plugin tree.
+ */
+const markVolatile = <T>(schema: T): T =>
+  CAN_VOLATILE ? ((schema as unknown as { volatile(): T }).volatile() as unknown as T) : schema
+
 export const Config = z.object({
-  enabled: z.boolean().default(true).volatile(),
-  tiers: z.object({
+  enabled: markVolatile(z.boolean().default(true)),
+  tiers: markVolatile(z.object({
     fast: TierConfigSchema,
     smart: TierConfigSchema,
-  }).volatile(),
-  routing: RoutingSchema.volatile(),
-  ux: UXSchema.volatile(),
-  orchestration: OrchestrationSchema.volatile(),
-  failover: FailoverSchema.volatile(),
-  telemetry: TelemetrySchema.volatile(),
-  pricing: z.array(PricingSchema).default([]).volatile(),
+  })),
+  routing: markVolatile(RoutingSchema),
+  ux: markVolatile(UXSchema),
+  orchestration: markVolatile(OrchestrationSchema),
+  failover: markVolatile(FailoverSchema),
+  telemetry: markVolatile(TelemetrySchema),
+  pricing: markVolatile(z.array(PricingSchema).default([])),
 })

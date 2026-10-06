@@ -97,7 +97,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bin="$(npx -y -p @deepseek-ai/dsh@0.1.5-rc.2 -- which dsh)"
+          # The harness version here IS the install-isolation contract: the e2e
+          # packs the tarball and installs it into a profile whose resolution
+          # comes from the harness, so a plugin that needs a newer schemastery
+          # fails HERE. That must be the generation this release declares as its
+          # baseline, not an older one — pinning 0.1.5-rc.2 once let a plugin
+          # that is green on the desktop carrier ship broken on install
+          # (ALIGNMENT §R15.10).
+          bin="$(npx -y -p @deepseek-ai/dsh@0.2.0-rc.2 -- which dsh)"
           if [ -z "$bin" ]; then
             echo "::error::could not resolve the dsh bin via npx (see the npx output above)"
             exit 1

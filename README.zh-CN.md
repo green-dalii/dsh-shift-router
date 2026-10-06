@@ -15,8 +15,8 @@
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
 [![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-436%20passing-brightgreen)](#开发)
-[![Coverage](https://img.shields.io/badge/coverage-83.76%25%20lines-green)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-439%20passing-brightgreen)](#开发)
+[![Coverage](https://img.shields.io/badge/coverage-83.69%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
