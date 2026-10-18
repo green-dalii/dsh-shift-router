@@ -46,7 +46,7 @@ a transport layer.
 | Telemetry | `session/event` (`assistant/message`, `assistant/chunk`) |
 | Judge LLM call | `ctx.llm.stream()` |
 | Configuration | `shift-router` settings namespace + `cordis.patch.yml` |
-| Commands / GUI | `ctx.commands.register()`, client card in `plugins.row.config` / `plugins.bundle.config` (0.2.0-rc.2+) or `settings.plugin.item` (≤0.1.5-rc.x) — §12.1 |
+| Commands / GUI | `ctx.commands.register()`, client card in `plugins.row.config` / `plugins.bundle.config` (0.2.0-rc.2+, audited through 0.2.1-rc.2) or `settings.plugin.item` (≤0.1.5-rc.x) — §12.1 |
 | Optional capabilities | `ctx.get()` probe / `ctx.inject()` subscription — **never** a bare `ctx.<name>` read (§1.4, §7.4) |
 
 ### 1.2 Routable agents
@@ -789,7 +789,9 @@ command registry must expose the same set of editable paths (enforced by test).
 ### 12.1 The card's slots (normative)
 
 The card has **one surface per shell generation**, because upstream moved the
-extension point in `0.2.0-rc.2` and deleted the old one in the same release:
+extension point in `0.2.0-rc.2` and deleted the old one in the same release;
+the surface is re-audited through `0.2.1-rc.2` (the two `plugins.*.config`
+slots and the `ConfigFormSnapshot` type still in place — ALIGNMENT §R15.11):
 
 | Shell | Surface | Slot | Key |
 |---|---|---|---|
@@ -827,6 +829,24 @@ The settings transport follows the same split (§11): `ctx.configForms.get(ns)` 
 0.2.0-rc.2+, `ctx.settingsScope.bind({ namespace })` on ≤0.1.5-rc.x. The card
 holds one `SettingsScopeBinding` across both, so it has one form and one set of
 drafts regardless of which service arrived.
+
+#### 12.1.1 The `engines.dsh` declaration (normative)
+
+The bundle declares `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`. Since the
+`0.2.1` generation this field, when present, decides compatibility **alone** —
+the shipped evaluator (`@deepseek-ai/dsh-app-boot`
+`evaluatePluginCompatibility`) compares the range against the running version
+with `semver.satisfies(..., { includePrerelease: true })` and **ignores
+`peerDependencies`**; without the field the rule falls back to the peers.
+
+Consequence this contract depends on: under `includePrerelease: true`, a plain
+`<0.3.0` ceiling **admits** `0.3.0-rc.x` prereleases. The `-rc.0` form is what
+keeps the un-audited 0.3.0 generation out. The admitted set (`0.2.0-rc.2`,
+`0.2.1-rc.1`, `0.2.1-rc.2`) and the rejected set (`0.1.5-rc.2`, `0.3.0-rc.1`,
+`0.3.0`) are enforced by `tests/engines-dsh-compat.test.ts`, which calls the
+upstream evaluator itself — the declaration is load-bearing, not documentary.
+Cliente UI changes in a future 0.3.0 generation need an audit before that
+ceiling moves (ALIGNMENT §R15.11).
 
 ### 12.2 Where the model lists come from (normative)
 

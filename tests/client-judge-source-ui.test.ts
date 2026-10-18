@@ -350,7 +350,6 @@ describe('the card holds one swappable settings-scope handle', () => {
       user: undefined,
       value: undefined,
       revision: undefined,
-      mode: 'host',
     })
     // A write with nothing attached settles instead of rejecting, so a stray
     // save cannot tear the card down with an unhandled rejection.

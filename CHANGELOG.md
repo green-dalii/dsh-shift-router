@@ -5,6 +5,70 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-10-18
+
+Baseline: DSH `0.2.1-rc.2` (the desktop carrier since 2026-10-17), floor unchanged
+at `0.2.0-rc.2`. An alignment release: the 0.2.1 generation changes no runtime API
+this plugin uses, but it **changes the compatibility contract** and the unit
+generation, so both are pinned here rather than inherited by luck.
+
+### Fixed
+
+- **`ConfigFormSnapshot` no longer carries `mode`.** `@deepseek-ai/dsh-client-ui-settings`
+  0.2.1-rc.2 dropped the field from the snapshot interface; the card's
+  `UNAVAILABLE_SNAPSHOT` literal still set `mode: 'host'`, so `tsc` against the
+  new generation failed with `Object literal may only specify known properties, and
+  'mode' does not exist`. The field had no reader in this plugin — it is dropped
+  from the literal and from the shape test.
+
+### Changed
+
+- **Compatibility is declared by `engines.dsh` and no longer rides on peers.**
+  0.2.1-alpha.4 made the runtime's plugin gate prefer `engines.dsh`; the shipped
+  0.2.1-rc.2 evaluator decides it ALONE when present (`engines.dsh` range decides
+  alone and peerDependencies are ignored ... Prereleases participate in ranges,
+  matched with `semver.satisfies(includePrerelease: true)`). This release declares
+  `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`, so the ceiling explicitly rejects
+  the un-audited 0.3.0 generation — with `includePrerelease: true` a plain
+  `<0.3.0` would admit `0.3.0-rc.x` shas. The declaration is a load-bearing
+  artifact now, so `tests/engines-dsh-compat.test.ts` calls the actual upstream
+  `evaluatePluginCompatibility` on the published `@deepseek-ai/dsh-app-boot` and
+  gates the admitted runtimes (`0.2.0-rc.2`, `0.2.1-rc.1`, `0.2.1-rc.2`) against
+  the rejected ones (`0.1.5-rc.2`, `0.3.0-rc.1`, `0.3.0`).
+- Every `@deepseek-ai` devDependency moves to the `0.2.1-rc.2` generation
+  (`^0.2.1-rc.2`; cordis `^4.0.5`, schemastery `^3.18.5`, cordis-plugin-loader
+  `^1.0.6`, plus `@deepseek-ai/dsh-app-boot ^0.2.1-rc.2` for the compat gate),
+  so the types and tests compile against the same libraries the running desktop
+  bundles. Peer ranges keep their wider floors on purpose: `cordis ^4.0.2`,
+  `schemastery ^3.18.2`, `dsh-llm `>=0.1.5-rc.2 <0.3.0``.
+- CI's e2e resolves `@deepseek-ai/dsh@0.2.1-rc.2`, the generation the desktop
+  now ships; the `engines.dsh` unit gate keeps the older admitted generation
+  audited without a second e2e leg.
+- Slot inventory re-verified inside the 0.2.1-rc.2 carrier: `plugins.row.config`
+  and `plugins.bundle.config` are still declared by `dsh-client-ui-plugin-manager`
+  (byte-level hit in the shipped `client.js`), `ctx.configForms` is still served,
+  and no code in this plugin references the removed `dsh-invariants` exports or
+  the split `composer-stats` extension — no migration needed there.
+
+### Known environmental hazard (not a code bug)
+
+- On a machine whose `~/.npmrc` pins `registry=https://registry.npmmirror.com/`
+  (the maintainer's default per AGENTS §6), `dsh 0.2.1-rc.2`'s `dsh plugin add`
+  reads a cached `dsh-shift-router@0.7.2` metadata from the mirror — even
+  though the local tarball is `0.7.5` and `pnpm` installs it correctly — and
+  fails the post-install compatibility check on `0.7.2`'s old peer range
+  (`@deepseek-ai/dsh-llm >=0.1.5-rc.2 <0.2.0`). All standard overrides
+  (`--registry` flag, profile `.npmrc`, `DSH_HOME/.npmrc`, `pnpm store prune`)
+  were tried and none reach the cache; the 0.2.1-rc.2 plugin-manager resolves
+  its registry from `configuredRegistries.registry` rather than the CLI /
+  workspace configuration. CI runs on `registry.npmjs.org/` (the GitHub-hosted
+  runner default), where the same check passes — the 0.7.4 e2e was green in
+  CI, and the 0.7.5 e2e is expected to be green there too. The new unit gate
+  `tests/engines-dsh-compat.test.ts` calls the actual upstream evaluator
+  against the published `0.2.1-rc.2` and is the authoritative correctness
+  check; the e2e is kept for its other install-isolation assertions. Full
+  diagnostic in ALIGNMENT §R15.11.
+
 ## [0.7.4] - 2026-10-06
 
 Baseline: DSH `0.2.0-rc.2`. A hotfix for what 0.7.3 can do to an installation

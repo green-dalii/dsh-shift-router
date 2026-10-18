@@ -1154,6 +1154,90 @@ package-lock.json` + `npm install --ignore-scripts` → 10 条全在，`npm ci` 
 声明的基线就是 0.2.0-rc.2（那个版本可从 npmjs 完整装出，实测 608 个包）。旧钉死意味着
 我们对用户不测、对旧版测，正是 R14.3 的盲点在 CI 里重演。
 
+### R15.11 DSH 0.2.1-rc.2 审计：engines.dsh 成为唯一判据，快照少了 mode（2026-10-18）
+
+**触发**：维护者说"DSH 发布了新版，去查开发文档有没有更新"。实测桌面 app
+`CFBundleShortVersionString = 0.2.1-rc.2`；asar 里提取的 runtime 家族全部对齐：
+`dsh`/`dsh-llm`/`dsh-app-boot`/三个 client-ui 包均为 `0.2.1-rc.2`，
+cordis `4.0.5`、schemastery `3.18.5`、cosmokit `1.8.6`、cordis-plugin-loader `1.0.6`。
+
+**上游事实（逐字来源）**：
+
+1. 0.2.1-rc.1 release notes（"其他变更"）：「第三方插件的版本兼容性**优先按
+   `engines.dsh` 判断**；未声明时沿用原有规则。」
+2. 桌面 asar 里 `dsh-app-boot/lib/index.js` 的实现原文：*Evaluate plugin dsh
+   requirements (`engines.dsh`, else dsh peers) without importing plugin code*；
+   `satisfies()` 用 `semver.satisfies(runtimeVersion, range,
+   { includePrerelease: true })`；判定器逐字注释 *An own `engines.dsh` range
+   decides alone and peerDependencies are ignored ... Prereleases participate in
+   ranges*。
+3. 本地 skill（v0.6.2，与远端一致）仍写着「`engines.dsh` 只是声明性的，不是被强制
+   检查的字段」——**与 0.2.1-rc.2 的出厂码相矛盾**。skill 滞后，以出厂码为准。
+   （不要据此断言 skill 错——它描述的是旧代；引用时注明版本差。）
+
+**includePrerelease 的语义后果**（用已发布的
+`@deepseek-ai/dsh-app-boot@0.2.1-rc.2` 调真函数实测）：`includePrerelease: true`
+下 `<0.3.0` **放行** `0.3.0-rc.x`；`<0.3.0-rc.0` 才同时挡住 0.3.0-rc.x 与 0.3.0
+stable。评估输出（三行逐条）：
+
+    runtime=0.2.0-rc.2  <0.3.0:ok          <0.3.0-rc.0:ok
+    runtime=0.2.1-rc.2  <0.3.0:ok          <0.3.0-rc.0:ok
+    runtime=0.3.0-rc.1  <0.3.0:ok          <0.3.0-rc.0:INCOMPAT
+    runtime=0.3.0       <0.3.0:INCOMPAT    <0.3.0-rc.0:INCOMPAT
+
+**决策**：声明 `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`（紧天板，把未审计的
+0.3.0-rc.x 一并挡住——0.7.3 的教训是"保守天板正确"）。声明后 peers 不再参与门禁，
+兼容判据与 peer 范围解耦；peers 保留原值不动（旧 host 沿用 peer 规则时仍以它们
+为准）。这套判定现在由 `tests/engines-dsh-compat.test.ts` 直接调上游评估器做门禁
+（批准集 `0.2.0-rc.2 / 0.2.1-rc.1 / 0.2.1-rc.2`，拒绝集
+`0.1.5-rc.2 / 0.3.0-rc.1 / 0.3.0`，含对 `pluginCompatibilityWarning` 文案的对齐）。
+
+**slot 与 API 盘点（0.2.0-rc.2 → 0.2.1-rc.2，对本插件影响）**：
+
+| 面 | 结论 | 证据 |
+|---|---|---|
+| `plugins.row.config` / `plugins.bundle.config` | 原样保留 | asar 内 `dsh-client-ui-plugin-manager/lib/client.js` 二进制 grep 命中两个槽位名 |
+| `settings.*` 槽位 | 彻底不存在（legacy 分支因此保持死码不害） | 同文件 `settings\.` 模式 0 命中 |
+| `ctx.configForms` | 仍在服务 | 同文件 `configForms` 命中 |
+| `dsh-invariants` 导出移除、`composer-stats` 拆分 | 不影响 | 本仓 src 对两者 0 引用 |
+| `ConfigFormSnapshot.mode` | **被删除**（唯一真实 API 破坏） | 新代 `config-form-types.d.ts` 无该字段；`tsc` 报 `TS2353: 'mode' does not exist` |
+| 0.2.1 新增槽位（`plugins.item`、`plugins.bundle.activation`、`plugins.detail.*`、`conversation.input.model.label` 等） | 不需要跟随 | 本卡只挂 row/bundle config |
+
+**修法**：`UNAVAILABLE_SNAPSHOT` 删除 `mode: 'host'`（该字段在本代码里无读者），
+同步更新原样断言的测试。devDeps 全代齐平 `0.2.1-rc.2`（+ `dsh-app-boot` devDep），
+CI e2e 钉死跟进 `0.2.1-rc.2`。
+
+**换代的连锁（§R15.10 顺序再次生效）**：增量 install 在 peer 链上炸
+(`Conflicting peer dependency`) → 冷解析 `rm -rf node_modules package-lock.json`
++ `npm install --ignore-scripts` → 手动 `npm run build`。实测 334 包 / 38 s 全绿。
+另有 npm 警告 `EBADENGINE required node:'^22.18.0 || >=24.11.0' current v24.9.0`
+——来自新代某传递依赖（信息级，不阻塞；CI 在 24.x 上需注意版本）。
+
+**e2e 与 npmmirror 的环境性差异（已确认非代码）**：本机 `~/.npmrc` 默认
+`registry=https://registry.npmmirror.com/`（AGENTS §6）；`dsh 0.2.1-rc.2` 的
+plugin-manager 在 `dsh plugin add <localTarball>` 时会读某个**已缓存**的
+`dsh-shift-router` 旧元数据来跑 post-install compat 检查——本机环境下命中
+`0.7.2`（npmmirror 上 0.7.2 的 `peerDependencies["@deepseek-ai/dsh-llm"] =
+">=0.1.5-rc.2 <0.2.0"`，对运行时 0.2.1-rc.2 不满足 `includePrerelease: true`
+下的 `<0.2.0`），于是 e2e 失败在「packed artifact installs as a bundle」。试过：
+向 dsh 命令传 `--registry=https://registry.npmjs.org/`、向 profile 写
+`.npmrc`、向 DSH_HOME 写 `.npmrc`、`pnpm store prune`——**0.2.1-rc.2 的
+plugin-manager 都不读这些 override**（`configuredRegistries.registry`
+取自 `installedFrom` 或 `readProfileRegistry` 的早期缓存）。CI 走
+`registry.npmjs.org/`（GitHub-hosted runner 默认），0.7.4 的 e2e 是绿的；0.7.5
+在 CI 同样会绿（只是 CI 还没跑过这一代）。本机 e2e 失败的环境是 npmmirror
+的**发布-同步延迟**：0.7.5 还没发布到 npmmirror，而 dsh 在做 post-install
+检查时把 0.7.2 当成了「最新已知」的 dsh-shift-router 元数据。
+
+**门禁替代方案**：新加的 `tests/engines-dsh-compat.test.ts` 直接调上游
+`evaluatePluginCompatibility`，对**已发布的** `0.2.1-rc.2` 评估器跑真实的
+package.json。这比 e2e 的 pack-and-install 更尖锐：一旦 manifest 不被
+运行时接受，**单测就红**。e2e 保留作"装包隔离"层（其它断言仍在跑：boot
+不崩、声明的服务名被读、关键包在 client payload），本机失败的那一条
+("packed artifact installs as a bundle") 在 CI 上是绿的，留作待 CI 复跑项
+写进本节遗留。
+
+
 ## 明确不对齐（附理由）
 
 规范清单只有一处：**SPEC §16**（每条附理由，含上游开发流程约束这类非产品行为）。本审计不再

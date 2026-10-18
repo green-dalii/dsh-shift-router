@@ -36,7 +36,6 @@ export const UNAVAILABLE_SNAPSHOT: ConfigFormSnapshot<unknown> = {
   user: undefined,
   value: undefined,
   revision: undefined,
-  mode: 'host',
 }
 
 /**
