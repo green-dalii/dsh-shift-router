@@ -112,6 +112,17 @@
     "prepare": "tsc --noCheck && tsc -p tsconfig.client.json --noCheck && tsdown",
     "prepublishOnly": "npm run typecheck && npm test"
   },
+  "overrides": {
+    "vite": {
+      "rollup": "4.64.0"
+    },
+    "vitest": {
+      "rollup": "4.64.0"
+    },
+    "tsdown": {
+      "rollup": "4.64.0"
+    }
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
