@@ -1,0 +1,64 @@
+# dsh-shift-router — publish to npm
+#
+# Publishing is a tag event, not a laptop command: npm's Trusted Publisher for
+# this repository names THIS file (`publish.yml`), so the registry verifies the
+# workflow's OIDC identity instead of accepting a long-lived token. Nothing here
+# holds an npm secret — `id-token: write` is the whole credential.
+#
+# Rules this workflow keeps:
+#   - the published artifact is the one CI gated: it re-runs typecheck, build
+#     and tests before `npm publish`, on the same Node line as the release gate;
+#   - the tag must equal `package.json`'s version, so a bad tag cannot publish
+#     a version whose docs and CHANGELOG describe something else;
+#   - provenance is attached (`--provenance`), which needs the public repo and
+#     the same OIDC permission.
+#
+# Trigger: push a `v*` tag (`git tag v0.8.0 && git push origin v0.8.0`), or run
+# the workflow by hand from Actions after checking the version.
+
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish (npmjs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          pkg="v$(node -p "require('./package.json').version")"
+          if [ "$pkg" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json ${pkg}" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # No NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC identity for a
+      # short-lived publish credential. A token in the environment would take
+      # precedence and defeat the trusted-publisher binding.
+      - run: npm publish --provenance --access public
