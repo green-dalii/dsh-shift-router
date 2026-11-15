@@ -1,11 +1,16 @@
 # dsh-shift-router × pi-shift-router 上游对齐审计
 
-> **本文件是审计与理由记录**：上游 `pi-shift-router`（HEAD `69ffb34` / v1.6.0）自本项目派生点以来
-> 新增或修正的内容里，哪些必须对齐、哪些必须换成 DSH 等价物、哪些明确不对齐，以及每一轮的证据与
-> 残余不确定性。**规范契约在 [`SPEC.md`](SPEC.md)，状态与历史在 [`ROADMAP.md`](ROADMAP.md)** ——
-> 同一件事不在这里再写一遍。
+> **本文件是审计与理由记录**：上游 `pi-shift-router`（从 v1.6.0 审计到 v1.9.0 `98a6a88`）自本项目
+> 派生点以来新增或修正的内容里，哪些必须对齐、哪些必须换成 DSH 等价物、哪些明确不对齐，以及每一轮
+> 的证据与残余不确定性。**规范契约在 [`SPEC.md`](SPEC.md)，状态与历史在 [`ROADMAP.md`](ROADMAP.md)**
+> —— 同一件事不在这里再写一遍。
 
 ## 修订记录
+
+**R16（上游 v1.7.1–v1.9.0 同步，2026-11-15，本轮）** — 上游 v1.9.0 的编排修复与 DSH 的异步
+子代理模型撞在同一个缺陷上：启动收据被计为完成。本轮改为阻塞式 `delegate` 工具（单轮不变）、
+门槛兼读 Judge 裁决、预算默认 6 并迁移旧默认 3、补打包门禁。详见下方「R16」一节；未移植清单
+在该节 R16.4。
 
 **R3（安装验证轮：一次真实的 P0 热修，已交付）** — 维护者按推荐路径把本插件装进真实 `web`
 profile 后 **DSH 无法启动**：
@@ -1237,6 +1242,148 @@ package.json。这比 e2e 的 pack-and-install 更尖锐：一旦 manifest 不�
 ("packed artifact installs as a bundle") 在 CI 上是绿的，留作待 CI 复跑项
 写进本节遗留。
 
+
+## R16：上游 v1.7.1–v1.9.0 —— 异步委派的记账缺口（2026-11-15）
+
+**触发。** 上游于 2026-11-13 发布 v1.9.0（`98a6a88`，功能提交 `07c3d4b`）。本项目的对齐目标原为
+v1.7.0，因此 v1.7.1 / v1.7.2 / v1.8.0 / v1.9.0 四版需要逐项判定。审计材料：上游 tag、CHANGELOG、
+SPEC、源码 diff 与测试；下游源码；本机宿主 `0.2.1-rc.5` 的 `asar` 内 `dsh-tool-subagent` /
+`dsh-subagent` 契约；devDependency 生成 `0.2.1-rc.2` 的公开类型。
+
+### R16.1 结论：真正要同步的是 v1.9.0 的编排正确性
+
+v1.7.1 的 OpenCode 归属头与 pi-tui peer 机制是 pi 加载器专属，DSH 无对应物。v1.7.2 修的是 pi
+`ModelRegistry.refresh()` 的 4.3 秒阻塞，DSH 的 `modelCatalog()` 根本不刷新，问题不存在。
+v1.8.0 的 classifier 层依赖 pi 的 `registry.classify()`，`dsh-llm` 没有 classifier 概念，
+不可移植；其中 `orchestrate` 传递与 TypeSafe `/v1` 两个修复，DSH 在 R12 已自行覆盖。
+
+**v1.9.0 不同：它修的是"异步子代理的启动收据被当成完成"，而 DSH 的子代理比 pi 更异步。**
+DSH 的 `subagent` 工具调用立即返回 `started subagent <name>`，真正的完成信号是另一条
+`source.kind === 'subagent-settled'` 的用户消息，带 `stopReason` 与 `senderSessionId`；服务层
+`ctx.subagents.startActivation()` 返回的 `result` 才在子代理静默后 settle。
+
+### R16.2 缺陷证据（实测）
+
+| 位置 | 事实 |
+|---|---|
+| `dsh-tool-subagent`（rc.2 与 rc.5） | 工具结果固定为 `started subagent <id>`；README 明写 "It does not wait for the child's result" |
+| `src/index.ts`（R15 前） | `tools/result` 对任何 `subagent` 结果执行 `done += 1`、把收据文本写进 `workerResults`、按 `result.isError` 记成功 |
+| `src/audit.ts` | `complete = done >= spawned`，因此审计恒判"每个 worker 都回报了" |
+| `src/index.ts` | 轮末 `exitOrchestration()`；下一轮 `agent/pre-step` 清扫泄漏状态。迟到完成既不入账本，也不进审计 |
+| `src/orchestrate.ts`（R15 前） | prompt 要求 `run_in_background: false` 并用 `job_output` 收结果；DSH 的 `subagent` 没有这两个参数 |
+
+与上游 #57 同型：**启动收据被计为完成**。上游的实测数字是 152/157 次编排报告"无委派"、4/5 报
+$0；DSH 的形状不同（收据被计为成功、审计恒真），后果同样错误。
+
+### R16.3 决策
+
+1. **编排改用插件自带的阻塞 `delegate` 工具（P0）。**
+   - 通过 `ctx.subagents.startActivation({ delivery: 'caller' })` 启动子代理，`await activation.result` 拿到
+     `output` / `stopReason` 后才返回工具结果。
+   - 兼容两代服务签名：rc.2 读 `request.prompt` / `request.parent` / `request.agentOptions`，rc.5 读
+     顶层 `prompt` / `parent` / `agentOptions`；一个 spec 同时携带两组字段。见 `src/delegate.ts`。
+   - 编排仍是**单轮**（SPEC §7.3）：工具在轮内等待，所以状态、预算、审计都在同一轮内闭环。
+   - 编排期间 `subagent` 工具被 `tools/pre-execute` 拒绝，防止绕过记账。
+   - 编排门槛由"存在 `subagent` 工具"改为"存在 `delegate` 工具"；没有子代理服务的组合直接退化为
+     一次普通 Smart 运行，不再承诺无法兑现的审查。
+2. **门槛同时读 Judge 裁决（P1）。** 上游 43/164 次编排的 `judge=fast`；DSH 的 `processRoute` 在
+   "保持原位"时返回 `decisionTier: state.currentTier`，同型误触发。新判据：必须运行在 Smart，且
+   （Judge 裁决为 Smart 或 Judge 明确 `orchestrate: true`）。保留 DSH 原有的"不能把 CTO 注入
+   Fast 运行"约束。
+3. **预算默认 3 → 6，范围 0–20，旧默认迁移（P1）。** 上游 v1.9.0 的语义是"一轮 = 一个 worker +
+   检查它的 review"；DSH 的 CTO 自己 review，因此一个 `delegate` 调用就是一轮。旧值 3 在加载时
+   抬到 6 并记一行日志；其他值不动。DSH 保留 0 作为历史"不委派"状态（上游是 1–20），这是唯一
+   的刻意分歧。
+4. **打包门禁补两条（P2）。** `dependencies` 不得出现 `@deepseek-ai/*`（宿主包只能 peer）；删除
+   `packaged-install.test.ts` 里那条 `|| true` 恒真断言。
+5. **lockfile 可移植性（P2，待办）。** 下游 `package-lock.json` 的 334 条 `resolved` 全指向
+   `registry.npmmirror.com`；上游 #64 的 `EALLOWREMOTE` 失败模式同样适用。修法是
+   `npm install --package-lock-only --registry=https://registry.npmjs.org/`，本轮未执行。
+
+### R16.4 明确不移植
+
+| 上游项 | 理由 |
+|---|---|
+| OpenCode `x-opencode-session` 归属头 | DSH 的 LLM seam 由宿主适配器负责，没有 session 头概念 |
+| pi classifier 层与 53 个 decision 模型 | DSH `dsh-llm` 没有 `classify` / classifier 目录 |
+| 向导不 await registry refresh / 立即刷新入口 | DSH 的 `modelCatalog()` 不做网络 refresh |
+| `subagent` 的 `action` 管理调用 | DSH 的 `subagent` 没有 `action` 参数，管理是独立工具 |
+| pi-tui 降 peer / lazy import 禁令 | pi 的 jiti + host alias 加载器专属；DSH 用 Cordis + tsdown |
+| `async: false`、命名 `reviewer` | DSH 没有该参数与角色；DSH 用阻塞 `delegate` + CTO 自审 |
+| 上游 receipt 文本 `Async: ... detached` | DSH 收据文本是 `started subagent <name>`；完成是 `subagent-settled` |
+
+### R16.5 effort control（#44/#45/#46）
+
+纯文档：SPEC §9.5 自述 "designed, not implemented"，三个 commit 对上游 `src/` 零改动。DSH 侧
+`ReasoningEffortId` 在插件源码出现 0 次；宿主三层都具备该 seam（`agent/request` 的
+`reasoningEffort`、`resolveModelInfo().reasoning.efforts`、`subagent` 的 `reasoning_effort`）。
+本轮不实现，记录为后续独立事项（ROADMAP Planned）。
+
+### R16.6 残余不确定性
+
+- 完整评估与逐项矩阵：`research/2026-11-15-upstream-sync-v1.9.0.md`（tracked，不随 npm 发布）。
+- 本轮未能在本机跑 e2e：宿主没有可执行的 `dsh` CLI（gate 如实失败，不跳过）。
+- rc.2 的双形状 spec 只做了类型与代码层核对，未在 rc.2 运行时实测。
+- `agentOptions` 的 worker 路由仍以宿主 `subagent-model-selection-settings` 白名单为前置；白名单
+  关闭时 worker 继承 Smart（与 R12 的结论一致），`/router status` 会如实说明。
+- 真实编排轮（`delegate` → 子代理 → 审查）未在本机 desktop profile 实机跑过；单元测试覆盖了
+  工具注册、守卫、结果映射与双形状 spec，端到端仍待下一次安装验证。
+
+---
+
+## R17：DSH 0.2.2 —— 步骤内的模型选择被冻结（2026-11-15）
+
+**触发。** 0.8.0 发布前的 e2e 用 `@deepseek-ai/dsh@0.2.2-rc.2` 跑，三条路由断言全挂，宿主报
+`UNKNOWN`，turn 无任何输出。临时 CLI 装在仓库外的临时目录，宿主 App 与 `~/.dsh` 未参与。
+
+### R17.1 结论：0.2.2 起没有"按轮换模型"的钩子
+
+从 `0.2.2-alpha.2` 起，`@deepseek-ai/dsh-agent-loop` 在派发 `agent/pre-step` **之前**就快照本步的
+provider/model，并在 `agent/request` 阶段拒绝任何改动：
+
+```
+agent "<id>": agent/request proposed "<p>/<m>" after step preparation fixed "<p>/<m>";
+use agent.model.select() before step preparation
+```
+
+`agent.model.select()` 写入的是会话选择状态，**只对下一步生效**；而"turn 开始前"没有任何插件钩子。
+本插件的按轮路由（SPEC §7）依赖 `agent/request` 覆写 wire model，因此在该代上没有载体。
+
+### R17.2 证据
+
+| 项 | 事实 |
+|---|---|
+| 引入版本 | `0.2.2-alpha.2` 的 `dsh-agent-loop/lib/index.js` 已含该守卫；`0.2.1-rc.5` 不含 |
+| 当前版本 | `0.2.2-rc.2`、`0.2.2-rc.3` 代码一致（逐行对比 `lib/index.js:1013`） |
+| 官方定位 | `docs/architecture.md:114`：`agent/request` 已 deprecated，"adjusts controls without changing the provider, model, or effort selection" |
+| 时序 | `packages/core/agent-loop/src/agent.ts:296-303`：`model.current()` 在 `agent/pre-step` 之前 |
+| 生效范围 | `packages/core/agent-loop/README.zh.md:93`：记录的选择"从下一个步骤开始生效" |
+| 事件面 | 只有 `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/turn-stopping`、`agent/status`、`agent/inbox/*`；无 turn 开始前钩子 |
+| 实测 | `DSH_BIN=…/@deepseek-ai/dsh@0.2.2-rc.2 npm run test:e2e` → 三条路由断言全部失败 |
+
+### R17.3 试过的修法（失败，已回滚）
+
+思路：pre-step 里 `select()` 目标路由 → 把 `payload.messages` 重新入队 → `reject` 本轮，让下一轮用
+新路由开步。
+
+实测：会话日志（`session.v4.jsonl.zstd`）只有 1 组 `turn/start` / `turn/end`，**没有 `user/message`**；
+CLI 退出码 1、无输出。原因在 `packages/core/agent-loop/src/agent.ts:235-246`：`wakeDriver()` 只对
+`maintenance` 或 abort 的 driver 锁存唤醒，运行中的 driver 丢弃这次 wake，重入队的消息无人领取。
+该试验已回滚，工作区回到 0.8.0 的内容。
+
+### R17.4 决策
+
+1. **`engines.dsh` 收到 `>=0.2.0-rc.2 <0.2.2-alpha.2`。** 让不兼容宿主在安装时拒绝，而不是装上去后
+   每一轮路由都失败。门禁 `tests/engines-dsh-compat.test.ts` 的放行/拒绝集合已同步。
+2. **文档写清原因**：README 双语、SPEC §12.1.1、CHANGELOG 0.8.0 的 Known limitations。
+3. **不采用** reject + 重入队的 hack，也不做会话级降级：前者依赖未公开的唤醒语义，后者会删掉产品的
+   核心能力。等上游提供 turn 开始前的选择钩子（例如 inbox claim 之后、快照之前的 waterfall）再适配。
+
+### R17.5 残余不确定性
+
+- `0.2.1-rc.5` 的 e2e 在发布前跑过一次（记录见 ROADMAP）；更早的 0.2.1 预发布未逐一验证。
+- 只对比了 `dsh-agent-loop` 的关键行，没有逐包对比 rc.2 与 rc.3。
+- 上游是否把 0.2.2 的冻结视为永久设计，未获确认；需要 issue 追踪。
 
 ## 明确不对齐（附理由）
 

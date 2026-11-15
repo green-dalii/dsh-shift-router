@@ -104,15 +104,31 @@ describe('shouldOrchestrate', () => {
   const fast = { decisionTier: 'fast' as const, held: false }
   const held = { decisionTier: 'smart' as const, held: true }
 
-  it('requires auto mode, a smart DECISION, and the subagent tool', () => {
+  it('requires auto mode, a smart DECISION, and the delegate tool', () => {
     const cfg = makeConfig()
     expect(shouldOrchestrate(cfg, smart, true)).toBe(true)
     expect(shouldOrchestrate(cfg, fast, true)).toBe(false)
-    expect(shouldOrchestrate(cfg, smart, false)).toBe(false) // no subagent tool
+    expect(shouldOrchestrate(cfg, smart, false)).toBe(false) // no delegate tool
     cfg.orchestration.mode = 'off'
     expect(shouldOrchestrate(cfg, smart, true)).toBe(false)
     cfg.enabled = false
     expect(shouldOrchestrate(cfg, smart, true)).toBe(false)
+  })
+
+  it('requires the Judge verdict, unless the Judge explicitly asks for it', () => {
+    const cfg = makeConfig()
+    // Staying on Smart after a Fast verdict is not evidence of a complex task.
+    const fastVerdictStayingSmart = { decisionTier: 'smart' as const, held: false, judgeTier: 'fast' as const }
+    expect(shouldOrchestrate(cfg, fastVerdictStayingSmart, true)).toBe(false)
+    // The Judge's explicit ask is the only override.
+    expect(shouldOrchestrate(cfg, fastVerdictStayingSmart, true, true)).toBe(true)
+    // A Smart verdict still orchestrates.
+    const smartVerdict = { decisionTier: 'smart' as const, held: false, judgeTier: 'smart' as const }
+    expect(shouldOrchestrate(cfg, smartVerdict, true)).toBe(true)
+    // Older callers without a verdict keep the previous decision-tier behaviour.
+    expect(shouldOrchestrate(cfg, smart, true)).toBe(true)
+    // A verdict-level veto still wins over the override.
+    expect(shouldOrchestrate(cfg, smartVerdict, true, false)).toBe(false)
   })
 
   it('never orchestrates on a hold — "keep position" is not evidence of complexity', () => {

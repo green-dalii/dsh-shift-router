@@ -409,6 +409,11 @@ export interface OrchestrationState {
 }
 
 /** Default configuration */
+/** Default orchestration budget. One round is one worker plus the review of it. */
+export const DEFAULT_ORCHESTRATION_MAX_ROUNDS = 6
+/** The v1.0.0-era default. A config that still carries it is migrated on load. */
+export const LEGACY_ORCHESTRATION_MAX_ROUNDS = 3
+
 export const DEFAULT_CONFIG: ShiftRouterConfig = {
   enabled: true,
   tiers: {
@@ -446,7 +451,7 @@ export const DEFAULT_CONFIG: ShiftRouterConfig = {
   },
   orchestration: {
     mode: 'auto',
-    maxRounds: 3,
+    maxRounds: DEFAULT_ORCHESTRATION_MAX_ROUNDS,
     escalationThreshold: 2,
     maxSpendUsd: 0,
     workerLedgerCap: 20,

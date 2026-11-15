@@ -64,6 +64,7 @@ interface PromptCapture {
 function harnessContext(
   extra: Record<string, unknown> = {},
   llm: Record<string, unknown> = {},
+  tools: Record<string, unknown> = {},
 ): { ctx: Context; prompt: PromptCapture } {
   const ctx = new Context()
   const prompt: PromptCapture = { sections: [], variables: [] }
@@ -74,7 +75,7 @@ function harnessContext(
     stream: async function* stream() {},
     ...llm,
   })
-  ctx.provide('tools', { get: () => undefined })
+  ctx.provide('tools', { get: () => undefined, register: () => () => undefined, ...tools })
   ctx.provide('commands', { register: () => () => undefined })
   ctx.provide('agents', { get: () => undefined })
   ctx.provide('systemPrompt', {
@@ -87,7 +88,9 @@ function harnessContext(
       return () => undefined
     },
   })
-  for (const [name, value] of Object.entries(extra)) ctx.provide(name, value)
+  for (const [name, value] of Object.entries(extra)) {
+    if (name !== 'tools') ctx.provide(name, value)
+  }
   return { ctx, prompt }
 }
 
@@ -113,6 +116,65 @@ describe('plugin load against a real Cordis context', () => {
     const { ctx } = harnessContext()
     await expect(ctx.plugin(plugin, autoConfig())).resolves.toBeDefined()
     ctx.provide('subagentModelSelection', { current: () => ({ enabled: false, allowedModels: [] }) })
+  })
+
+  it('registers the blocking delegate tool when the subagent service is mounted', async () => {
+    const register = vi.fn(() => () => undefined)
+    const { ctx } = harnessContext({
+      subagents: {
+        startActivation: async () => ({
+          childId: 'child',
+          result: Promise.resolve({ output: [], stopReason: 'completed' }),
+          dispose: async () => undefined,
+        }),
+      },
+    }, {}, { register })
+    await ctx.plugin(plugin, autoConfig())
+    expect(register).toHaveBeenCalledTimes(1)
+    expect(register.mock.calls[0]?.[0]).toMatchObject({ name: 'delegate' })
+  })
+
+  it('the delegate tool rejects calls outside an orchestrated turn', async () => {
+    const register = vi.fn(() => () => undefined)
+    const { ctx } = harnessContext({
+      subagents: {
+        startActivation: async () => ({
+          childId: 'child',
+          result: Promise.resolve({ output: [], stopReason: 'completed' }),
+          dispose: async () => undefined,
+        }),
+      },
+    }, {}, { register })
+    await ctx.plugin(plugin, autoConfig())
+    const definition = register.mock.calls[0]?.[0] as { execute(args: unknown, exec: unknown): Promise<unknown> }
+    const agent = { session: { header: { origin: 'user', delegationDepth: 0 } } }
+    const exec = { agent, signal: new AbortController().signal }
+    await expect(definition.execute({ prompt: 'x' }, exec)).rejects.toThrow('only during an orchestrated turn')
+  })
+
+  it('the delegate tool rejects a worker session as the caller', async () => {
+    const register = vi.fn(() => () => undefined)
+    const { ctx } = harnessContext({
+      subagents: {
+        startActivation: async () => ({
+          childId: 'child',
+          result: Promise.resolve({ output: [], stopReason: 'completed' }),
+          dispose: async () => undefined,
+        }),
+      },
+    }, {}, { register })
+    await ctx.plugin(plugin, autoConfig())
+    const definition = register.mock.calls[0]?.[0] as { execute(args: unknown, exec: unknown): Promise<unknown> }
+    const agent = { session: { header: { origin: 'subagent', delegationDepth: 1 } } }
+    const exec = { agent, signal: new AbortController().signal }
+    await expect(definition.execute({ prompt: 'x' }, exec)).rejects.toThrow('worker sessions cannot delegate')
+  })
+
+  it('does not register the delegate tool without the subagent service', async () => {
+    const register = vi.fn(() => () => undefined)
+    const { ctx } = harnessContext({}, {}, { register })
+    await ctx.plugin(plugin, autoConfig())
+    expect(register).not.toHaveBeenCalled()
   })
 
   it('warns once when orchestration is on and delegation is not model-selectable (SPEC §7.4)', async () => {

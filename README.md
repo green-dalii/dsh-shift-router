@@ -15,10 +15,10 @@ the table in [ROADMAP.md § Upstream alignment](ROADMAP.md#upstream-alignment), 
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
-[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2%20%E2%86%92%200.2.1--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2%20%E2%86%92%200.2.1--rc.5-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-443%20passing-brightgreen)](#development)
-[![Coverage](https://img.shields.io/badge/coverage-83.69%25%20lines-green)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-459%20passing-brightgreen)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-82.14%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -41,7 +41,7 @@ Before every turn of a top-level agent, a small **LLM Judge** (running on your F
 - **Pluggable Judge** — the verdict comes from the Fast chain by default; `routing.judge.mode` can point it at a dedicated Judge chain (`custom`) or at a **decision model** (`decision` — the TypeSafe Jev / System One class, Beta), which answers with a typed choice and a probability instead of prose, so there is no reply-parsing step and no malformed-reply failure class. Measured against the live endpoint on this deployment: correct, **1.4–5.7 s per verdict** (the 15 s floor is real — the 5 s default would have aborted it), and the tier came back fully decided on 4 of 4 prompts, so treat it as a **hard classifier** rather than a graded one; only the orchestration signal is graded (0.10–0.83). Every configured source falls back to the Fast chain when it is unusable, and **with no Judge at all the router stops routing**: the turn runs on your own selected model, orchestration is cleared, and the session is told once.
 - **Cache-aware routing** — when Fast and Smart share a provider, the decision bar is divided by `sameFamilyPenalty` (default 1.5) and downgrades are held off while the prompt cache is warm, so switching to a cheaper model never costs more than staying put.
 - **Runtime failover** — 429 / 402 / 5xx / quota / usage-limit / unsupported-model failures put the model into exponential-backoff cooldown (1m → 4m → 16m → 1h04m → 4h16m → 6h cap; client-side limits start at 16m) and re-resolve the same tier to the next healthy model — same-turn retry, never cross-tier.
-- **Task-level orchestration** — complex tasks run the Smart tier as a **CTO** that plans, delegates implementation to Fast engineer subagents via the harness's `subagent` tool, reviews each result, and iterates. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, consecutive worker failures count an escalation, and once a cap is hit the `subagent` tool is denied outright and the system prompt switches to a "wrap up now" notice.
+- **Task-level orchestration** — complex tasks run the Smart tier as a **CTO** that plans, delegates implementation to Fast workers through the plugin's `delegate` tool and **waits for the real result**, reviews each one, and iterates. `delegate` calls the harness subagent service and awaits the activation, so review is grounded; the harness's native `subagent` tool returns a launch receipt immediately and is denied while orchestrating. The hard caps are **enforced by the plugin**, not just prompted: each delegation counts a round, consecutive worker failures count an escalation, and once a cap is hit the `delegate` tool is denied outright and the system prompt switches to a "wrap up now" notice.
 - **Cost telemetry** — per-tier token tracking and an optional USD pricing table (`/router status` shows "what this session would have cost on the Smart model").
 - **Visible when it acts** — a tier or model switch is written into the transcript as a `[shift-router] Fast → Smart · …` notice (the harness has no status-bar seat for plugins), so an enabled router is never silently invisible. Set `ux.routerLogVerbose` to get one notice per judged turn, not just per switch.
 - **Zero-config startup** — a no-op until you configure tiers; then routing just works. Configuration is editable live via the GUI settings panel **and** `/router config` commands (persisted, no restart).
@@ -74,7 +74,7 @@ Prebuilt as well, and the option to reach for when a registry is not available.
 ### From git
 
 ```sh
-dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.7.0
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.8.0
 ```
 
 A git install fetches **source, not artifacts**, so the package's `prepare`
@@ -88,7 +88,7 @@ allowBuilds:
 ```
 
 > This authorizes the package's code to execute on your machine at install time,
-> outside the agent sandbox. Pin a tag or commit (`…#v0.7.0`, `…#<sha>`) so a
+> outside the agent sandbox. Pin a tag or commit (`…#v0.8.0`, `…#<sha>`) so a
 > later push cannot change what you actually run.
 
 ### From a local checkout (development)
@@ -162,8 +162,8 @@ and which models can take images.
 | `routing.cacheAware.idleBoundaryMs` | `300000` | Idle gap before a warm cache is considered cold |
 | `routing.cacheAware.sameFamilyThreshold` | *(unset)* | **Legacy** sentinel. The pre-EV default `0.9` is inert; a different value implies `sameFamilyPenalty = 3.0` |
 | `orchestration.mode` | `auto` | `auto`: complex → Smart CTO; `off`: plain two-tier routing |
-| `orchestration.maxRounds` | `3` | Delegate→review rounds hard cap (**enforced**: each subagent delegation counts one round; at the cap the subagent tool is denied) |
-| `orchestration.escalationThreshold` | `2` | **Consecutive** worker failures that count as one escalation; a successful worker result resets the streak. At the cap Smart must take over and the subagent tool is denied (**enforced**) |
+| `orchestration.maxRounds` | `6` | Delegate→review rounds hard cap (**enforced**: each `delegate` call counts one round at dispatch; at the cap the `delegate` tool is denied). Accepted range 0–20; the legacy default 3 migrates to 6 on load |
+| `orchestration.escalationThreshold` | `2` | **Consecutive** worker failures that count as one escalation; a successful worker result resets the streak. At the cap Smart must take over and the `delegate` tool is denied (**enforced**) |
 | `orchestration.maxSpendUsd` | `0` | Hard budget for one orchestrated task, in USD; `0` disables it. It is part of `capHit`, so reaching it denies further delegation. Needs a `pricing` entry to be meaningful — with no pricing the spend is legitimately 0 |
 | `orchestration.workerLedgerCap` | `20` | Per-worker cost rows kept for the status report (oldest dropped). The task total is authoritative and unaffected |
 | `orchestration.audit.enabled` | `true` | After a run that actually delegated, audit the acceptance claim: every worker reported, a CTO summary exists, and (one small Fast-tier call) the claim is grounded in the worker results |
@@ -191,7 +191,8 @@ The package ships a browser-side (client) module that registers a **"Shift-Route
 
 - **Where (DSH 0.2.0-rc.2+)**: the sidebar **Plugins** page → the `dsh-shift-router` card → the `shift-router` row → its configure control. The full form also sits on the bundle's own page, so either route reaches it. The card registers into `plugins.row.config` (keyed `dsh-shift-router#shift-router`) and `plugins.bundle.config` (keyed `dsh-shift-router`), both declared by the official `dsh-client-ui-plugin-manager` (unchanged through 0.2.1-rc.2); the settings transport is `ctx.configForms`.
 - **Where (up to 0.1.5-rc.x)**: Settings → Built-in plugins → the configurable tab, where the card occupies the keyed `settings.plugin.item` cell (`key: 'shift-router'`) and the transport is `ctx.settingsScope`. Each generation declares exactly one of the three slots, so the registrations for the other generation stay inert.
-- **Supported DSH range**: `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`. Since 0.2.1 that field alone decides compatibility (`engines.dsh` wins and `peerDependencies` no longer gate); the unit gate runs the upstream evaluator itself, see `tests/engines-dsh-compat.test.ts`.
+- **Supported DSH range**: `engines.dsh = ">=0.2.0-rc.2 <0.2.2-alpha.2"`. Since 0.2.1 that field alone decides compatibility (`engines.dsh` wins and `peerDependencies` no longer gate); the unit gate runs the upstream evaluator itself, see `tests/engines-dsh-compat.test.ts`.
+- **DSH 0.2.2 is rejected on purpose.** That generation snapshots a step's provider/model before `agent/pre-step` runs and rejects a later change in `agent/request`, so per-turn routing has no hook to switch through. The ceiling keeps an incompatible host from installing the bundle and failing every routed turn; the full diagnosis is ALIGNMENT §R17.
 - **What**: a form over every scalar leaf field (booleans, numbers, enums) **plus the model chains** (both tiers, and a dedicated Judge chain), grouped into seven sections (General / Models / Routing / Orchestration / Failover / Telemetry / Logs & UX) with sub-groups for the routing section (Judge / Judge source / Decision window / Cache-aware). A control appears only while it is relevant — choosing a Judge source reveals that source's own settings and hides the rest — and no dropdown shows a raw config token. Scalar fields use the compact settings-row pattern — label + hint on the left, control right-aligned on the same line — so each field is one tight row instead of three stacked lines. Controls use the host-plane design tokens: toggle switches (contrast-safe in light and dark themes), a styled select for enums, unit suffixes inside numeric inputs (`ms`, `tokens`, `0–1`, …), and an ordered row editor for model chains — the row order is the in-tier fallback order, so the first available model wins and the rest are its fallbacks. The provider/model dropdowns are auto-loaded from **DSH's runtime model catalog** (`llm.models` — the same catalog the DSH settings surface reads): only providers with a currently advertised model list appear, no dormant-directory noise, and nothing is hardcoded, so the card works with any deployment's configured models. A "Custom…" escape covers values outside the catalog. Staged saving, per-field reset to default, and override markers work exactly like the official cards.
 - **Boundary**: only `pricing` (the optional USD cost table) stays with `/router config` and the profile patch; the model chains — both tiers and the Judge's — are editable in the card.
 - **Build**: `npm run build` emits both the host artifact (`dist/index.js`) and the client bundle (`dist/client.js`). The client module is discovered through the `dsh.client` manifest by `dsh-client-modules`, which requires the plugin to be mounted **by package name (`dsh-shift-router`)** — a source-checkout patch (`name: '/path/dist/index.js'`) does not serve the card.
@@ -245,27 +246,39 @@ The mechanism-by-mechanism mapping is normative and lives in
 Turn-level routing decides *which model* runs a turn; task-level orchestration decides *how a complex
 task is executed*. When the Judge says `smart` and `orchestration.mode` is `auto` (the default), the
 router hands the turn to the Smart tier as a **CTO**: it plans, delegates implementation to Fast
-workers through the harness's `subagent` tool, reviews each result and iterates — then an independent
-acceptance audit checks the claim. A `fast` verdict never triggers any of this.
+workers through the plugin's `delegate` tool, waits for each real result, reviews it, and iterates —
+then an independent acceptance audit checks the claim. A `fast` verdict never triggers any of this.
+
+### Why `delegate`, not `subagent`
+
+The harness `subagent` tool is **asynchronous**: it returns `started subagent <name>` immediately and
+delivers the worker's real output later as a `subagent-settled` message. An orchestration loop must
+review a worker before deciding the next step, so the plugin registers its own `delegate` tool: it
+calls the subagent service, waits on the activation's `result`, and returns the worker's final output
+as the tool result. While orchestrating, `tools/pre-execute` denies `subagent` so the accounting
+cannot be bypassed.
 
 ### How an orchestrated turn runs
 
-1. **Enter** — the decision tier is Smart, the `subagent` tool is present and the mode is `auto`; the
-   orchestrator instruction is injected as a system-prompt section (SPEC §7.2).
-2. **Delegate** — the CTO calls `subagent`; each call is one round, counted at **dispatch** (a
-   dispatched delegation has already spent budget, so this keeps `maxRounds` a true ceiling).
-3. **Review and iterate** — a failed worker advances the failure streak, and the convergence protocol
-   requires every re-delegation to carry a structured `## Failure report` (what failed, where, which
-   acceptance test re-checks it); repeating the same feedback triggers takeover (SPEC §7.2.1).
-4. **Stop** — at the cap the `subagent` tool is **denied** at `tools/pre-execute` and the prompt
+1. **Enter** — the decision tier is Smart **and the Judge's own verdict is `smart` (or it explicitly
+   answered `orchestrate: true`)**; the `delegate` tool is present and the mode is `auto`; the
+   orchestrator instruction is injected as a system-prompt section (SPEC §7.1, §7.2).
+2. **Delegate** — the CTO calls `delegate`, which waits for the worker inside the turn; each call is
+   one round, counted at **dispatch** (a dispatched delegation has already spent budget, so this
+   keeps `maxRounds` a true ceiling).
+3. **Review and iterate** — a worker that ends with a non-`completed` stop reason comes back as a
+   tool error and advances the failure streak, and the convergence protocol requires every
+   re-delegation to carry a structured `## Failure report` (what failed, where, which acceptance test
+   re-checks it); repeating the same feedback triggers takeover (SPEC §7.2.1).
+4. **Stop** — at the cap the `delegate` tool is **denied** at `tools/pre-execute` and the prompt
    section becomes a wrap-up notice; `agent/turn-stopping` releases the state. Orchestration is
-   single-turn: nothing spans turns, and a leaked run is swept at the next turn's start.
+   single-turn: the tool waits inside the turn, and a leaked run is swept at the next turn's start.
 
 ### Hard caps (enforced, not prompted)
 
 | Setting | Default | Effect |
 |---|---|---|
-| `orchestration.maxRounds` | 3 | delegations per task |
+| `orchestration.maxRounds` | 6 | delegations per task (0–20; `0` is the historical "no delegation" state) |
 | `orchestration.escalationThreshold` | 2 | **consecutive** worker failures before the Smart agent takes that phase over itself |
 | `orchestration.maxSpendUsd` | 0 (no guard) | stop delegating at a USD budget, priced from the `pricing` table |
 | `orchestration.workerLedgerCap` | 20 | per-worker cost rows kept for display |
@@ -283,27 +296,28 @@ turn: the LLM half runs detached and its verdict appears as `Last audit:` in `/r
 Upstream calls the per-worker model pin **mandatory**: a worker that inherits the parent's model runs
 on Smart mid-orchestration, which collapses the economics. In DSH that pin sits behind the harness's
 own allowlist (`subagent-model-selection-settings`, default **off**). `/router allow-workers` writes the Fast
-chain into it for you; when it is not authorised the router says so in a `Worker delegation:` line
-rather than pretending otherwise (SPEC §7.4).
+chain into it for you; when the allowlist is enabled, `delegate` picks a healthy Fast route for the
+worker's `agentOptions`; when it is not, the worker inherits the CTO's model and the router says so in
+a `Worker delegation:` line (SPEC §7.4).
 
 ### How to tell it happened
 
 `/router status` shows `🪄 active (round x/y, esc a/b, fail streak n)`, then
-`Orchestration spend: $X · N/M workers reported` once workers report, and `Last audit: …` after the
+`Orchestration spend: $X · N/M workers reported` once workers settle, and `Last audit: …` after the
 audit settles. Entry also writes a route notice into the transcript (SPEC §13.1), so the shape of the
 turn is visible without reading counters.
 
 ### When it does not engage
 
-A `fast` verdict; `orchestration.mode: off` (or `/router orchestrate off`); the `subagent` tool absent
-from the composition; or no Smart model resolvable — in which case the turn simply runs on Smart,
-with no delegation and no audit.
+A `fast` verdict; `orchestration.mode: off` (or `/router orchestrate off`); the `delegate` tool absent
+from the composition (for example, no subagent service); or no Smart model resolvable — in which case
+the turn simply runs on Smart, with no delegation and no audit.
 
 ## Development
 
 ```sh
 npm run build       # tsc (host → dist/) + tsc client + tsdown (client bundle → dist/client.js)
-npm test            # vitest (429 tests across 24 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
+npm test            # vitest (459 tests across 26 files: EV routing / failover signatures / judge parsing + prompt contract / judge sources + the availability ladder + the decision protocol / orchestration + blocking delegate / config schema + migration / telemetry / route notices / release wiring / config registries + GUI form model + card UX + model catalog / packaged-install contract)
 npm run typecheck
 ```
 

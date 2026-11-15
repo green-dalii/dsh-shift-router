@@ -8,7 +8,8 @@
 
 import z from '@deepseek-ai/schemastery'
 import { describe, expect, it } from 'vitest'
-import { Config, supportsVolatile } from '../src/config.js'
+import { Config, migrateLegacyOrchestrationDefaults, supportsVolatile } from '../src/config.js'
+import type { ShiftRouterConfig } from '../src/types.js'
 import { readConfig } from './config-ref.js'
 
 type StandardResult =
@@ -47,8 +48,23 @@ describe('Config schema', () => {
     expect(cfg.tiers.fast).toMatchObject({ label: '', models: [] })
     expect(cfg.tiers.smart).toMatchObject({ label: '', models: [] })
     expect(cfg.ux).toMatchObject({ routerLogVerbose: false })
-    expect(cfg.orchestration).toMatchObject({ mode: 'auto', maxRounds: 3, escalationThreshold: 2 })
+    expect(cfg.orchestration).toMatchObject({ mode: 'auto', maxRounds: 6, escalationThreshold: 2 })
     expect(cfg.pricing).toEqual([])
+  })
+
+  it('migrates only the legacy default round budget', () => {
+    const cfg = (validate({}) as { value: ShiftRouterConfig }).value
+    cfg.orchestration.maxRounds = 3
+    expect(migrateLegacyOrchestrationDefaults(cfg)).toBe(true)
+    expect(cfg.orchestration.maxRounds).toBe(6)
+
+    cfg.orchestration.maxRounds = 5
+    expect(migrateLegacyOrchestrationDefaults(cfg)).toBe(false)
+    expect(cfg.orchestration.maxRounds).toBe(5)
+
+    cfg.orchestration.maxRounds = 0
+    expect(migrateLegacyOrchestrationDefaults(cfg)).toBe(false)
+    expect(cfg.orchestration.maxRounds).toBe(0)
   })
 
   it('resolves a partial nested config with leaf defaults', () => {
@@ -104,6 +120,7 @@ describe('Config schema', () => {
       { routing: { cacheAware: { sameFamilyThreshold: 2 } } },
       { tiers: { fast: { models: [{ provider: 'p', model: 'm', priority: -1 }] } } },
       { orchestration: { maxRounds: -1 } },
+      { orchestration: { maxRounds: 21 } },
       { orchestration: { escalationThreshold: 0 } },
       { failover: { baseMs: 0 } },
       { telemetry: { callLogCap: 1 } },
@@ -122,6 +139,7 @@ describe('Config schema', () => {
       { routing: { economics: { reworkPenalty: 1, downgradeMemory: 1, mode: 'sport' } } },
       { routing: { cacheAware: { sameFamilyPenalty: 1 } } },
       { orchestration: { maxRounds: 0 } },
+      { orchestration: { maxRounds: 20 } },
       { orchestration: { escalationThreshold: 1 } },
       { telemetry: { callLogCap: 10 } },
       { failover: { baseMs: 100, startAttempts4xx: 1 } },

@@ -29,6 +29,10 @@ export default defineConfig({
         'src/client/ShiftRouterCard.tsx',
         'src/client/legacy-scope.ts',
         'src/client/legacy-slot.ts',
+        // Type-only seam for `ctx.subagents`: interfaces plus a `declare
+        // module` augmentation. The compiler emits a bare `export {}`, so v8
+        // scores it 0/0 and reports 0% — a number no test can move.
+        'src/subagents-types.ts',
       ],
       thresholds: {
         // Floor over all shipping source: pinned at today's measurement so it

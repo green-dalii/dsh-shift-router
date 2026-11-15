@@ -12,14 +12,17 @@ v1.7.0 while this project's own releases continued in parallel.
 
 - **Port baseline**: upstream **v1.0.0** (2026-08-14) — the commit date of this
   project's first commit, matching upstream's task-level-orchestration release.
-- **Alignment target**: upstream **v1.7.0** (`932675d`, 2026-09-23) — pluggable
-  Judge sources, the decision (Jev) Judge, and the judge availability ladder.
-- **Aligned through**: upstream **v1.6.0** (`4d1b546`, 2026-09-18) for the P0
-  (correctness) + P1 (decision core) scope plus the P2 round — **shipped in
-  v0.6.0** — and the **v1.7.0** round (R12) — **shipped in v0.7.0**. What remains is the GUI (card-button) form of
-  worker-route authorisation, the v1.6.0 pricing single-source work, and a
-  real-machine check of `mode: 'decision'` (see Planned). The delivery audit is
-  in [`ALIGNMENT.md`](ALIGNMENT.md).
+- **Alignment target**: upstream **v1.9.0** (`98a6a88`, 2026-11-13) — the
+  asynchronous-delegation accounting fixes on top of v1.7.0's pluggable Judge
+  sources and decision Judge.
+- **Aligned through**: upstream **v1.9.0** for the product scope audited in
+  R16 — **delivered in v0.8.0**. The v1.6.0 P0/P1
+  + P2 work shipped in v0.6.0, and the v1.7.0 round (R12) shipped in v0.7.0.
+  Not portable: pi's classifier layer, OpenCode attribution headers, wizard
+  catalog refresh, `pi-tui` packaging rules (ALIGNMENT §R16.4). Still open: the
+  GUI (card-button) form of worker-route authorisation, the v1.6.0 pricing
+  single-source work, and a real-machine check of `mode: 'decision'` — see
+  Planned. The delivery audit is in [`ALIGNMENT.md`](ALIGNMENT.md).
 - The full audit, including what was deliberately **not** ported and why, lives
   in [`ALIGNMENT.md`](ALIGNMENT.md); the normative contract is
   [`SPEC.md`](SPEC.md).
@@ -42,6 +45,10 @@ v1.7.0 while this project's own releases continued in parallel.
 | v1.5.1 | verbose logs to a file | ⛔ not needed (DSH does not hand the terminal to plugins); diagnostics use `ctx.logger` (now supplemented by route notices — see R9) |
 | v1.6.0 | model catalog from the host registry (single source of truth) | ✅ principle shipped in v0.6.0 (GUI card dropdowns — R7); the DSH-side pricing replacement is ⏳ P3 |
 | v1.7.0 | pluggable Judge sources (`fast-chain`/`custom`/`decision` + `normalizeJudgeMode()`), a decision model (Jev / System One class) as Judge, and the judge availability ladder ending in **no routing at all** | ✅ R12 (see below; audit in [`ALIGNMENT.md`](ALIGNMENT.md) §R12) — `mode: 'decision'` is implemented and unit-tested but not yet verified against a live endpoint |
+| v1.7.1 | session-attribution headers for direct provider calls; `pi-tui` becomes a peer; host-package packaging gate | ⛔ headers and loader rules are pi-specific. The host-package rule is adopted in DSH form (R16: no `@deepseek-ai/*` in `dependencies`) |
+| v1.7.2 | config wizard no longer awaits `ModelRegistry.refresh()`; explicit catalog refresh row | ⛔ no equivalent (DSH's `modelCatalog()` does not refresh). The "do not block the UI on catalog I/O" lesson is recorded in R16.4 |
+| v1.8.0 | decision Judges run through pi's classifier layer; judge `orchestrate` reaches the verdict; TypeSafe `/v1` 404 fix; 53-model catalog | ⛔ classifier layer and catalog (no `classify` in `dsh-llm`); ✅ `orchestrate` and `/v1` already covered in R12/R13 |
+| v1.9.0 | **delegation you can trust**: launch receipt ≠ completion, background settlement ingestion, round budget 3→6, gate on the verdict, audit treats in-flight workers as deferred, prompt rewrite | ✅ R16 (see below; audit in [`ALIGNMENT.md`](ALIGNMENT.md) §R16) — DSH form: blocking `delegate` tool, verdict gate, budget 6 with legacy migration, packaging gate. Single-turn orchestration preserved |
 
 ## Released
 
@@ -59,6 +66,7 @@ v1.7.0 while this project's own releases continued in parallel.
 | v0.7.4 | **Crash guard for the volatile schema.** `supportsVolatile()` probes the library's prototype instead of assuming 3.18.4, so a carrier whose schemastery lacks `.volatile()` (the 0.1.5-rc.2 CLI generation ships 3.18.2) can no longer fail the whole plugin tree during module evaluation — 0.7.3 did, and no unit test or `tsc` could see it. CI's e2e now installs the declared baseline carrier (`0.2.0-rc.2`). 439 tests / 24 files; coverage 83.69% lines | ✅ |
 | v0.7.3 | **The configuration page actually appears on 0.2.0-rc.2.** Two independent root causes fixed: the deleted `settings.plugin.item` slot (the card now registers into `plugins.row.config` / `plugins.bundle.config` on the sidebar Plugins page, and keeps the historical cell for ≤0.1.5-rc.x), and the desktop profile's disabled bundle. Plus the Host half's migration to loader-entry-id namespaces with a volatile-rooted `Config` and the `configForms` transport, and the `subagent-model-selection-settings` rename. Every `@deepseek-ai` devDependency moved to the target runtime. 436 tests / 24 files; coverage 83.76% lines; verified end to end against a real 0.2.0-rc.2 composition (ALIGNMENT §R15.6) | ✅ |
 | v0.7.5 | **DSH 0.2.1-rc.2 alignment.** The desktop carrier moved to 0.2.1-rc.2 (2026-10-17), which makes `engines.dsh` the sole compatibility check (when present) and removes `ConfigFormSnapshot.mode`. This release declares `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"` so the un-audited 0.3.0 generation is rejected by the ceiling, and the `ConfigFormSnapshot` literal drops `mode`. A new `tests/engines-dsh-compat.test.ts` calls the actual upstream `evaluatePluginCompatibility` against the admitted (`0.2.0-rc.2`, `0.2.1-rc.1`, `0.2.1-rc.2`) and rejected (`0.1.5-rc.2`, `0.3.0-rc.1`, `0.3.0`) runtimes; every `@deepseek-ai` devDependency moves to the `0.2.1-rc.2` generation; CI's e2e pin follows. 443 tests / 25 files; coverage ≈ the 0.7.4 line (ALIGNMENT §R15.11) | ✅ |
+| v0.8.0 | **Upstream v1.9.0 alignment + blocking delegation.** A launch receipt is no longer scored as a completed worker: a new blocking `delegate` tool waits on `startActivation()`'s `result`, `subagent` is denied while orchestrating, the orchestration gate now requires the Judge's own `orchestrate` verdict, the round budget defaults to 6 with a legacy 3→6 migration, and the packaging gate rejects host packages in `dependencies`. The compatibility ceiling moves to `<0.2.2-alpha.2`: 0.2.2 freezes the step's provider/model before `agent/pre-step` (ALIGNMENT §R17). 459 tests / 26 files; coverage 82.14% lines | ✅ |
 
 ## Installation verification round (delivered)
 
@@ -171,6 +179,26 @@ what we deliberately do differently from upstream — is in
 | The card renders what the controller publishes (`publishedFields`) — the seam where a unit-tested projection and the actual DOM disagreed until a browser run caught it | ✅ R13 (`ALIGNMENT.md` §R13.3) |
 | Live verification of the decision protocol against TypeSafe, with the measurements that make the timeout floor and the Beta posture concrete | ✅ R13 (`ALIGNMENT.md` §R13.5) |
 
+## R16 round — upstream v1.7.1–v1.9.0 (delivered, unreleased)
+
+The upstream v1.9.0 release matches a real defect in this port: the Harness
+`subagent` tool returns a launch receipt immediately, so counting its tool
+result as a completed worker made the acceptance audit vacuous. DSH's subagent
+is *more* asynchronous than pi's, so the upstream receipt-text check does not
+transfer; the fix is a plugin-owned blocking `delegate` tool that waits on the
+service's `result` promise (SPEC §7.6).
+
+| Item | Status |
+|---|---|
+| Blocking `delegate` tool over `ctx.subagents.startActivation()` (dual rc.2/rc.5 spec) | ✅ `src/delegate.ts`; registered only when the subagent service is mounted |
+| Receipt no longer counted as completion; `subagent` denied during orchestration | ✅ `tools/pre-execute` + `tools/result` |
+| Orchestration gate reads the Judge verdict, not only the running tier | ✅ `shouldOrchestrate` (hybrid: Smart run + Smart verdict or explicit `orchestrate: true`) |
+| Round budget default 3 → 6, range 0–20, legacy default migration | ✅ `types.ts` / `config.ts`; migration logs once |
+| Packaging gate: no host package in `dependencies`; remove the tautological assertion | ✅ `tests/packaged-install.test.ts` |
+| Tests | 459 passing / 26 files (was 443 / 25); coverage 82.14% lines; `delegate.ts` 100% statements/lines |
+| e2e / live orchestration / rc.2 runtime | ⏳ not run (no `dsh` CLI on the maintainer machine this round; recorded in ALIGNMENT §R16.6) |
+| lockfile portability (334 mirror URLs) | ⏳ Planned (P2) |
+
 ## Planned
 
 | Feature | Priority | Notes |
@@ -178,6 +206,13 @@ what we deliberately do differently from upstream — is in
 | Orchestration acceptance audit, convergence protocol, per-worker cost attribution | ~~P2~~ | ✅ delivered in the P2 round (see that section) |
 | GUI-assisted worker route authorisation (`subagent-model-selection`) | P2 | DSH-specific; the command form shipped as `/router allow-workers`, the card-button form is open (see `ALIGNMENT.md` C4) |
 | Cross-turn orchestration lifecycle / parallel specialised workers | P3 | upstream is still Phase 3 (not implemented there either) |
+| Real-machine orchestration check (blocking `delegate` → worker → review → audit) | P2 | unit-tested; e2e now runs against `0.2.1-rc.5` (ALIGNMENT §R16.6, §R17.5) |
+| DSH 0.2.2 carrier support (per-turn model selection) | P1 | blocked upstream: the 0.2.2 loop snapshots the step selection before `agent/pre-step` and rejects `agent/request` provider/model changes, with no pre-turn hook (ALIGNMENT §R17). Needs an upstream waterfall before the snapshot, then a plugin port |
+| Upstream report: pre-turn model-selection hook | P1 | file against `deepseek-harness` with the R17 evidence; the source checkout is at `/Users/greener/project/dsh-research/deepseek-harness` |
+| `package-lock.json` resolved URLs → official registry | P2 | 334/334 point at `registry.npmmirror.com`; upstream #64's `EALLOWREMOTE` failure mode applies (ALIGNMENT §R16.3) |
+| `/router config` list-model timeout | P3 | `commands.ts` awaits each provider's `listModels` with no bound; DSH has no registry refresh, but adapter round-trips can still be slow |
+| Static reasoning-effort pinning (upstream SPEC §9.5, designed only) | P3 | upstream has not implemented it; DSH host seam exists (`reasoningEffort` on `agent/request`); needs a schema + card + capability filter |
+| SPEC route-notice source drift (`kind: 'plugin'` vs implemented `'model-selection'`) | P3 | documentation-only; found during R16 |
 | Tool-result classification as a Judge input signal | P3 | upstream: TBD |
 | GUI: `pricing` list-of-record editor | P3 | needs list-of-record form support |
 | ~~GUI: catalog live refresh on owner events~~ | ~~P3~~ | ✅ delivered (R7): the card re-reads `ctx.remote.session.modelCatalog()` on `llm/adapters-updated`, `settings/document-updated`, `credentials/reference-updated` and `connection/reset` — the row claiming "loads once" was stale |
@@ -202,6 +237,24 @@ to be re-proposed: a **plugin-side throughput indicator** — DSH renders `tok/s
 natively from decode time, so porting it would duplicate the harness with a worse
 number.
 
+## Super-agent research (tracking only)
+
+The official article *Exploring Super-agent Design* and its prototype are tracked
+in GitHub issues; none of this is on the release path. The assessment concluded:
+do not fork the prototype, do not fold the event plane into this plugin; validate
+with a code-free bundle first.
+
+| Issue | Direction |
+|---|---|
+| [#9](https://github.com/green-dalii/dsh-shift-router/issues/9) | Roadmap overview and validation order |
+| [#3](https://github.com/green-dalii/dsh-shift-router/issues/3) | D: two-week code-free bundle validation |
+| [#2](https://github.com/green-dalii/dsh-shift-router/issues/2) | A: isolated prototype trial and API-drift audit |
+| [#8](https://github.com/green-dalii/dsh-shift-router/issues/8) | E: `dsh-supervisor` event plane + ticket lifecycle |
+| [#4](https://github.com/green-dalii/dsh-shift-router/issues/4) | Fix `engines.dsh` prerelease range |
+| [#5](https://github.com/green-dalii/dsh-shift-router/issues/5) | `routing.excludePresets` |
+| [#6](https://github.com/green-dalii/dsh-shift-router/issues/6) | Worker preset / subagent route pinning |
+| [#7](https://github.com/green-dalii/dsh-shift-router/issues/7) | Orchestration stall detector (Watchdog-lite) |
+
 ## Documentation index
 
 - [SPEC.md](SPEC.md) — the normative contract for this project
@@ -210,4 +263,5 @@ number.
 - [README.zh-CN.md](README.zh-CN.md) — user-facing docs (zh)
 - [CHANGELOG.md](CHANGELOG.md) — per-version change log
 - [CONTRIBUTING.md](CONTRIBUTING.md) — DSH dev loop, build, and E2E notes
+- [research/](research/) — background research notes (tracked, **not** shipped): the 2026-10-31 Super-agent assessment and the 2026-11-15 upstream v1.9.0 sync audit
 - [pi-shift-router ROADMAP](../pi-shift-router/ROADMAP.md) — the upstream roadmap

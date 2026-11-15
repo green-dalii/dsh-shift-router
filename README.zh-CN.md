@@ -13,10 +13,10 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-shift-router?logo=npm)](https://www.npmjs.com/package/dsh-shift-router)
-[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2%20%E2%86%92%200.2.1--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.2%20%E2%86%92%200.2.1--rc.5-blue)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-443%20passing-brightgreen)](#开发)
-[![Coverage](https://img.shields.io/badge/coverage-83.69%25%20lines-green)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-459%20passing-brightgreen)](#开发)
+[![Coverage](https://img.shields.io/badge/coverage-82.14%25%20lines-green)](.github/workflows/ci.yml)
 [![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
 
 </div>
@@ -39,7 +39,7 @@
 - **可插拔的裁判来源** —— 判定默认来自 Fast 链；`routing.judge.mode` 可以把它指向一条专用裁判链（`custom`），或指向**决策模型**（`decision` —— TypeSafe Jev / System One 这一类，Beta）：它返回的是带类型的选项与概率而不是散文，因此没有回复解析步骤，也不存在"回复格式坏了"这一类失败。本部署对真实端点的实测：协议正确、**每次判定 1.4–5.7 秒**（15 秒下限是实测需要——5 秒默认值会把其中两次直接掐断），且 4 个 prompt 的档位判定全部是**完全确定**的结果，所以请把它当作**硬分类器**而不是细腻的连续判断；只有编排信号是连续的（0.10–0.83）。任何已配置的来源不可用时都会回落 Fast 链；而**完全没有裁判时路由器就停止路由**——本轮改用你自己选定的模型、编排被清除，且每个会话只提示一次。
 - **缓存感知路由** —— 当 Fast 与 Smart 共享同一 provider 时，决策门槛会除以 `sameFamilyPenalty`（默认 1.5），并在 prompt 缓存仍热时抑制降级，避免切到便宜模型反而更贵。
 - **运行时故障转移** —— 429 / 402 / 5xx / 配额 / 用量上限 / 模型下线 等失败会把模型置入指数退避冷却（1m → 4m → 16m → 1h04m → 4h16m，上限 6h；客户端侧限流从 16m 起步），并在同一层内重新解析到下一个健康模型——同一轮内重试，绝不跨层。
-- **任务级编排** —— 复杂任务会让 Smart 层担任 **CTO**：规划、通过 harness 的 `subagent` 工具把实现委派给 Fast 层工程师子代理、逐个审查结果并迭代。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、**连续**工作代理失败计一次升级，一旦触顶 `subagent` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
+- **任务级编排** —— 复杂任务会让 Smart 层担任 **CTO**：规划、通过插件的 `delegate` 工具把实现委派给 Fast 层 worker 并**等待真实结果**、逐个审查并迭代。`delegate` 走 harness 的 subagent 服务并等待 activation 结束，所以审查有据可依；harness 原生的 `subagent` 工具立即返回启动收据，编排期间会被拒绝。硬上限由**插件强制执行**而非仅靠提示词：每次委派计一轮、**连续** worker 失败计一次升级，一旦触顶 `delegate` 工具会被直接拒绝、系统提示词切换为"立即收尾"通知。
 - **成本遥测** —— 按层统计 token，可选的 USD 计价表（`/router status` 会显示"本次会话若全程使用 Smart 模型将花费多少"）。**吞吐速率不在此列**：DSH 原生已在消息页脚与 trajectory 面板显示 `tok/s`，且按解码时间计算，口径更准。
 - **动作可见** —— 切换档位或模型时会往对话里写一条 `[shift-router] Fast → Smart · …` 通知（harness 没有给插件预留状态栏座位），所以插件启用后不会"静默地什么都没发生"。把 `ux.routerLogVerbose` 打开，则每一轮判定都会有一条通知，而不只是切换时。
 - **零配置启动** —— 未配置分层前完全无操作；配置完成后路由立即生效。配置可通过 GUI 设置面板 **和** `/router config` 命令实时编辑（持久化，无需重启）。
@@ -68,7 +68,7 @@ dsh plugin --profile web add ./dsh-shift-router-0.7.0.tgz
 ### 从 git 安装
 
 ```sh
-dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.7.0
+dsh plugin --profile web add github:green-dalii/dsh-shift-router#v0.8.0
 ```
 
 git 安装拉到的是**源码而非构建产物**，因此由包的 `prepare` 脚本构建 `dist/`。pnpm ≥ 10 默认拒绝 git 依赖的 `prepare`——若第一次 `add` 失败，把 pnpm 打印的确切包键复制进 profile 的 `pnpm-workspace.yaml` 后重新执行：
@@ -78,7 +78,7 @@ allowBuilds:
   dsh-shift-router: true
 ```
 
-> 这等于允许该包的代码在安装时于你的机器上执行，且不在 agent 沙箱内。请锁定 tag 或 commit（`…#v0.7.0`、`…#<sha>`），避免后续 push 悄悄改变你实际运行的内容。
+> 这等于允许该包的代码在安装时于你的机器上执行，且不在 agent 沙箱内。请锁定 tag 或 commit（`…#v0.8.0`、`…#<sha>`），避免后续 push 悄悄改变你实际运行的内容。
 
 ### 从本地检出安装（开发用）
 
@@ -147,8 +147,8 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 | `routing.cacheAware.idleBoundaryMs` | `300000` | 热缓存被认为变冷前的空闲间隔 |
 | `routing.cacheAware.sameFamilyThreshold` | *(未设置)* | **遗留**哨兵。EV 之前的默认值 `0.9` 已失效；不同取值等价于 `sameFamilyPenalty = 3.0` |
 | `orchestration.mode` | `auto` | `auto`：复杂任务 → Smart CTO；`off`：仅普通双层路由 |
-| `orchestration.maxRounds` | `3` | 委派→审查轮次硬上限（**强制执行**：每次 subagent 委派计一轮；触顶后拒绝 subagent 工具） |
-| `orchestration.escalationThreshold` | `2` | **连续**工作代理失败计一次升级；工作代理成功会清零连击。达到上限后 Smart 必须亲自接管，且 subagent 工具被拒绝（**强制执行**） |
+| `orchestration.maxRounds` | `6` | 委派→审查轮次硬上限（**强制执行**：每次 `delegate` 委派计一轮，派发时计数；触顶后拒绝 `delegate` 工具）。允许 0–20；旧默认值 3 在加载时迁移为 6 |
+| `orchestration.escalationThreshold` | `2` | **连续** worker 失败计一次升级；worker 成功会清零连击。达到上限后 Smart 必须亲自接管，且 `delegate` 工具被拒绝（**强制执行**） |
 | `orchestration.maxSpendUsd` | `0` | 单个编排任务的硬预算（USD）；`0` 表示不启用。它是 `capHit` 的一部分，触顶即拒绝继续委派。需要 `pricing` 才有意义——未配置定价时花费合理地保持为 0 |
 | `orchestration.workerLedgerCap` | `20` | 状态报告保留的每 worker 成本行数（超出丢最旧）。任务总额是权威值、不受影响 |
 | `orchestration.audit.enabled` | `true` | 在一次**确实委派过**的运行结束后审计验收声明：每个 worker 是否都回报、是否存在 CTO 总结，以及（一次小的 Fast 档调用）声明是否有 worker 结果支撑 |
@@ -172,7 +172,8 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 - **位置（DSH 0.2.0-rc.2 及以后）**：左侧栏 **「插件」** 页 → `dsh-shift-router` 卡片 → `shift-router` 行 → 该行的「配置」按钮。完整表单同时出现在 bundle 自己的页面上，两条路径都能到。卡片注册进 `plugins.row.config`（键 `dsh-shift-router#shift-router`）与 `plugins.bundle.config`（键 `dsh-shift-router`），两者都由官方 `dsh-client-ui-plugin-manager` 声明（0.2.1-rc.2 仍原样保留）；设置传输用 `ctx.configForms`。
 - **位置（≤ 0.1.5-rc.x）**：设置 → 内置插件 → 可配置页；卡片占用 keyed 的 `settings.plugin.item` 单元格（`key: 'shift-router'`），传输用 `ctx.settingsScope`。每一代只声明三个槽位里的一个，所以面向另一代的注册保持静止。
-- **支持的 DSH 范围**：`engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`。0.2.1 起**该字段单独决定兼容性**（上游 `evaluatePluginCompatibility`：`engines.dsh` 声明后 peer 不再参与门禁）；单元门禁直接调用上游评估器，见 `tests/engines-dsh-compat.test.ts`。
+- **支持的 DSH 范围**：`engines.dsh = ">=0.2.0-rc.2 <0.2.2-alpha.2"`。0.2.1 起**该字段单独决定兼容性**（上游 `evaluatePluginCompatibility`：`engines.dsh` 声明后 peer 不再参与门禁）；单元门禁直接调用上游评估器，见 `tests/engines-dsh-compat.test.ts`。
+- **0.2.2 被刻意拒绝。** 该代在 `agent/pre-step` 之前就快照了本步的 provider/model，并在 `agent/request` 阶段禁止改动，按轮路由没有可用的切换钩子。上限的作用是让不兼容的宿主拒绝安装，而不是装上去后每一轮路由都失败；完整诊断见 ALIGNMENT §R17。
 - **能力**：以表单编辑全部**标量**叶子字段（开关、数字、枚举）**以及模型链**（两层，外加一条专用裁判链），分七个分组（通用 / 模型 / 路由 / 编排 / 故障转移 / 遥测 / 日志与体验），路由分组下再分子组（裁判 / 裁判来源 / 决策窗口 / 缓存感知）。控件只在与当前选择相关时出现——选定裁判来源就只显示该来源自己的设置，其余隐藏——且任何下拉都不会出现原始配置取值。标量字段采用紧凑的「设置行」版式——左侧标签 + 说明，右侧同行右对齐控件——每个字段只占一行，不再上下堆叠三层。控件全部使用宿主平面设计令牌：开关用拨动开关（浅色/深色主题下对比度都清晰）、枚举用带箭头的下拉、数字输入框内嵌单位后缀（`ms`、`tokens`、`0–1` 等）、模型链用有序行编辑器——**行的顺序就是层内回退顺序**：优先命中排在最前的可用模型，其余作为后备。**provider/model 下拉自动载入 DSH 运行时模型目录**（`llm.models`，与设置页模型目录同源）：只列出当前有模型清单的 provider，无休眠目录噪音，且插件不硬编码任何模型，跟随任何部署的 DSH 实际配置。另有「自定义…」入口填写目录之外的取值。分段保存、单字段恢复默认与覆盖标记与官方卡片完全一致。
 - **边界**：仅 `pricing`（可选的 USD 计价表）仍由 `/router config` 或 patch 行编辑；模型链——两层以及裁判那条——都可以在卡片中直接编辑。
 - **构建**：`npm run build` 会同时产出 host 产物（`dist/index.js`）与 client 产物（`dist/client.js`）。client 模块通过 `dsh.client` manifest 被 `dsh-client-modules` 扫描，**要求插件以包名（`dsh-shift-router`）挂载**——源码检出式 patch（`name: '/path/dist/index.js'`）不会提供卡片。
@@ -221,26 +222,34 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 轮次级路由决定**用哪个模型**跑这一轮；任务级编排决定**复杂任务怎么执行**。当裁判判定 `smart`
 且 `orchestration.mode` 为 `auto`（默认）时，路由器把这一轮交给 Smart 层担任 **CTO**：它制定计划、
-通过 harness 的 `subagent` 工具把实现委派给 Fast 层 worker、逐个审查结果并迭代——最后由一次独立的
-验收审计核对它的说法。`fast` 判定永远不会触发这些。
+用插件的 `delegate` 工具把实现委派给 Fast 层 worker 并等待真实结果、逐个审查并迭代——最后由一次
+独立的验收审计核对它的说法。`fast` 判定永远不会触发这些。
+
+### 为什么是 `delegate` 而不是 `subagent`
+
+Harness 原生的 `subagent` 工具是**异步**的：工具立即返回 `started subagent <name>`，worker 的
+真实结果稍后以一条 `subagent-settled` 消息到达。编排必须"先审查、再决定下一步"，所以插件事先
+注册自己的 `delegate` 工具：它调用 subagent 服务并等待 activation 的 `result`，把 worker 的最终
+输出直接作为工具结果返回。编排期间 `tools/pre-execute` 会拒绝 `subagent`，防止绕开记账。
 
 ### 一轮编排是怎么跑的
 
-1. **进入** —— 决策档位是 Smart、`subagent` 工具存在、模式为 `auto`；编排器指令以系统提示词段落
-   注入（SPEC §7.2）。
-2. **委派** —— CTO 调用 `subagent`；每次调用算一轮，且**在派发时**计数（派发出去的委派已经花掉了
-   预算，这样 `maxRounds` 才是真正的上限）。
-3. **审查与迭代** —— worker 失败会推进失败连击；收敛协议要求每次重派都携带结构化的
-   `## Failure report`（什么失败、在哪、用哪个验收测试复测），重复同一反馈即触发接管
-   （SPEC §7.2.1）。
-4. **停止** —— 触顶后 `tools/pre-execute` **直接拒绝** `subagent` 工具、提示词段落切换为「立即
-   收尾」；`agent/turn-stopping` 释放状态。编排是**单轮**的：不跨轮，泄漏的运行会在下一轮开始时清扫。
+1. **进入** —— 决策档位是 Smart，**且裁判自己的裁决是 smart（或明确回答 `orchestrate: true`）**；
+   `delegate` 工具存在、模式为 `auto`；编排器指令以系统提示词段落注入（SPEC §7.1、§7.2）。
+2. **委派** —— CTO 调用 `delegate`，工具在轮内等待 worker 完成；每次调用算一轮，且**在派发时**
+   计数（派发出去的委派已经花掉了预算，这样 `maxRounds` 才是真正的上限）。
+3. **审查与迭代** —— worker 以非 `completed` 结束时工具返回错误，推进失败连击；收敛协议要求每次
+   重派都携带结构化的 `## Failure report`（什么失败、在哪、用哪个验收测试复测），重复同一反馈即
+   触发接管（SPEC §7.2.1）。
+4. **停止** —— 触顶后 `tools/pre-execute` **直接拒绝** `delegate` 工具、提示词段落切换为「立即
+   收尾」；`agent/turn-stopping` 释放状态。编排是**单轮**的：工具在轮内等待，泄漏的运行会在下
+   一轮开始时清扫。
 
 ### 硬上限（由路由器强制执行，而非仅写在提示词里）
 
 | 设置 | 默认值 | 作用 |
 |---|---|---|
-| `orchestration.maxRounds` | 3 | 每个任务的委派轮数 |
+| `orchestration.maxRounds` | 6 | 每个任务的委派轮数（0–20；0 是历史的"不委派"状态） |
 | `orchestration.escalationThreshold` | 2 | **连续**多少轮 worker 失败后，Smart 层自己接管该阶段 |
 | `orchestration.maxSpendUsd` | 0（不设闸） | 达到 USD 预算即停止委派，按 `pricing` 表计价 |
 | `orchestration.workerLedgerCap` | 20 | 保留用于展示的每 worker 成本行数 |
@@ -256,25 +265,27 @@ Fast 与 Smart 模型（Fast 链默认同时充当裁判链）、什么样的模
 
 上游把「每 worker 的模型钉定」称为**强制**：worker 若继承父会话的模型，编排中途那已是 Smart，
 经济学前提直接崩塌。DSH 里这个钉定居于宿主持有的白名单之后（`subagent-model-selection-settings`，默认
-**关闭**）。`/router allow-workers` 帮你把 Fast 链写进去；未授权时路由器会在
-`Worker delegation:` 行里如实说明，而不是假装可以（SPEC §7.4）。
+**关闭**）。`/router allow-workers` 帮你把 Fast 链写进去；白名单开启时 `delegate` 会从 Fast 链
+挑一条健康路由作为 worker 的 `agentOptions`，未开启时 worker 继承 CTO 的模型，路由器会在
+`Worker delegation:` 行里如实说明（SPEC §7.4）。
 
 ### 怎么知道它发生了
 
-`/router status` 会显示 `🪄 active (round x/y, esc a/b, fail streak n)`，worker 回报后追加
+`/router status` 会显示 `🪄 active (round x/y, esc a/b, fail streak n)`，worker 完成后追加
 `Orchestration spend: $X · N/M workers reported`，审计结束后还有 `Last audit: …`。进入编排时还会
 往对话里写一条路由通知（SPEC §13.1），所以不必去读计数器也能看出这一轮的形态。
 
 ### 什么时候不触发
 
-`fast` 判定；`orchestration.mode: off`（或 `/router orchestrate off`）；组合里没有 `subagent`
-工具；或解析不到 Smart 模型——这些情况下这一轮就只是跑在 Smart 上，没有委派、也没有审计。
+`fast` 裁决；`orchestration.mode: off`（或 `/router orchestrate off`）；组合里没有 `delegate`
+工具（例如没有 subagent 服务）；或解析不到 Smart 模型——这些情况下这一轮就只是跑在 Smart 上，
+没有委派、也没有审计。
 
 ## 开发
 
 ```sh
 npm run build       # tsc（host → dist/）+ tsc client + tsdown（client bundle → dist/client.js）
-npm test            # vitest（24 个文件、429 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排 / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
+npm test            # vitest（26 个文件、459 个测试：EV 路由 / 故障转移签名 / 裁判解析与提示词契约 / 裁判来源与可用性阶梯与决策协议 / 编排与阻塞式 delegate / 配置 schema 与迁移 / 遥测 / 路由通知 / release 装配 / 配置注册表与 GUI 表单模型 + 卡片 UX + 模型目录 / 打包安装契约）
 npm run typecheck
 ```
 

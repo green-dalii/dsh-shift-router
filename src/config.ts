@@ -9,7 +9,12 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { DEFAULT_SAME_FAMILY_PENALTY, type ShiftRouterConfig } from './types.js'
+import {
+  DEFAULT_ORCHESTRATION_MAX_ROUNDS,
+  DEFAULT_SAME_FAMILY_PENALTY,
+  LEGACY_ORCHESTRATION_MAX_ROUNDS,
+  type ShiftRouterConfig,
+} from './types.js'
 
 /** Model reference: provider + model id + priority (lower wins). */
 export const ModelRefSchema = z.object({
@@ -103,7 +108,8 @@ const AuditSchema = z.object({
 
 const OrchestrationSchema = z.object({
   mode: z.union(['auto', 'off']).default('auto'),
-  maxRounds: z.natural().min(0).max(100).default(3),
+  // 0 keeps the legacy "no delegation" state; 20 is the upstream v1.9.0 ceiling.
+  maxRounds: z.natural().min(0).max(20).default(DEFAULT_ORCHESTRATION_MAX_ROUNDS),
   escalationThreshold: z.natural().min(1).max(100).default(2),
   // 0 = no budget guard (the default: a routing layer must not impose a
   // monetised cap unless the deployment asks for one).
@@ -158,6 +164,20 @@ function applyPartial(target: Record<string, unknown>, source: Record<string, un
       target[key] = value
     }
   }
+}
+
+/**
+ * Raise the v1.0.0-era default budget to the current default.
+ *
+ * A config saved by an older release (or by the GUI, which writes the whole
+ * merged snapshot) carries `maxRounds: 3` even when its owner never chose it.
+ * Upstream v1.9.0 raises exactly that value and leaves every other value alone.
+ * Mutates in place; returns true when it fired so the caller can log once.
+ */
+export function migrateLegacyOrchestrationDefaults(config: ShiftRouterConfig): boolean {
+  if (config.orchestration.maxRounds !== LEGACY_ORCHESTRATION_MAX_ROUNDS) return false
+  config.orchestration.maxRounds = DEFAULT_ORCHESTRATION_MAX_ROUNDS
+  return true
 }
 
 /**

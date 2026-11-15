@@ -48,13 +48,13 @@ import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-sessio
 // this import leaves `ctx.on` with no matching overload.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-tools'
-import type { ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition, ToolExecution, ToolExecutionResult, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 // Type-only: the credential seam (`ctx.credentials`) and its branded
 // reference. Never a runtime import — a deployment without the credentials
 // plugin must load this plugin exactly as before.
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
-import { Config, deepMergeConfig } from './config.js'
+import { Config, deepMergeConfig, migrateLegacyOrchestrationDefaults } from './config.js'
 import type { ShiftRouterConfig, RouterState, Tier, ResolvedModel, JudgeResult } from './types.js'
 import { DEFAULT_CONFIG, TIERS } from './types.js'
 import { findBestModelForTier, tierLabel } from './tier.js'
@@ -105,6 +105,17 @@ import {
   resetOrchestration,
   renderTierChain,
 } from './orchestrate.js'
+import {
+  DELEGATE_TOOL,
+  DELEGATE_DESCRIPTION,
+  DELEGATE_PARAMETERS,
+  DELEGATE_TIMEOUT_MS,
+  delegateFailureMessage,
+  delegateResultText,
+  delegateSucceeded,
+  isDelegateRejection,
+  startDelegate,
+} from './delegate.js'
 import { getModelPricing, estimateCost } from './stats.js'
 import {
   AUDITOR_SYSTEM_PROMPT,
@@ -228,6 +239,7 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   // field exists (mirrors pi's loadConfig merge). Volatile fields arrive as live
   // references, so read through them first.
   const config: ShiftRouterConfig = deepMergeConfig(DEFAULT_CONFIG, readProvidedConfig(rawConfig) ?? {})
+  migrateLegacyOrchestrationDefaults(config)
 
   // ── Effective config: cordis.yml entry + GUI settings overrides ──────
   // The loader/settings may hand us a DEEP-FROZEN config object, so commands
@@ -242,8 +254,20 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   // provider/model?" — checked once per config and cached. Declared before
   // the settings block because refreshConfig() clears it.
   const modelCache = new Map<string, boolean>()
+  let legacyRoundsReported = false
   const refreshConfig = (): void => {
-    effectiveConfig = structuredClone(configSource())
+    const next = structuredClone(configSource())
+    if (migrateLegacyOrchestrationDefaults(next) && !legacyRoundsReported) {
+      legacyRoundsReported = true
+      // One line, not per refresh: the GUI writes the whole merged snapshot, so
+      // a stored 3 is usually the old default rather than a decision.
+      ctx.logger.info(
+        '[shift-router] orchestration.maxRounds: %d → %d (legacy default, not a user choice) — change it in the card or /router config',
+        3,
+        next.orchestration.maxRounds,
+      )
+    }
+    effectiveConfig = next
     // Model availability is resolved against the harness's adapter registry;
     // a config change may point tiers at providers/models that weren't
     // resolvable before (or vice versa), so drop the memoized results.
@@ -598,11 +622,19 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
       ...(judgeResult.orchestrate !== undefined ? { orchestrate: judgeResult.orchestrate } : {}),
     }
 
-    // Task-level orchestration gates on the DECISION tier (post-EV, post-hold),
-    // never the raw verdict: reading the verdict is what used to inject the CTO
-    // prompt while a Fast model ran the turn.
-    const subagentAvailable = ctx.tools.get(SUBAGENT_TOOL) !== undefined
-    if (shouldOrchestrate(cfg, result, subagentAvailable, judgeResult.orchestrate)) {
+    // Task-level orchestration needs BOTH signals: the turn actually runs Smart
+    // (so the CTO prompt never lands on a Fast model) and the Judge's own
+    // verdict is complex (a Fast verdict that merely stayed on Smart is not
+    // evidence — upstream v1.9.0's 43/164 defect). A blocking delegate tool is
+    // the third precondition, because the Harness `subagent` tool returns before
+    // the worker result exists (SPEC §7.1, §7.6).
+    const delegateAvailable = ctx.tools.get(DELEGATE_TOOL) !== undefined
+    const orchestrationDecision = {
+      decisionTier: result.decisionTier,
+      held: result.held,
+      judgeTier: judgeResult.tier,
+    }
+    if (shouldOrchestrate(cfg, orchestrationDecision, delegateAvailable, judgeResult.orchestrate)) {
       // The prompt IS the task goal for the audit's goal-alignment check; it is
       // captured here because this is the moment the task starts.
       enterOrchestration(state, prompt)
@@ -869,17 +901,44 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   })
 
   // ── Orchestration hard caps (enforced, not just prompted) ──────────
-  // While an orchestration turn is active, the router counts each subagent
-  // delegation as one round and each failed worker result as one escalation.
-  // Once `capHit()` is true the subagent tool is denied outright and the
-  // system-prompt section switches to a "wrap up" notice.
+  // While an orchestration turn is active, the router counts each `delegate`
+  // call as one round and each failed worker result as one escalation. Once
+  // `capHit()` is true the delegate tool is denied outright and the system-prompt
+  // section switches to a "wrap up" notice. The asynchronous `subagent` tool is
+  // denied too, so a model cannot bypass the accounting with a launch receipt.
   ctx.on('tools/pre-execute', async (exec: ToolExecution, next): Promise<PreToolDecision> => {
+    if (exec.name === DELEGATE_TOOL) {
+      const agent = exec.agent
+      const state = agent ? stateFor(agent) : undefined
+      const cfg = getConfig()
+      if (!state?.orchestration.active || !cfg.enabled || cfg.routing.mode !== 'auto') {
+        return { kind: 'deny', reason: `${DELEGATE_TOOL}: available only during an orchestrated turn` }
+      }
+      if (capHit(state, cfg)) {
+        return {
+          kind: 'deny',
+          reason: `dsh-shift-router: ${capReason(state, cfg) ?? 'orchestration cap reached'} — stop delegating and wrap up the task now`,
+        }
+      }
+      state.orchestration.rounds += 1
+      state.orchestration.spawned += 1
+      vlog(`🪄 orchestration delegation ${state.orchestration.rounds}/${cfg.orchestration.maxRounds} (${DELEGATE_TOOL} call)`)
+      return next()
+    }
     if (exec.name !== SUBAGENT_TOOL) return next()
     const agent = exec.agent
     const state = agent ? stateFor(agent) : undefined
     if (!state?.orchestration.active) return next()
     const cfg = getConfig()
     if (!cfg.enabled || cfg.routing.mode !== 'auto') return next()
+    if (ctx.tools.get(DELEGATE_TOOL) !== undefined) {
+      // `subagent` returns before the worker finishes; accepting it here would
+      // bypass the accounting the delegate tool exists for.
+      return {
+        kind: 'deny',
+        reason: 'dsh-shift-router: use the delegate tool while orchestrating — subagent returns before the worker result exists',
+      }
+    }
     if (capHit(state, cfg)) {
       // One authority for the reason (capReason) so this deny and the prompt's
       // wrap-up notice can never disagree about which cap fired.
@@ -899,6 +958,26 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   })
 
   ctx.on('tools/result', (exec: ToolExecution, result: Readonly<ToolExecutionResult>): undefined => {
+    if (exec.name === DELEGATE_TOOL) {
+      const agent = exec.agent
+      const state = agent ? stateFor(agent) : undefined
+      if (!state?.orchestration.active) return undefined
+      const text = result.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+      // A denied call (cap, not-orchestrating) never counted a dispatch; it must
+      // not advance `done` or the failure streak.
+      if (result.isError && isDelegateRejection(text)) return undefined
+      const cfg = getConfig()
+      state.orchestration.done += 1
+      appendWorkerResult(state.orchestration.workerResults, text, cfg.orchestration.audit.promptCap)
+      recordWorkerOutcome(state, cfg, !result.isError)
+      vlog(
+        `🪄 worker ${result.isError ? 'failed' : 'succeeded'} — done ${state.orchestration.done}/${state.orchestration.spawned}`,
+      )
+      return undefined
+    }
     if (exec.name !== SUBAGENT_TOOL) return undefined
     const agent = exec.agent
     const state = agent ? stateFor(agent) : undefined
@@ -1069,13 +1148,13 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
       const state = stateFor(agent)
       if (!state?.orchestration.active) return ''
       const cfg = getConfig()
-      // The prompt must mirror the gates that enforce it: the `subagent` deny
+      // The prompt must mirror the gates that enforce it: the `delegate` deny
       // at `tools/pre-execute` only fires while routing is enabled and in auto
       // mode, so rendering the CTO instruction outside those conditions would
       // ask for delegation that nothing is capping.
       if (!cfg.enabled || cfg.routing.mode !== 'auto') return ''
       // Hard cap reached → replace the orchestrator instruction with a
-      // "wrap up now" notice (the subagent tool is denied at the same time).
+      // "wrap up now" notice (the delegate tool is denied at the same time).
       if (capHit(state, cfg)) return buildCapNotice(cfg)
       return buildOrchestratorPrompt(cfg, cooldownPredicate(state.modelCooldowns, Date.now()))
     },
@@ -1199,6 +1278,106 @@ export function apply(ctx: Context, rawConfig?: ProvidedConfig): void {
   }
   ctx.inject(['subagentModelSelection'], (sctx) => {
     checkWorkerModelSelection(readWorkerModelSelection(sctx))
+  })
+
+  // ── Blocking orchestration delegate (SPEC §7.6) ─────────────────────
+  // The Harness `subagent` tool starts an asynchronous activation and returns
+  // `started subagent <name>` immediately, so an orchestration loop that must
+  // review the worker cannot use it: the launch receipt would be counted as a
+  // completion (the upstream v1.9.0 defect). This tool calls the subagent
+  // service directly and waits for the activation's `result`, which keeps the
+  // orchestration turn single-turn and makes the accounting truthful.
+  //
+  // The service is an OPTIONAL dependency: a composition without it simply has
+  // no delegate tool, and `shouldOrchestrate` then leaves the CTO prompt off
+  // instead of promising reviews it cannot perform.
+  function delegateAgentOptions(agent: Agent, state: RouterState): { provider: string; model: string } | undefined {
+    const selection = readWorkerModelSelection(ctx)
+    if (selection === undefined || !selection.enabled) return undefined
+    const model = findBestModelForTier(
+      'fast',
+      getConfig(),
+      modelAvailable,
+      cooldownPredicate(state.modelCooldowns, Date.now()),
+    )
+    return model === null ? undefined : { provider: model.provider, model: model.modelId }
+  }
+
+  const buildDelegateTool = (service: Context['subagents']): ToolDefinition => ({
+    name: DELEGATE_TOOL,
+    description: DELEGATE_DESCRIPTION,
+    parameters: DELEGATE_PARAMETERS as unknown as ToolDefinition['parameters'],
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: String(value) }],
+    },
+    timeoutMs: DELEGATE_TIMEOUT_MS,
+    isConcurrencySafe: (args) => typeof (args as { prompt?: unknown }).prompt === 'string',
+    async execute(args, exec) {
+      const prompt = typeof (args as { prompt?: unknown }).prompt === 'string'
+        ? (args as { prompt: string }).prompt.trim()
+        : ''
+      if (prompt.length === 0) throw new Error(`${DELEGATE_TOOL}: "prompt" must be a non-empty string`)
+      const agent = exec.agent
+      if (agent === undefined) throw new Error(`${DELEGATE_TOOL}: no calling agent`)
+      if (!isRoutableAgent(agent)) throw new Error(`${DELEGATE_TOOL}: worker sessions cannot delegate`)
+      const state = stateFor(agent)
+      const cfg = getConfig()
+      if (!state?.orchestration.active || !cfg.enabled || cfg.orchestration.mode !== 'auto') {
+        throw new Error(`${DELEGATE_TOOL}: available only during an orchestrated turn`)
+      }
+      if (exec.signal.aborted) throw new Error(`${DELEGATE_TOOL}: cancelled before the worker started`)
+      const options = delegateAgentOptions(agent, state)
+      let activation: Awaited<ReturnType<typeof startDelegate>> | undefined
+      const onAbort = (): void => {
+        if (activation !== undefined) void activation.dispose().catch(() => undefined)
+      }
+      exec.signal.addEventListener('abort', onAbort, { once: true })
+      try {
+        activation = await startDelegate(service, {
+          parent: agent,
+          prompt,
+          signal: exec.signal,
+          ...(options !== undefined ? { agentOptions: options } : {}),
+        })
+        const result = await activation.result
+        if (!delegateSucceeded(result)) {
+          const text = delegateResultText(result)
+          throw new Error(`${delegateFailureMessage(result)}${text.length > 0 ? `\n\nWorker output:\n${text}` : ''}`)
+        }
+        return delegateResultText(result)
+      } catch (error) {
+        if (exec.signal.aborted) throw new Error(`${DELEGATE_TOOL}: cancelled`)
+        throw error instanceof Error ? error : new Error(String(error))
+      } finally {
+        exec.signal.removeEventListener('abort', onAbort)
+      }
+    },
+  })
+
+  ctx.inject(['subagents'], (sctx) => {
+    if (ctx.tools.get(DELEGATE_TOOL) !== undefined) {
+      ctx.logger.warn(
+        '[shift-router] another plugin already registers "%s" — orchestration stays off',
+        DELEGATE_TOOL,
+      )
+      return
+    }
+    const service = sctx.subagents
+    if (service === undefined || typeof service.startActivation !== 'function') return
+    // Register on the plugin context: the injected child only controls the
+    // service lifetime, while the tool must be visible to top-level agents.
+    // Loadability rule (§1.4): a failed optional registration degrades
+    // orchestration, it must never fail the plugin fiber.
+    let dispose: (() => void) | undefined
+    try {
+      dispose = ctx.tools.register(buildDelegateTool(service))
+    } catch (error) {
+      ctx.logger.warn('[shift-router] could not register the delegate tool: %s', String(error))
+      return
+    }
+    sctx.effect(() => () => dispose?.())
+    ctx.logger.info('[shift-router] orchestration delegate tool registered (%s)', DELEGATE_TOOL)
   })
 
   // ── Startup diagnostics ────────────────────────────────────────────

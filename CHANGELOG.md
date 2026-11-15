@@ -5,6 +5,78 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.8.0] - 2026-11-15
+
+Baseline: DSH floor unchanged at `0.2.0-rc.2`; audited against `0.2.1-rc.5` and
+upstream `pi-shift-router` v1.9.0 (ALIGNMENT §R16). The **ceiling moves to
+`<0.2.2-alpha.2`**: the 0.2.2 generation snapshots a step's provider/model
+before `agent/pre-step` and rejects a later change in `agent/request`, removing
+the hook this router switches models through (ALIGNMENT §R17).
+
+### Added
+
+- **Blocking `delegate` tool for orchestration.** The Harness `subagent` tool
+  returns `started subagent <name>` immediately and delivers the real result
+  later as a `subagent-settled` message, so an orchestration loop could not
+  review a worker before continuing and the acceptance audit counted launch
+  receipts as completions. The new tool calls `ctx.subagents.startActivation()`
+  with `delivery: 'caller'` and waits on the activation's `result`, so one
+  orchestration turn still sees the worker's real output. The activation spec
+  carries both the `0.2.1-rc.2` (`request.*`) and `0.2.1-rc.5` (top-level)
+  service shapes; the tool is registered only when the subagent service is
+  mounted (SPEC §7.6).
+- **Legacy round-budget migration.** A config still carrying the v1.0.0 default
+  `orchestration.maxRounds: 3` is raised to the current default `6` on load and
+  logs one line. Other values are untouched.
+
+### Changed
+
+- **Orchestration entry reads the Judge's verdict.** It still requires the turn
+  to run on Smart, but a Fast verdict that merely stayed on Smart no longer
+  starts a CTO run unless the Judge explicitly answered `orchestrate: true`
+  (upstream v1.9.0's 43/164 defect; SPEC §7.1).
+- **Round budget default 3 → 6; the card exposes 0–20.** One round is one
+  `delegate` call plus the CTO review of it (SPEC §7.3).
+- **The orchestrator prompt uses `delegate`, not `subagent`.** The previous
+  prompt told the model to pass `run_in_background` and read `job_output`; the
+  Harness `subagent` tool has neither parameter. The escape hatch "if it is
+  simple, just do it yourself" is removed, matching upstream v1.9.0.
+- **Orchestration is gated on the delegate tool.** A composition without the
+  subagent service now falls back to a plain Smart run instead of injecting a
+  CTO prompt that cannot review workers.
+
+### Fixed
+
+- **A launch receipt is no longer a completed worker.** `tools/result` counts a
+  `delegate` result only after the tool waited for the activation; the failure
+  streak, worker evidence and spend ledger therefore read real outcomes.
+- **`subagent` is denied while orchestrating** when the delegate tool exists, so
+  a model cannot bypass the accounting by using the asynchronous tool.
+- **Packaging gate.** `tests/packaged-install.test.ts` now rejects
+  `@deepseek-ai/*` in `dependencies` (host packages are peers) and no longer
+  contains a tautological `|| true` assertion.
+
+### Known limitations
+
+- **DSH 0.2.2 is not supported.** `@deepseek-ai/dsh-agent-loop` 0.2.2-alpha.2
+  introduced the guard `agent/request proposed "…" after step preparation
+  fixed "…"; use agent.model.select() before step preparation`; 0.2.2-rc.2 and
+  0.2.2-rc.3 carry the same code. The loop captures the step's selection
+  **before** the `agent/pre-step` waterfall, so a recorded selection only
+  governs the next step, and no pre-turn hook exists. `engines.dsh` therefore
+  rejects the whole 0.2.2 line, so a host refuses the install instead of
+  failing every routed turn (ALIGNMENT §R17).
+- The e2e was run locally against `@deepseek-ai/dsh@0.2.2-rc.2` (routing
+  assertions fail, by design of the ceiling) and against `0.2.1-rc.5`, the
+  newest admitted carrier; the blocking-`delegate` real-machine check is still
+  tracked in ROADMAP.
+- `package-lock.json` still resolves 334/334 tarballs through
+  `registry.npmmirror.com`; the official-registry rewrite is tracked (P2).
+- `0.2.1-rc.2` compatibility of the dual-shape activation spec is type-checked,
+  not runtime-verified (ALIGNMENT §R16.6).
+
 ## [0.7.5] - 2026-10-18
 
 Baseline: DSH `0.2.1-rc.2` (the desktop carrier since 2026-10-17), floor unchanged

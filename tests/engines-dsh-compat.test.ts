@@ -32,12 +32,12 @@ const manifest = JSON.parse(
   peerDependencies?: Record<string, string>
 }
 
-const ADMITTED_RUNTIMES = ['0.2.0-rc.2', '0.2.1-rc.1', '0.2.1-rc.2'] as const
-const REJECTED_RUNTIMES = ['0.1.5-rc.2', '0.3.0-rc.1', '0.3.0'] as const
+const ADMITTED_RUNTIMES = ['0.2.0-rc.2', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.5'] as const
+const REJECTED_RUNTIMES = ['0.1.5-rc.2', '0.2.2-alpha.2', '0.2.2-rc.2', '0.2.2-rc.3', '0.3.0-rc.1', '0.3.0'] as const
 
 describe('engines.dsh declaration (against the upstream evaluator)', () => {
   it('declares engines.dsh, so the range — not peers — decides on 0.2.1 hosts', () => {
-    expect(manifest.engines?.dsh).toBe('>=0.2.0-rc.2 <0.3.0-rc.0')
+    expect(manifest.engines?.dsh).toBe('>=0.2.0-rc.2 <0.2.2-alpha.2')
   })
 
   it('admits every shipped runtime the plugins surface needs', () => {

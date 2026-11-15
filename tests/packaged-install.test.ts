@@ -15,8 +15,9 @@
  * These tests read the BUILT artifacts (not the sources) and assert the
  * install-time contract:
  *
- *   1. every external specifier the host half imports is a declared
- *      `dependencies` entry — never a devDependency, never undeclared;
+ *   1. every external specifier the host half imports is declared for the
+ *      consumer (`dependencies` or `peerDependencies`) — never dev-only, and a
+ *      Harness package is `peerDependencies`-only (the host supplies it);
  *   2. every specifier the browser half `require()`s is a platform **seed word**
  *      the shell provides, or a package our `dsh.client` declaration makes the
  *      host load first;
@@ -90,15 +91,22 @@ describe('host artifact runtime imports', () => {
     }
   })
 
-  it('does not rely on a dependency that only exists in devDependencies', () => {
-    const declared = new Set(Object.keys(manifest.dependencies ?? {}))
-    const dev = Object.keys(manifest.devDependencies ?? {})
-    // The type-only packages this plugin deliberately keeps out of the runtime
-    // surface: if one ever becomes a runtime import, the first test fails and
-    // this list documents what to expect.
-    for (const spec of dev) {
-      expect(declared.has(spec) || spec.startsWith('@types/') || true).toBe(true)
-    }
+  it('declares every Harness package as a peer, never a bundled dependency', () => {
+    // A `dependencies` copy of a host package gives the consumer two instances
+    // (Cordis services, schemas, branded types). The upstream v1.7.1 release
+    // establishes the same rule for pi; in DSH the host supplies these packages.
+    const bundled = Object.keys(manifest.dependencies ?? {}).filter((spec) => spec.startsWith('@deepseek-ai/'))
+    expect(bundled, `host packages must not be bundled: ${bundled.join(', ')}`).toEqual([])
+
+    // Every declared peer is a Harness package this plugin only type-imports
+    // or resolves through the Host. A new peer is a deliberate dependency
+    // decision, so the list is asserted rather than silently widened.
+    const peers = Object.keys(manifest.peerDependencies ?? {}).sort()
+    expect(peers).toEqual([
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/schemastery',
+    ])
   })
 })
 

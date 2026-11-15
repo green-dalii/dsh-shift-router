@@ -42,6 +42,8 @@ a transport layer.
 | Runtime failover | `agent/request-error` waterfall (cooldown + `{ kind: 'retry' }`) |
 | Turn teardown | `agent/turn-stopping` serial event |
 | Orchestration caps | `tools/pre-execute` (`{ kind: 'deny' }`) + `tools/result` |
+| Worker delegation | `ctx.subagents.startActivation()` (optional service, caller delivery, awaited result) — §7.6 |
+| Delegate tool | `ctx.tools.register()` — registered only while the subagent service is attached |
 | Orchestrator instruction | `ctx.systemPrompt.section()` + `ctx.systemPrompt.variable()` |
 | Telemetry | `session/event` (`assistant/message`, `assistant/chunk`) |
 | Judge LLM call | `ctx.llm.stream()` |
@@ -494,13 +496,18 @@ POST <routing.judge.decision.baseUrl>/v1/systemone
    and a **release** (no Judge at all, §6.3), which carries `held: true` for
    exactly this reason. Without it, a released turn on a session that had already
    upgraded would start an orchestration loop on the strength of no verdict.
-4. `decision.decisionTier === 'smart'` (post-EV, post-hold — **not** the raw
-   verdict). Because `decisionTier` only reports `smart` when the router
-   actually owns a resolvable Smart model for the turn (SPEC §2), entry needs no
-   separate "is Smart resolvable?" precondition and there is no config knob that
-   can force the orchestrator prompt onto a non-Smart run.
-5. no Judge veto: `judgeResult.orchestrate !== false`
-6. the `subagent` tool is available — otherwise degrade to a plain Smart run
+4. `decision.decisionTier === 'smart'` (post-EV, post-hold). Because
+   `decisionTier` only reports `smart` when the router actually owns a
+   resolvable Smart model for the turn (§2), entry needs no separate "is Smart
+   resolvable?" precondition and there is no config knob that can force the
+   orchestrator prompt onto a non-Smart run.
+5. no Judge veto: `judgeResult.orchestrate !== false`.
+6. the Judge's **own verdict** is `smart`, unless it explicitly answered
+   `orchestrate: true`. Gating only on `decisionTier` started CTO runs on Fast
+   verdicts that merely stayed on Smart (upstream v1.9.0: 43/164 turns); the
+   decision-tier condition in (4) still keeps the CTO off a Fast *run*.
+7. the blocking `delegate` tool is available (§7.6) — otherwise degrade to a
+   plain Smart run instead of promising reviews the plugin cannot perform.
 
 Simple tasks never orchestrate. There is no "always" mode.
 
@@ -508,7 +515,7 @@ Simple tasks never orchestrate. There is no "always" mode.
 
 The orchestrator instruction is a **dynamic system-prompt section** named
 `shift-router:orchestrator` (order 150), rendered only while
-`orchestration.active`. It carries: the CTO role, the subagent tool contract,
+`orchestration.active`. It carries: the CTO role, the `delegate` tool contract,
 worker-model guidance (§7.4), the task-contract rules, the review rules with the
 blocking-issues-only rule, the hard caps, the cooldown-filtered tier chains, and
 the CTO summary output contract.
@@ -541,20 +548,28 @@ re-delegation as a **contract**:
 
 ### 7.3 Hard caps (enforced, not prompted)
 
-- `rounds` increments per delegation; `maxRounds` (default 3) caps them.
+- `rounds` increments per `delegate` call at dispatch; `maxRounds` (default
+  **6**, accepted range 0–20; `0` is the historical "no delegation" state)
+  caps them. A config still carrying the v1.0.0 default `3` is raised to `6`
+  once, at load, with one log line.
 - A worker failure advances `workerFailStreak`; on reaching
   `escalationThreshold` (default 2) `escalations` increments and the streak
   resets. A successful worker result resets the streak to 0.
 - `capHit()` = `rounds ≥ maxRounds || escalations ≥ escalationThreshold ||
   (maxSpendUsd > 0 && spend ≥ maxSpendUsd)`. While it holds, `tools/pre-execute`
-  **denies** the `subagent` tool outright and the system-prompt section switches
+  **denies** the `delegate` tool outright and the system-prompt section switches
   to the wrap-up notice. `capReason()` words the reason once, so the deny and the
   notice cannot disagree.
 - Worker accounting: `spawned` increments at dispatch, `done` at result; `spend`
   is the task's monotonic USD total (§9).
 - Orchestration is **single-turn**: state is entered at the turn that triggers it
   and released at `agent/turn-stopping`. Leaked state (a turn that never reached
-  its stop boundary, e.g. an abort) is swept at the next turn's start.
+  its stop boundary, e.g. an abort) is swept at the next turn's start. The
+  blocking `delegate` tool (§7.6) keeps that invariant: it waits for the worker
+  inside the turn instead of returning a launch receipt.
+- While orchestration is active and the `delegate` tool exists, `tools/pre-execute`
+  also **denies** the asynchronous Harness `subagent` tool: accepting it would
+  return before the worker result exists and bypass the accounting above.
 
 ### 7.4 Worker model injection (DSH-specific)
 
@@ -578,6 +593,10 @@ capability is **absent**, not disabled. Therefore:
   then an absent service is a fact about the deployment, not a mount artefact).
 - Stock compositions export no `ctx.logger` sink (§13), so the same fact is also rendered
   by `/router status` as a `Worker delegation:` line (§11) — the surface a user can read.
+- The blocking `delegate` tool passes `agentOptions.provider` / `.model` to
+  `ctx.subagents.startActivation()` from the same Fast chain, and only while the
+  allowlist above reports `enabled` with at least one route. It reads the same
+  preference as the model-facing path; it does not widen it.
 - `/router allow-workers [off]` writes the Fast chain into the host namespace itself;
   `enabled: false` revokes authorisation while keeping the route list. The write is refused
   with a specific reason when that namespace or the settings service is absent, or when the
@@ -623,6 +642,40 @@ boundary is ever reached. Consequently the upstream "delay exit/audit on a
 retryable error tail" failure mode cannot occur here, and the plugin does not
 implement it. The observable DSH equivalent is the **leaked-state sweep** in
 §7.3.
+
+### 7.6 Blocking delegation (DSH-specific)
+
+The Harness `subagent` tool is **asynchronous**: its result is
+`started subagent <name>`, and the worker's real output arrives later as a
+`subagent-settled` user message. An orchestration loop must review a worker
+before delegating the next phase, so this plugin registers its own model-facing
+`delegate` tool instead:
+
+- **Service seam.** The tool calls the optional `ctx.subagents` service's
+  `startActivation({ delivery: 'caller', ... })` and awaits the returned
+  activation's `result`. It never imports the subagent package at runtime; the
+  seam is declared in `src/subagents-types.ts` and appears in `inject` only as
+  an optional `ctx.inject(['subagents'], …)` subscription.
+- **Two service shapes.** `0.2.1-rc.2` reads `request.prompt` (`ContentBlock[]`),
+  `request.parent` and `request.agentOptions`; `0.2.1-rc.5` reads the top-level
+  `prompt`, `parent` and `agentOptions`. One spec carries both; each generation
+  ignores the fields it does not know (§1.5 baseline).
+- **Availability.** The tool is registered only while the subagent service is
+  attached, and §7.1 requires it. A composition without the service has no
+  orchestration; it never falls back to receipt-based accounting.
+- **Single-turn.** The tool's `timeoutMs` is 30 minutes and forwards
+  `exec.signal`; cancellation disposes the activation. Because the wait happens
+  inside the tool call, the round/audit/spend lifecycle of §7.3 stays turn-scoped.
+- **Result mapping.** A `completed` stop reason returns the child's text output
+  as the tool result. Any other stop reason throws a tool error that carries the
+  reason, the diagnostic (if any) and the partial output, so `tools/result`
+  records a failed worker and the failure streak advances.
+- **Concurrency.** The tool is declared concurrency-safe: independent phases may
+  issue several `delegate` calls in one reply; each dispatch already counted a
+  round in `tools/pre-execute`.
+- **Model routing.** `agentOptions` is populated only when the host allowlist of
+  §7.4 is enabled; otherwise the worker inherits the CTO's model and the prompt
+  says so.
 
 ---
 
@@ -832,7 +885,7 @@ drafts regardless of which service arrived.
 
 #### 12.1.1 The `engines.dsh` declaration (normative)
 
-The bundle declares `engines.dsh = ">=0.2.0-rc.2 <0.3.0-rc.0"`. Since the
+The bundle declares `engines.dsh = ">=0.2.0-rc.2 <0.2.2-alpha.2"`. Since the
 `0.2.1` generation this field, when present, decides compatibility **alone** —
 the shipped evaluator (`@deepseek-ai/dsh-app-boot`
 `evaluatePluginCompatibility`) compares the range against the running version
@@ -840,11 +893,27 @@ with `semver.satisfies(..., { includePrerelease: true })` and **ignores
 `peerDependencies`**; without the field the rule falls back to the peers.
 
 Consequence this contract depends on: under `includePrerelease: true`, a plain
-`<0.3.0` ceiling **admits** `0.3.0-rc.x` prereleases. The `-rc.0` form is what
-keeps the un-audited 0.3.0 generation out. The admitted set (`0.2.0-rc.2`,
-`0.2.1-rc.1`, `0.2.1-rc.2`) and the rejected set (`0.1.5-rc.2`, `0.3.0-rc.1`,
-`0.3.0`) are enforced by `tests/engines-dsh-compat.test.ts`, which calls the
-upstream evaluator itself — the declaration is load-bearing, not documentary.
+`<0.3.0` ceiling **admits** `0.3.0-rc.x` prereleases, so the ceiling names the
+first rejected prerelease instead. The admitted set (`0.2.0-rc.2`, `0.2.1-rc.1`,
+`0.2.1-rc.2`, `0.2.1-rc.5`) and the rejected set (`0.1.5-rc.2`, `0.2.2-alpha.2`,
+`0.2.2-rc.2`, `0.2.2-rc.3`, `0.3.0-rc.1`, `0.3.0`) are enforced by
+`tests/engines-dsh-compat.test.ts`, which calls the upstream evaluator itself —
+the declaration is load-bearing, not documentary.
+
+**Why the 0.2.2 ceiling exists (normative).** From `0.2.2-alpha.2` on,
+`@deepseek-ai/dsh-agent-loop` snapshots the step's provider/model **before**
+dispatching `agent/pre-step` and rejects any provider/model change a later
+`agent/request` listener proposes:
+
+> `agent "<id>": agent/request proposed "<p>/<m>" after step preparation fixed
+> "<p>/<m>"; use agent.model.select() before step preparation`
+
+`agent.model.select()` records session state that governs the **next** step, so
+the step a router just classified keeps the previous selection, and no pre-turn
+hook exists. The §7 routing contract (per-turn provider/model override in
+`agent/request`) therefore has no carrier on 0.2.2; admitting that generation
+would make every routed turn fail. The ceiling is rejected until the carrier
+offers a pre-step selection hook (ALIGNMENT §R17).
 Cliente UI changes in a future 0.3.0 generation need an audit before that
 ceiling moves (ALIGNMENT §R15.11).
 
@@ -1053,6 +1122,11 @@ failures** — the plugin simply stops reading them.
 - `routing.cacheAware.sameFamilyThreshold` was the raised downgrade threshold.
   It is now a **legacy sentinel**: a non-default value implies
   `sameFamilyPenalty = 3.0`. The old default `0.9` is inert.
+- `orchestration.maxRounds` still carrying the v1.0.0 default `3` is raised to
+  `6` at load (one log line). Any other value is left alone — the GUI writes the
+  whole merged snapshot, so a stored `3` is usually the old default rather than a
+  decision. Range accepted by the schema is `0–20`; `0` keeps the historical
+  no-delegation state.
 - Routing decisions may therefore differ immediately after upgrade even with no
   config edit. This is the point of the change (the old rule counted votes; the
   new rule weighs expected cost) and is called out in `CHANGELOG.md`.
@@ -1079,6 +1153,11 @@ failures** — the plugin simply stops reading them.
 | `models-store.json` / `auth.json` / three JSON config layers | host-private file layout |
 | pi-subagents `runs.all`, `worktree: true`, fork-context thinking workaround | different delegation primitives in DSH |
 | `pack:check` / `pi.extensions` / `minPiVersion` | pi packaging contract |
+| pi classifier layer, decision-model catalog, `registry.classify()` (upstream v1.8.0) | `dsh-llm` exposes no classifier seam; the plugin's own decision transport is the DSH form (§6.6) |
+| OpenCode session-attribution headers for direct provider calls (upstream v1.7.1) | DSH attributes calls in its adapters; the plugin holds no session-header seam |
+| Wizard waiting on a host model-registry refresh; explicit catalog-refresh row (upstream v1.7.2) | DSH's `modelCatalog()` performs no refresh, so there is nothing to await |
+| pi-tui as a peer / lazy-import ban (upstream v1.7.1) | pi's `jiti` + host-alias loader rules; DSH uses Cordis and `tsdown` |
+| pi-subagents `async: false`, named `reviewer` workers (upstream v1.9.0) | DSH has neither parameter nor that role; the blocking `delegate` tool plus CTO self-review is the equivalent (§7.6) |
 | `AGENTS.md`'s pi-specific hard-stop rules | upstream *development-process* constraints, not product behaviour |
 | Counting a delegation round at the worker's **result** | counting at **dispatch** keeps `maxRounds` a true ceiling: a dispatched call has already spent budget, while a result-time count lets an aborted call slip past the cap (§7.3) |
 | Upstream's known doc drift (SPEC §9.1/§9.2/§7.5) | this SPEC aligns to upstream *code behaviour*, not its stale prose |

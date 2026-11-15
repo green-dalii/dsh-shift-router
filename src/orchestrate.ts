@@ -5,18 +5,19 @@
  * becomes an orchestration run, (b) inject the orchestrator instruction with
  * the current Fast/Smart tier chains rendered in, and (c) hold the hard caps
  * (rounds, escalations, budget). The actual loop — plan, delegate via the
- * subagent tool, review, re-delegate, take over, accept — is the Smart main
- * agent's own work once the orchestrator prompt is active.
+ * blocking `delegate` tool, review, re-delegate, take over, accept — is the
+ * Smart main agent's own work once the orchestrator prompt is active.
  *
  * DSH adaptation: the orchestrator prompt is rendered as a dynamic
  * system-prompt section (activated per agent while orchestration is active)
  * instead of string-splicing into pi's event.systemPrompt.
  *
- * Worker model injection (upstream calls it mandatory): DSH's `subagent` tool
- * accepts per-call `provider`/`model`, but only inside the host-owned
- * `subagent-model-selection-settings` allowlist (default off). The prompt therefore
- * states that condition factually instead of asserting a guarantee the plugin
- * cannot keep; index.ts warns when the allowlist is not available.
+ * Worker model injection (upstream calls it mandatory): the blocking delegate
+ * tool passes a Fast route to the subagent service only when the host-owned
+ * `subagent-model-selection-settings` allowlist is enabled (default off). The
+ * prompt therefore states that condition factually instead of asserting a
+ * guarantee the plugin cannot keep; index.ts warns when the allowlist is not
+ * available.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -29,8 +30,8 @@ export const ORCHESTRATOR_PROMPT = `# Orchestrator System Prompt (dsh-shift-rout
 > You are the **CTO** for this task. The router has classified this as a
 > complex, high-stakes, or judgment-heavy task — too big for a single routine
 > turn. You drive the *whole task* at your intelligence level, and you
-> **delegate implementation** to fast engineer subagents instead of doing all
-> the routine work yourself.
+> **delegate implementation** to fast workers instead of doing all the routine
+> work yourself.
 
 ## Your role
 
@@ -38,38 +39,40 @@ You are the orchestrator of a virtual dev team. You do NOT hand off and walk
 away — you own the outcome end-to-end:
 
 1. **Plan.** Break the task into phases with clear acceptance criteria.
-2. **Delegate.** Spawn Fast engineer subagents (the \`subagent\` tool) for each
-   phase's implementation.
-3. **Review.** Read each subagent's result against its acceptance criteria.
+2. **Delegate.** Spawn one Fast worker per phase (the \`delegate\` tool) and
+   wait for its real result.
+3. **Review.** Read each worker's result against its acceptance criteria.
 4. **Iterate.** Send failed work back with concrete feedback — or take over
    the phase yourself when a worker keeps failing.
 5. **Accept.** Do the final acceptance pass before declaring the task done.
 
-## The subagent tool (DeepSeek Harness)
+## The delegate tool (DeepSeek Harness)
 
-Spawn engineer subagents with the \`subagent\` tool. Per-run contract:
+Spawn one worker per phase with the \`delegate\` tool. It runs the worker in its
+own fresh session, **waits for it to finish**, and returns the worker's final
+output. Do not use the Harness \`subagent\` tool while orchestrating: it returns
+as soon as the worker starts, so it cannot be reviewed and the router denies it.
 
-- \`description\` — a short (3-5 word) label for the delegated phase.
+Per-run contract:
+
 - \`prompt\` — a self-contained task contract (see "Task contract" below).
-  A worker runs in its **own fresh session**: it inherits NO conversation
-  history from you, so the prompt IS its world. Do not rely on the worker
-  seeing this conversation's context.
-- \`run_in_background\` — when your next action depends on the result (the
-  normal case for review-then-iterate), set \`run_in_background: false\` so the
-  call waits and returns the worker's result. For fire-and-forget work you
-  can leave it in the background and collect the result with \`job_output\`.
-- For independent phases, you may fan out several subagent calls in parallel.
+  A worker inherits NO conversation history from you, so the prompt IS its
+  world. Do not rely on the worker seeing this conversation's context.
+- The call returns only after the worker settles. Review that result before
+  delegating the next phase; for independent phases you may issue several
+  \`delegate\` calls in one reply.
+- A worker that ends with a non-\`completed\` stop reason comes back as a tool
+  error. Treat it as a failed attempt and re-delegate with a failure report or
+  take the phase over.
 
 ### Worker model — read this carefully
 
-You can pass \`provider\` and \`model\` to the \`subagent\` tool, and you should
-whenever a Fast-tier route is available — without it a worker inherits **your
-own model**, and you are the Smart tier, so the cost story collapses. But the
-harness only honours those fields for routes the deployment has authorised
-(its \`subagent-model-selection-settings\` allowlist). If the call is rejected on those
-fields, or you are unsure whether it took effect, delegate without them and
-**say so in your CTO summary** — an honest note about the worker model is
-worth more than a silent assumption that it was Fast.
+The router pins the worker to a Fast-tier route **only when the deployment has
+authorised worker routes** (its \`subagent-model-selection-settings\`
+allowlist). Without that authorisation a worker inherits **your** model, and
+you are the Smart tier, so the cost story collapses. If the router reports the
+worker inherited Smart, say so in your CTO summary — an honest note is worth
+more than a silent assumption that it was Fast.
 
 The "Tier configuration" section below lists the Fast-tier routes the
 deployment should have authorised for delegation.
@@ -138,8 +141,7 @@ parts, in this shape:
 ## Tier configuration (models involved in this task)
 
 Fast tier chain (priority order, already filtered for health/cooldown) — the
-routes the deployment should have authorised for subagent delegation
-(\`provider\` / \`model\` on the call):
+routes the router pins a worker to when the deployment has authorised them:
 
 {{fastChain}}
 
@@ -152,8 +154,8 @@ Smart tier (you — for the final acceptance pass and takeovers):
 - End your run with a short **CTO summary**: what was planned, what was
   delegated, what you reviewed/accepted, what remains (if any).
 - Do not claim completion of acceptance criteria that were never checked.
-- If the task turns out to be simple after all (no real delegation needed),
-  just do it yourself — orchestration is not mandatory overhead.`
+- Delegation is the default. Take over a phase only after
+  {{escalationThreshold}} failed attempts, and say why in the summary.`
 
 // ─── Tier chain rendering ─────────────────────────────────────────
 
@@ -322,6 +324,13 @@ export interface OrchestrationDecisionInput {
   decisionTier: Tier
   /** The Judge gave no usable signal and the router held position. */
   held: boolean
+  /**
+   * The Judge's own verdict, before EV/hold/override. Orchestration requires a
+   * Smart verdict unless the Judge explicitly asked for it: a Fast verdict that
+   * the router chose to stay Smart on is not evidence of a complex task
+   * (upstream v1.9.0, SPEC §7.1).
+   */
+  judgeTier?: Tier
 }
 
 /**
@@ -337,14 +346,18 @@ export interface OrchestrationDecisionInput {
  *    model for this turn. Gating on the decision (never the raw verdict) is
  *    what keeps the CTO prompt off a Fast-tier run.
  * 4. The Judge did not veto it (`orchestrate !== false`).
- * 5. The subagent tool is available — otherwise degrade to a plain Smart run.
+ * 5. The Judge's own verdict is Smart, unless it explicitly requested
+ *    orchestration (`orchestrate: true`). Gating only on the decision tier
+ *    started CTO runs on Fast verdicts that merely stayed on Smart.
+ * 6. A blocking delegate tool is available — otherwise degrade to a plain
+ *    Smart run instead of promising reviews the plugin cannot perform.
  *
  * Pure decision — no side effects.
  */
 export function shouldOrchestrate(
   config: ShiftRouterConfig,
   decision: OrchestrationDecisionInput,
-  subagentToolAvailable: boolean,
+  delegateToolAvailable: boolean,
   judgeOrchestrate?: boolean,
 ): boolean {
   if (!config.enabled) return false
@@ -352,7 +365,10 @@ export function shouldOrchestrate(
   if (decision.held) return false
   if (decision.decisionTier !== 'smart') return false
   if (judgeOrchestrate === false) return false
-  if (!subagentToolAvailable) return false
+  if (decision.judgeTier !== undefined && decision.judgeTier !== 'smart' && judgeOrchestrate !== true) {
+    return false
+  }
+  if (!delegateToolAvailable) return false
   return true
 }
 
